@@ -1,558 +1,639 @@
 import streamlit as st
 from datetime import date, datetime, timedelta
 import io
-import asyncio
-import edge_tts
-import speech_recognition as sr
-import tempfile
 import os
-import random
+import re
+import requests
+import database as db
 
-# ─────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────
-st.set_page_config(page_title="AI Gym Assistant", page_icon="💪", layout="wide")
+# ============================================
+# YOUTUBE SEARCH FUNCTION
+# ============================================
 
-# ─────────────────────────────────────────────────────────
-# SESSION STATE
-# ─────────────────────────────────────────────────────────
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "last_question" not in st.session_state:
-    st.session_state.last_question = ""
-if "current_gym" not in st.session_state:
-    st.session_state.current_gym = "gym_001"
+def search_youtube(query: str, max_results: int = 8) -> list:
+    """Search YouTube and return video IDs"""
+    try:
+        search_url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+        
+        response = requests.get(search_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }, timeout=10)
+        
+        video_ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', response.text)
+        video_ids = list(dict.fromkeys(video_ids))  # Remove duplicates
+        
+        return video_ids[:max_results]
+    except Exception as e:
+        print(f"Search error: {e}")
+        return []
 
-# ─────────────────────────────────────────────────────────
-# DATABASE FUNCTIONS
-# ─────────────────────────────────────────────────────────
-def get_members(gym_id=None):
-    members = [
-        {"full_name": "Ali Khan", "status": "active", "expiry_date": (date.today() + timedelta(days=30)).isoformat(), "phone": "03001234567"},
-        {"full_name": "Sara Ahmed", "status": "active", "expiry_date": (date.today() + timedelta(days=15)).isoformat(), "phone": "03007654321"},
-        {"full_name": "John Doe", "status": "inactive", "expiry_date": (date.today() - timedelta(days=5)).isoformat(), "phone": "03001112222"},
-        {"full_name": "Emma Watson", "status": "active", "expiry_date": (date.today() + timedelta(days=45)).isoformat(), "phone": "03003334444"},
-        {"full_name": "Usman Chaudhry", "status": "expired", "expiry_date": (date.today() - timedelta(days=10)).isoformat(), "phone": "03005556666"},
-        {"full_name": "Fatima Zahra", "status": "active", "expiry_date": (date.today() + timedelta(days=20)).isoformat(), "phone": "03007778888"},
-    ]
-    return members
+def extract_youtube_id(url_or_id: str) -> str:
+    if not url_or_id:
+        return ""
+    url_or_id = url_or_id.strip()
+    regex = r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})'
+    match = re.search(regex, url_or_id)
+    if match:
+        return match.group(1)
+    if len(url_or_id) == 11:
+        return url_or_id
+    return ""
 
-def get_recent_scans(gym_id=None, limit=100, today_only=False):
-    if today_only:
-        return [{"time": datetime.now().isoformat()} for _ in range(random.randint(15, 40))]
-    return []
+# ============================================
+# TEXT-TO-SPEECH (Google TTS)
+# ============================================
 
-def get_todays_fees(gym_id=None):
-    return [random.randint(1000, 5000) for _ in range(random.randint(3, 10))]
+try:
+    from gtts import gTTS
+    HAS_GTTS = True
+except ImportError:
+    HAS_GTTS = False
 
-def get_gym_data(gym_id):
-    members = get_members(gym_id=gym_id)
-    active = [m for m in members if m.get('status') == 'active']
-    today_att = get_recent_scans(gym_id=gym_id, limit=100, today_only=True)
-    today_fees = get_todays_fees(gym_id=gym_id)
-    
-    expired = []
-    for m in members:
-        if m.get('expiry_date'):
-            try:
-                if date.fromisoformat(m['expiry_date']) < date.today():
-                    expired.append(m['full_name'])
-            except:
-                pass
-    
-    return f"""
-📊 GYM DATA REPORT
-━━━━━━━━━━━━━━━━━━━━━
-Total Members: {len(members)}
-Active Members: {len(active)}
-Today's Attendance: {len(today_att)}
-Today's Collection: PKR {sum(today_fees) if today_fees else 0}
-Expired Members: {len(expired)}
-Expired Names: {', '.join(expired[:3]) if expired else 'None'}
-━━━━━━━━━━━━━━━━━━━━━
-"""
+# ============================================
+# SPEECH-TO-TEXT (SpeechRecognition)
+# ============================================
 
-# ─────────────────────────────────────────────────────────
-# 🎬 VIDEO PLAYER (YouTube KE ILAWA - 4 Platforms)
-# ─────────────────────────────────────────────────────────
-def video_player():
-    st.markdown("""
-        <h3 style='text-align: center;'>🎬 VIDEO PLAYER - YouTube ke ilawa 4 Platforms</h3>
-        <hr>
-    """, unsafe_allow_html=True)
-    
-    st.info("💡 **Choose karo kahan se dekhna hai:**")
-    
-    platform = st.radio(
-        "Select Platform:",
-        ["🌐 Dailymotion", "🎬 Tubi Movies", "🚀 Playful (No Ads YouTube)", "🎵 Spotify Web (Audio)"],
-        horizontal=True,
-        key="video_platform"
-    )
-    
-    st.markdown("---")
-    
-    if platform == "🌐 Dailymotion":
-        st.markdown("### 📺 Dailymotion - YouTube ka best alternative")
-        st.caption("Millions of videos - Music, Movies, Sports, News")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            search_query = st.text_input("🔍 Search video (song, movie, comedy, etc.):", 
-                                        placeholder="Example: Atif Aslam song or comedy video",
-                                        key="dm_search")
-        with col2:
-            search_btn = st.button("▶️ PLAY", type="primary", use_container_width=True)
-        
-        if search_btn and search_query:
-            # Dailymotion search embed
-            st.markdown(f"""
-                <div style="background: black; border-radius: 12px; padding: 10px;">
-                    <iframe 
-                        width="100%" 
-                        height="450" 
-                        src="https://www.dailymotion.com/embed/video/search?search={search_query.replace(' ', '+')}"
-                        frameborder="0" 
-                        allowfullscreen
-                        allow="autoplay; fullscreen">
-                    </iframe>
-                </div>
-            """, unsafe_allow_html=True)
-            st.success(f"✅ Searching: {search_query} on Dailymotion")
-        
-        elif search_btn and not search_query:
-            st.warning("⚠️ Kuch search karo!")
-        
-        # Popular suggestions
-        with st.expander("🔥 Popular searches (click to use)"):
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                if st.button("🎵 Atif Aslam songs"):
-                    st.session_state.dm_search = "Atif Aslam"
-                    st.rerun()
-                if st.button("🎬 Latest movie trailer"):
-                    st.session_state.dm_search = "movie trailer"
-                    st.rerun()
-            with col_b:
-                if st.button("😂 Comedy clips"):
-                    st.session_state.dm_search = "comedy"
-                    st.rerun()
-                if st.button("🏋️ Workout videos"):
-                    st.session_state.dm_search = "workout"
-                    st.rerun()
-            with col_c:
-                if st.button("🎮 Gaming"):
-                    st.session_state.dm_search = "gaming"
-                    st.rerun()
-                if st.button("📰 News"):
-                    st.session_state.dm_search = "news"
-                    st.rerun()
-    
-    elif platform == "🎬 Tubi Movies":
-        st.markdown("### 🎬 Tubi - Free Movies & TV Shows")
-        st.caption("Thousands of Hollywood movies, Bollywood, Pakistani dramas - 100% FREE")
-        
-        st.info("🎥 **Direct website opens in iframe - search karo jo movie chahiye**")
-        
-        if st.button("🚀 OPEN TUBI MOVIES", type="primary", use_container_width=True):
-            st.markdown("""
-                <div style="background: black; border-radius: 12px; padding: 10px;">
-                    <iframe 
-                        width="100%" 
-                        height="550" 
-                        src="https://tubitv.com/home"
-                        frameborder="0" 
-                        allowfullscreen>
-                    </iframe>
-                </div>
-            """, unsafe_allow_html=True)
-            st.success("✅ Tubi Movies loaded! Search karo jo movie chahiye.")
-        
-        st.markdown("""
-        **Popular movies on Tubi (free):**
-        - Bollywood classics
-        - Hollywood action movies  
-        - Pakistani dramas
-        - Comedy shows
-        """)
-    
-    elif platform == "🚀 Playful (No Ads YouTube)":
-        st.markdown("### 🚀 Playful - YouTube WITHOUT ADS!")
-        st.caption("Same YouTube videos, but NO advertisements - 100% free")
-        
-        st.info("🎥 **Yahan YouTube ki video daalo, bina ads ke chalegi!**")
-        
-        video_url = st.text_input("🔗 Paste YouTube URL or Video ID:", 
-                                 placeholder="https://youtu.be/... or https://youtube.com/watch?v=...",
-                                 key="playful_url")
-        
-        if st.button("▶️ PLAY WITHOUT ADS", type="primary", use_container_width=True):
-            if video_url:
-                # Extract video ID
-                video_id = video_url.strip()
-                if "youtu.be" in video_id:
-                    video_id = video_id.split("/")[-1].split("?")[0]
-                elif "watch?v=" in video_id:
-                    video_id = video_id.split("watch?v=")[1].split("&")[0]
-                elif len(video_id) == 11:
-                    pass
-                else:
-                    st.error("❌ Invalid YouTube URL!")
-                    return
-                
-                # Playful embed (no ads)
-                st.markdown(f"""
-                    <div style="background: black; border-radius: 12px; padding: 10px;">
-                        <p style="color: #00ff88; text-align: center;">✅ NO ADS! Enjoy the video...</p>
-                        <iframe 
-                            width="100%" 
-                            height="450" 
-                            src="https://playful.vercel.app/embed/{video_id}"
-                            frameborder="0" 
-                            allowfullscreen
-                            allow="autoplay; fullscreen">
-                        </iframe>
-                    </div>
-                """, unsafe_allow_html=True)
-                st.success(f"✅ Playing video WITHOUT ADS!")
-            else:
-                st.warning("⚠️ Please paste YouTube URL!")
-        
-        st.caption("💡 **Tip:** Koi bhi YouTube video daalo - ads nahi aayengi!")
-    
-    elif platform == "🎵 Spotify Web (Audio)":
-        st.markdown("### 🎵 Spotify Web - Millions of Songs Free")
-        st.caption("Hindi, Urdu, Punjabi, English, Pakistani songs - sab free mein suno!")
-        
-        st.info("🎧 **Direct Spotify Web Player - Search karo jo gaana chahiye**")
-        
-        if st.button("🎵 OPEN SPOTIFY WEB", type="primary", use_container_width=True):
-            st.markdown("""
-                <div style="background: #121212; border-radius: 12px; padding: 10px;">
-                    <iframe 
-                        width="100%" 
-                        height="550" 
-                        src="https://open.spotify.com/"
-                        frameborder="0" 
-                        allowfullscreen
-                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture">
-                    </iframe>
-                </div>
-            """, unsafe_allow_html=True)
-            st.success("✅ Spotify loaded! Search karo - Atif Aslam, Ali Zafar, NFAK, or any song.")
-        
-        st.markdown("""
-        **Popular Pakistani artists on Spotify:**
-        - 🎤 Atif Aslam
-        - 🎤 Ali Zafar  
-        - 🎤 Nusrat Fateh Ali Khan
-        - 🎤 Abida Parveen
-        - 🎤 Strings
-        - 🎤 Young Stunners
-        """)
+try:
+    import speech_recognition as sr
+    HAS_SPEECH = True
+except ImportError:
+    HAS_SPEECH = False
 
-# ─────────────────────────────────────────────────────────
-# 🎵 MUSIC PLAYER (Audio Focused)
-# ─────────────────────────────────────────────────────────
-def music_player():
-    st.markdown("""
-        <h3 style='text-align: center;'>🎵 MUSIC PLAYER - Gaane Suno Free Mein</h3>
-        <hr>
-    """, unsafe_allow_html=True)
-    
-    platform = st.radio(
-        "Select Music Platform:",
-        ["🎵 Spotify Web", "🎧 JioSaavn", "🌐 SoundCloud", "📻 Online Radio"],
-        horizontal=True,
-        key="music_platform"
-    )
-    
-    if platform == "🎵 Spotify Web":
-        st.markdown("### 🎵 Spotify - Sabse bada music library")
-        if st.button("🎧 OPEN SPOTIFY", type="primary", use_container_width=True):
-            st.markdown("""
-                <iframe 
-                    width="100%" 
-                    height="500" 
-                    src="https://open.spotify.com/embed"
-                    frameborder="0" 
-                    allow="autoplay; clipboard-write; encrypted-media; fullscreen">
-                </iframe>
-            """, unsafe_allow_html=True)
-    
-    elif platform == "🎧 JioSaavn":
-        st.markdown("### 🎧 JioSaavn - Best for Hindi/Urdu/Punjabi")
-        st.caption("Pakistani aur Indian gaane - bilkul free!")
-        if st.button("🎵 OPEN JIOSAAVN", type="primary", use_container_width=True):
-            st.markdown("""
-                <iframe 
-                    width="100%" 
-                    height="500" 
-                    src="https://www.jiosaavn.com/"
-                    frameborder="0" 
-                    allowfullscreen>
-                </iframe>
-            """, unsafe_allow_html=True)
-    
-    elif platform == "🌐 SoundCloud":
-        st.markdown("### 🌐 SoundCloud - Independent Artists + Remixes")
-        if st.button("🎶 OPEN SOUNDCLOUD", type="primary", use_container_width=True):
-            st.markdown("""
-                <iframe 
-                    width="100%" 
-                    height="500" 
-                    src="https://soundcloud.com/stream"
-                    frameborder="0" 
-                    allow="autoplay">
-                </iframe>
-            """, unsafe_allow_html=True)
-    
-    elif platform == "📻 Online Radio":
-        st.markdown("### 📻 Live Radio Stations")
-        radio_station = st.selectbox("Select Radio Station:", [
-            "🎵 FM 100 Pakistan",
-            "🎤 FM 91 (City FM)",
-            "🌍 BBC Asian Network",
-            "🎶 Radio Mirchi"
-        ])
-        if st.button("🔊 PLAY RADIO", type="primary"):
-            st.audio("https://streaming.radio.co/something.mp3", format="audio/mp3")
-            st.info("Radio stations - URL update karna hoga apne hisaab se")
+# ============================================
+# PAGE CONTEXT
+# ============================================
 
-# ─────────────────────────────────────────────────────────
-# 🎙️ MICROPHONE FUNCTIONS
-# ─────────────────────────────────────────────────────────
-def mic_input():
-    audio = st.audio_input("🎤 Click and speak (Urdu/English)", key="mic_input")
-    if audio:
-        return audio.getvalue()
-    return None
+PAGE_CONTEXT = {
+    "Dashboard": "Showing gym overview: member counts, revenue, expenses, recent activity.",
+    "Gym Setup": "Managing gym locations — add, edit, delete gyms with address and contact info.",
+    "Members": "Managing members: registration, photo upload, serial numbers, edit/delete.",
+    "Membership Cards": "Viewing and printing digital membership cards for members.",
+    "Attendance": "Tracking daily attendance: marking present/absent, viewing history.",
+    "Progress Tracker": "Logging member body measurements and fitness progress over time.",
+    "Fee Collection": "Recording and tracking monthly fee payments from members.",
+    "Expenses": "Logging gym expenses by category: equipment, maintenance, utilities, etc.",
+    "Inventory": "Managing gym equipment and supply stock levels.",
+    "Reports": "Generating financial and membership analytics reports.",
+    "Message Center": "Sending announcements and messages to members.",
+    "WhatsApp": "Sending WhatsApp messages to members via link/template.",
+    "Complaints": "Logging and resolving member complaints and feedback.",
+    "Audit": "Reviewing financial records and audit logs.",
+    "User Management": "Managing staff user accounts, roles, and passwords.",
+    "AI Assistant": "AI-powered assistant for gym management guidance.",
+}
 
-def transcribe_audio(audio_bytes):
-    if not audio_bytes:
+SYSTEM_PROMPT = (
+    "You are GymPro AI, an expert assistant embedded in GymPro — a professional multi-gym management system. "
+    "You help gym managers, admins, staff, and auditors with: member management, fee collection, "
+    "attendance tracking, financial analysis, expense management, inventory control, membership operations, "
+    "and best practices for gym management.\n"
+    "Be concise, practical, and friendly. Respond in Roman Urdu if the user asks in Roman Urdu. "
+    "If asked something unrelated to gym management, politely redirect to gym topics."
+)
+
+# ============================================
+# SESSION STATE INIT
+# ============================================
+
+def _init_state():
+    if "ai_chat_history" not in st.session_state:
+        st.session_state["ai_chat_history"] = []
+    if "ai_input_counter" not in st.session_state:
+        st.session_state["ai_input_counter"] = 0
+    if "ai_last_question" not in st.session_state:
+        st.session_state["ai_last_question"] = ""
+    if "speak_trigger" not in st.session_state:
+        st.session_state["speak_trigger"] = None
+    if "auto_speak" not in st.session_state:
+        st.session_state["auto_speak"] = True
+    
+    # Music Player
+    if "music_results" not in st.session_state:
+        st.session_state["music_results"] = []
+    if "music_search" not in st.session_state:
+        st.session_state["music_search"] = ""
+    if "active_music" not in st.session_state:
+        st.session_state["active_music"] = None
+    
+    # Video Player
+    if "video_results" not in st.session_state:
+        st.session_state["video_results"] = []
+    if "video_search" not in st.session_state:
+        st.session_state["video_search"] = ""
+    if "active_video" not in st.session_state:
+        st.session_state["active_video"] = None
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def is_roman_urdu(text: str) -> bool:
+    roman_urdu_words = ["hai", "hain", "ka", "ki", "ke", "ko", "se", "mein", "mai", "ho", "hum", "ap", "tum", "wo", "ye", "kya", "kyu", "kaise", "kahan", "kab", "kitna", "kitne", "aap", "mujhe", "tujhe", "usne", "unhon"]
+    words = text.lower().split()
+    if not words:
+        return False
+    urdu_count = sum(1 for w in words if w in roman_urdu_words)
+    return urdu_count / len(words) > 0.2
+
+def detect_language(text: str) -> str:
+    if any(ord(char) in range(0x0600, 0x06FF) for char in text):
+        return "urdu_script"
+    if is_roman_urdu(text):
+        return "roman_urdu"
+    return "english"
+
+def play_tts(text: str):
+    if not HAS_GTTS:
+        return
+    try:
+        lang_code = "ur" if detect_language(text) in ["urdu_script", "roman_urdu"] else "en"
+        clean_text = re.sub(r'[*_`#\-\n]', ' ', text)[:500]
+        tts = gTTS(text=clean_text, lang=lang_code, slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        st.audio(fp, format="audio/mp3", autoplay=True)
+    except:
+        pass
+
+def transcribe_mic(audio_bytes: bytes) -> str:
+    if not HAS_SPEECH:
         return None
     try:
+        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         
-        r = sr.Recognizer()
+        recognizer = sr.Recognizer()
         with sr.AudioFile(tmp_path) as source:
-            audio = r.record(source)
-            text = r.recognize_google(audio, language="ur-PK")
-        
-        os.unlink(tmp_path)
-        return text
+            audio = recognizer.record(source)
+            try:
+                text = recognizer.recognize_google(audio, language="ur-PK")
+                return text
+            except:
+                try:
+                    text = recognizer.recognize_google(audio, language="en-US")
+                    return text
+                except:
+                    return None
     except:
         return None
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
 
-# ─────────────────────────────────────────────────────────
-# 🔊 TEXT TO SPEECH
-# ─────────────────────────────────────────────────────────
-async def text_to_speech(text):
+# ============================================
+# AI RESPONSE ENGINE
+# ============================================
+
+def _build_system_content(page: str, gym_stats: dict) -> str:
+    page_ctx = PAGE_CONTEXT.get(page, "")
+    stats_ctx = (
+        f"Live gym stats — Total members: {gym_stats.get('total_members', '?')}, "
+        f"Active: {gym_stats.get('active_members', '?')}, "
+        f"Month revenue: PKR {gym_stats.get('month_revenue', 0):,.0f}, "
+        f"Month expenses: PKR {gym_stats.get('month_expenses', 0):,.0f}."
+    )
+    return f"{SYSTEM_PROMPT}\n\nCurrent page: {page}. {page_ctx}\n{stats_ctx}"
+
+def _rule_based_response(user_msg: str, page: str, gym_stats: dict) -> str:
+    q = user_msg.lower()
+    
+    if any(w in q for w in ["salam", "hello", "hi", "hey", "assalam", "adaab"]):
+        return "👋 **Assalam-u-Alaikum!** Main GymPro AI hoon. Aap **" + page + "** page par hain. Koi sawal poochiye! Members, fees, attendance, workout, diet — sab mein madad kar sakta hoon."
+    
+    if any(w in q for w in ["member", "register", "serial", "enroll", "new member"]):
+        return "📝 **Member Register:** Members page par jao → 'Register Member' tab → form fill karo → photo upload karo. Serial number (PF-00001) automatically generate hoga."
+    
+    if any(w in q for w in ["fee", "payment", "collect", "paisa", "money", "charges"]):
+        return f"💰 **Fees Collection:** Is mahine ka revenue: **PKR {gym_stats.get('month_revenue', 0):,.0f}**. Har member ki payment record karo."
+    
+    if any(w in q for w in ["expense", "cost", "spend", "kharch", "expenditure"]):
+        return f"📊 **Expenses:** Is mahine total expenses: **PKR {gym_stats.get('month_expenses', 0):,.0f}**. Categories: Equipment, Maintenance, Utilities."
+    
+    if any(w in q for w in ["attendance", "present", "absent", "aaye", "haazri"]):
+        return "📋 **Attendance:** Rozana haazri mark karo. 3+ din ghaib members alert hote hain."
+    
+    if any(w in q for w in ["diet", "khana", "protein", "nutrition", "food"]):
+        return """🥗 **Diet Plan:**
+• Subah: 2 ande + oats + milk + banana
+• Dopahar: Chicken 200g + brown rice + salad
+• Shaam: Protein shake + dry fruits
+• Raat: Fish/Chicken 150g + vegetables
+• Paani: 8-10 glass rozana
+❌ Avoid: Junk food, sugar, soft drinks"""
+    
+    if any(w in q for w in ["workout", "exercise", "kasrat", "routine", "gym plan"]):
+        return """🏋️ **Weekly Workout:**
+• Mon: Chest + Triceps
+• Tue: Back + Biceps
+• Wed: Legs + Shoulders
+• Thu: Rest / Cardio
+• Fri: Full Body
+• Sat: Abs + Core
+• Sun: Active Rest
+🔥 Warm-up 10 min mandatory!"""
+    
+    if any(w in q for w in ["inventory", "stock", "equipment"]):
+        return "📦 **Inventory:** Equipment aur supplies track karo. Low-stock alerts sidebar mein aate hain."
+    
+    if any(w in q for w in ["report", "analytics", "chart", "statistics"]):
+        total = gym_stats.get("total_members", "?")
+        active = gym_stats.get("active_members", "?")
+        return f"📈 **Reports:** Total: {total}, Active: {active}, Revenue: PKR {gym_stats.get('month_revenue', 0):,.0f}"
+    
+    if any(w in q for w in ["gym", "setup", "add gym", "branch"]):
+        return "🏢 **Gym Setup:** Nayi gym add karo. Har gym ka alag member pool aur financials."
+    
+    if any(w in q for w in ["help", "madad", "support", "kya", "batao"]):
+        return f"""🤖 **Main yeh topics mein help kar sakta hoon:**
+📊 Members, Fees, Attendance, Expenses
+📦 Inventory, Reports, Gym Setup
+🏋️ Workout Plans, Diet Plans
+💬 Complaints, Messages
+
+Aap **{page}** page par hain. Poochiye!"""
+    
+    return f"🤔 Samajh nahi aaya. Aap **{page}** page par hain. Members, fees, attendance, workout, diet — kisi bhi topic par poochiye! 😊"
+
+def get_ai_response(messages: list, page: str, gym_stats: dict) -> str:
+    system_content = _build_system_content(page, gym_stats)
+    
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if groq_key:
+        try:
+            import requests as req
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "system", "content": system_content}] + messages,
+                "max_tokens": 600,
+                "temperature": 0.7,
+            }
+            resp = req.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=20,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"].strip()
+        except:
+            pass
+    
+    return _rule_based_response(messages[-1]["content"] if messages else "", page, gym_stats)
+
+def _api_messages() -> list:
+    return [
+        {"role": "assistant" if m["role"] == "assistant" else "user", "content": m["content"]}
+        for m in st.session_state.get("ai_chat_history", [])[-20:]
+    ]
+
+def _push_and_respond(user_text: str, page: str, gym_stats: dict):
+    if st.session_state.get("ai_last_question", "") == user_text:
+        st.warning("⚠️ Yeh sawaal already pooch chuke ho!")
+        return
+    
+    st.session_state["ai_last_question"] = user_text
+    st.session_state["ai_chat_history"].append({"role": "user", "content": user_text})
+    
+    with st.spinner("🤔 Soch raha hoon..."):
+        reply = get_ai_response(_api_messages(), page, gym_stats)
+    
+    st.session_state["ai_chat_history"].append({"role": "assistant", "content": reply})
+    
+    if st.session_state.get("auto_speak", True):
+        st.session_state["speak_trigger"] = reply
+    
+    st.session_state["ai_input_counter"] += 1
+    st.rerun()
+
+# ============================================
+# SIDEBAR WIDGET
+# ============================================
+
+def render_sidebar_widget(current_page: str, gym_id=None):
+    _init_state()
+    
+    gym_stats = {}
     try:
-        voice = "ur-PK-AsadNeural"
-        communicate = edge_tts.Communicate(text[:400], voice)
-        audio_fp = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_fp.write(chunk["data"])
-        audio_fp.seek(0)
-        return audio_fp.read()
+        gym_stats = db.get_stats(gym_id)
     except:
-        return None
-
-def tts_sync(text):
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(text_to_speech(text))
-        loop.close()
-        return result
-    except:
-        return None
-
-# ─────────────────────────────────────────────────────────
-# 🤖 AI RESPONSE - HAR SAWAAL KA ALAG JAWAB
-# ─────────────────────────────────────────────────────────
-def get_ai_response(question, gym_data):
-    q = question.lower().strip()
+        pass
     
-    if q in ["salam", "assalam", "hello", "hi", "hey"]:
-        return "👋 **Assalam-u-Alaikum!** Main AI Gym Assistant hoon. Gym statistics, diet plan, workout routine, aur media player mein madad kar sakta hoon. Kya poochna chahenge?"
-    
-    elif "total member" in q or "kitne member" in q:
-        for line in gym_data.split('\n'):
-            if "Total Members:" in line:
-                return f"📊 **{line.strip()}**"
-    
-    elif "active member" in q or "active kitne" in q:
-        for line in gym_data.split('\n'):
-            if "Active Members:" in line:
-                return f"💪 **{line.strip()}**"
-    
-    elif "attendance" in q or "aaj kitne aaye" in q:
-        for line in gym_data.split('\n'):
-            if "Today's Attendance:" in line:
-                return f"📋 **{line.strip()}**"
-    
-    elif "collection" in q or "paisa" in q or "fee" in q:
-        for line in gym_data.split('\n'):
-            if "Today's Collection:" in line:
-                return f"💰 **{line.strip()}**"
-    
-    elif "diet" in q or "khana" in q or "protein" in q:
-        return "🥗 **DIET PLAN:** Morning: eggs + oats, Lunch: chicken + rice, Dinner: light meal. Avoid junk food, drink 8-10 glasses water."
-    
-    elif "workout" in q or "exercise" in q or "kasrat" in q:
-        return "🏋️ **WORKOUT:** Monday Chest, Tuesday Back, Wednesday Legs, Thursday Cardio, Friday Full Body, Saturday Abs, Sunday Rest."
-    
-    elif "time" in q or "timing" in q:
-        return "⏰ **GYM TIMINGS:** Morning 6am-12pm, Evening 3pm-10pm. Open 7 days!"
-    
-    else:
-        return f"🤔 **Main ne ye sawaal samjha:** '{question}'\n\n❓ Aap pooch sakte hain: 'Kitne active members?' ya 'Diet plan kya hai?' ya 'Workout batao'"
-
-# ─────────────────────────────────────────────────────────
-# 💬 AI CHAT
-# ─────────────────────────────────────────────────────────
-def ai_chat():
-    st.markdown("""
-        <h3 style='text-align: center;'>💬 AI CHAT - Gym Assistant</h3>
-        <hr>
-    """, unsafe_allow_html=True)
-    
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("audio"):
-                st.audio(msg["audio"], format="audio/mp3")
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        audio_bytes = mic_input()
-    
-    with col2:
-        text_input = st.chat_input("Apna sawal likhein...")
-    
-    user_question = None
-    
-    if audio_bytes:
-        with st.spinner("🎧 Sun raha hoon..."):
-            user_question = transcribe_audio(audio_bytes)
-            if user_question:
-                st.success(f"🎤 Aapne kaha: **{user_question}**")
-    
-    if text_input:
-        user_question = text_input
-    
-    if user_question and user_question != st.session_state.last_question:
-        st.session_state.last_question = user_question
+    with st.expander("🤖 AI Assistant", expanded=False):
+        history = st.session_state.get("ai_chat_history", [])
         
-        st.session_state.chat_history.append({"role": "user", "content": user_question})
-        
-        with st.spinner("🤔 Soch raha hoon..."):
-            gym_data = get_gym_data(st.session_state.current_gym)
-            ai_response = get_ai_response(user_question, gym_data)
-        
-        with st.spinner("🔊 Awaaz bana raha hoon..."):
-            ai_audio = tts_sync(ai_response[:350])
-        
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": ai_response,
-            "audio": ai_audio
-        })
-        
-        st.rerun()
-    
-    if st.button("🗑️ Clear Chat", use_container_width=True):
-        st.session_state.chat_history = []
-        st.session_state.last_question = ""
-        st.rerun()
-
-# ─────────────────────────────────────────────────────────
-# 🏠 SIDEBAR
-# ─────────────────────────────────────────────────────────
-def sidebar():
-    with st.sidebar:
-        st.image("https://img.icons8.com/color/96/000000/gym.png", width=80)
-        st.markdown("# 💪 AI Gym Assistant")
-        st.markdown("---")
-        
-        st.markdown("### 🏢 Select Gym")
-        gyms = ["🏋️‍♂️ Main Gym", "🏋️‍♀️ Women's Gym", "💪 Elite Gym"]
-        selected_gym = st.selectbox("Choose Location:", gyms, key="gym_selector")
-        
-        if "Main" in selected_gym:
-            st.session_state.current_gym = "gym_001"
-        elif "Women" in selected_gym:
-            st.session_state.current_gym = "gym_002"
+        if history:
+            html = '<div style="max-height:150px;overflow-y:auto;font-size:0.8rem;">'
+            for msg in history[-5:]:
+                if msg["role"] == "user":
+                    html += f'<div style="background:#1E3A5F;padding:4px 8px;margin:2px 0;border-radius:5px;">👤 {msg["content"][:80]}...</div>'
+                else:
+                    html += f'<div style="background:#1E1E3A;padding:4px 8px;margin:2px 0;border-radius:5px;">🤖 {msg["content"][:80]}...</div>'
+            html += "</div>"
+            st.markdown(html, unsafe_allow_html=True)
         else:
-            st.session_state.current_gym = "gym_003"
+            st.caption(f"Page: {current_page}. Kuch poochiye!")
         
-        st.markdown("---")
+        key = f"sb_chat_{st.session_state.get('ai_input_counter', 0)}"
+        user_input = st.text_input("Message", placeholder="Roman Urdu mein likhein...", key=key, label_visibility="collapsed")
         
-        st.markdown("### 📊 Quick Stats")
-        gym_data = get_gym_data(st.session_state.current_gym)
-        for line in gym_data.split('\n')[:5]:
-            if line.strip() and "━━" not in line:
-                st.info(line.strip())
+        col1, col2 = st.columns([3, 1])
+        send = col1.button("Send", key="sb_send_btn", type="primary", use_container_width=True)
+        clear = col2.button("🗑", key="sb_clear_btn", use_container_width=True)
         
-        st.markdown("---")
+        if clear:
+            st.session_state["ai_chat_history"] = []
+            st.session_state["ai_last_question"] = ""
+            st.session_state["ai_input_counter"] += 1
+            st.rerun()
         
-        st.markdown("### 📖 Media Platforms Available")
-        st.markdown("""
-        🎬 **Video:**
-        - Dailymotion
-        - Tubi Movies (Free Hollywood)
-        - Playful (YouTube NO ADS)
+        if send and user_input.strip():
+            _push_and_respond(user_input.strip(), current_page, gym_stats)
         
-        🎵 **Audio:**
-        - Spotify Web
-        - JioSaavn
-        - SoundCloud
-        """)
+        auto = st.toggle("🔊 Voice Reply", value=st.session_state.get("auto_speak", True))
+        st.session_state["auto_speak"] = auto
         
-        st.markdown("---")
-        st.caption("Made with ❤️ | YouTube ke ilawa 6 platforms!")
+        if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", True):
+            play_tts(st.session_state["speak_trigger"])
+            st.session_state["speak_trigger"] = None
 
-# ─────────────────────────────────────────────────────────
-# MAIN RENDER
-# ─────────────────────────────────────────────────────────
-def render(gym_id=None, role=None):
-    sidebar()
+# ============================================
+# 🎵 MUSIC PLAYER - SEARCH ANY SONG
+# ============================================
+
+def _music_player():
+    st.markdown("### 🎵 Music Player")
+    st.caption("🔍 Koi bhi song, artist, ya genre search karein!")
     
-    st.markdown("""
-        <div style='text-align: center; padding: 10px;'>
-            <h1>🤖 AI Gym Assistant</h1>
-            <p style='font-size: 18px;'>💪 Gym Management + 🎬 Media Player (YouTube ke ilawa)</p>
-            <p style='color: #00ff88;'>✅ Dailymotion | ✅ Tubi Movies | ✅ Spotify | ✅ JioSaavn | ✅ Playful (No Ads YouTube)</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # Quick suggestions
+    st.markdown("**⚡ Quick Suggestions:**")
+    quick_suggestions = ["Atif Aslam", "Dil Dil Pakistan", "Arijit Singh", "Taylor Swift", "Workout Music", "EDM", "Lofi", "Hindi Songs"]
+    cols = st.columns(4)
+    for i, suggestion in enumerate(quick_suggestions[:4]):
+        if cols[i % 4].button(suggestion, key=f"qs_music_{i}", use_container_width=True):
+            st.session_state['music_search_input'] = suggestion
+            st.rerun()
     
     st.markdown("---")
     
-    tab1, tab2, tab3 = st.tabs(["🎬 VIDEO PLAYER", "🎵 MUSIC PLAYER", "💬 AI CHAT"])
+    # Search
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_query = st.text_input(
+            "🎵 Search Song / Artist:",
+            placeholder="e.g. Atif Aslam, Fitness Motivation...",
+            key="music_search_input",
+            label_visibility="collapsed"
+        )
+    with col2:
+        if st.button("🔍 Search", key="music_search_btn", type="primary", use_container_width=True):
+            if search_query:
+                with st.spinner(f"🎵 Searching '{search_query}'..."):
+                    results = search_youtube(search_query, max_results=8)
+                    if results:
+                        st.session_state['music_results'] = results
+                        st.session_state['music_search'] = search_query
+                        st.rerun()
+                    else:
+                        st.error("❌ No results found")
+    
+    # Show results
+    if st.session_state['music_results']:
+        results = st.session_state['music_results']
+        search = st.session_state.get('music_search', '')
+        
+        st.success(f"🎵 {len(results)} songs found for '{search}'")
+        
+        cols = st.columns(2)
+        for i, video_id in enumerate(results):
+            col_idx = i % 2
+            with cols[col_idx]:
+                with st.container(border=True):
+                    thumb_url = f"https://img.youtube.com/vi/{video_id}/default.jpg"
+                    st.image(thumb_url, use_container_width=True)
+                    
+                    if st.button(f"▶️ Play", key=f"music_play_{i}", use_container_width=True, type="primary"):
+                        st.session_state['active_music'] = video_id
+                        st.rerun()
+        
+        if st.button("🗑️ Clear Results", key="music_clear", use_container_width=True):
+            st.session_state['music_results'] = []
+            st.session_state['music_search'] = ""
+            st.rerun()
+    
+    # Active player
+    if st.session_state.get('active_music'):
+        video_id = st.session_state['active_music']
+        
+        st.divider()
+        st.markdown(f"### 🎵 Now Playing")
+        
+        st.markdown(f"""
+            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;background:#000;">
+                <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                    src="https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0" 
+                    frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" 
+                    allowfullscreen>
+                </iframe>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("❌ Stop Music", use_container_width=True):
+            st.session_state['active_music'] = None
+            st.rerun()
+
+# ============================================
+# 🎬 VIDEO PLAYER - SEARCH ANY VIDEO
+# ============================================
+
+def _video_player():
+    st.markdown("### 🎬 Video Player")
+    st.caption("🔍 Koi bhi workout, exercise, ya informative video search karein!")
+    
+    # Quick suggestions
+    st.markdown("**⚡ Quick Suggestions:**")
+    quick_suggestions = ["Chest Workout", "Yoga for Beginners", "Cardio", "Full Body Workout", "Gym Motivation", "Weight Loss"]
+    cols = st.columns(3)
+    for i, suggestion in enumerate(quick_suggestions[:3]):
+        if cols[i].button(suggestion, key=f"qs_video_{i}", use_container_width=True):
+            st.session_state['video_search_input'] = suggestion
+            st.rerun()
+    
+    st.markdown("---")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_query = st.text_input(
+            "🔍 Search Video:",
+            placeholder="e.g. Chest workout, Yoga, Cardio...",
+            key="video_search_input",
+            label_visibility="collapsed"
+        )
+    with col2:
+        if st.button("🔍 Search", key="video_search_btn", type="primary", use_container_width=True):
+            if search_query:
+                with st.spinner(f"🔍 Searching '{search_query}'..."):
+                    results = search_youtube(search_query, max_results=6)
+                    if results:
+                        st.session_state['video_results'] = results
+                        st.session_state['video_search'] = search_query
+                        st.rerun()
+                    else:
+                        st.error("❌ No results found")
+    
+    # Show results
+    if st.session_state['video_results']:
+        results = st.session_state['video_results']
+        search = st.session_state.get('video_search', '')
+        
+        st.success(f"📹 {len(results)} videos found for '{search}'")
+        
+        cols = st.columns(3)
+        for i, video_id in enumerate(results):
+            col_idx = i % 3
+            with cols[col_idx]:
+                with st.container(border=True):
+                    thumb_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+                    st.image(thumb_url, use_container_width=True)
+                    
+                    if st.button(f"▶️ Play", key=f"video_play_{i}", use_container_width=True, type="primary"):
+                        st.session_state['active_video'] = video_id
+                        st.rerun()
+        
+        if st.button("🗑️ Clear Results", key="video_clear", use_container_width=True):
+            st.session_state['video_results'] = []
+            st.session_state['video_search'] = ""
+            st.rerun()
+    
+    # Active player
+    if st.session_state.get('active_video'):
+        video_id = st.session_state['active_video']
+        
+        st.divider()
+        st.markdown(f"### ▶️ Now Playing")
+        
+        st.markdown(f"""
+            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;background:#000;">
+                <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                    src="https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0" 
+                    frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" 
+                    allowfullscreen>
+                </iframe>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("❌ Stop Video", use_container_width=True):
+            st.session_state['active_video'] = None
+            st.rerun()
+
+# ============================================
+# 💬 CHAT TAB
+# ============================================
+
+def _chat_tab(page: str, gym_stats: dict):
+    st.markdown("### 💬 AI Chat with Voice")
+    st.caption("🎤 **Roman Urdu mein sawal poochiye ya microphone use karein**")
+    
+    st.markdown("#### ⚡ Quick Questions")
+    chips = [
+        "Kitne members hain?",
+        "Aaj ki attendance?",
+        "Diet plan batao",
+        "Workout routine",
+        "Fees collection?",
+        "Expenses kya hain?"
+    ]
+    cols = st.columns(3)
+    for i, chip in enumerate(chips):
+        if cols[i % 3].button(chip, key=f"chip_{i}", use_container_width=True):
+            _push_and_respond(chip, page, gym_stats)
+    
+    st.divider()
+    
+    st.markdown("### 🎤 Voice Input")
+    
+    if hasattr(st, "audio_input"):
+        voice_file = st.audio_input("🎙️ Press and speak (Roman Urdu/English)", key="mic_recorder_main")
+        if voice_file is not None:
+            audio_bytes = voice_file.read()
+            with st.spinner("🎧 Sun raha hoon..."):
+                transcribed = transcribe_mic(audio_bytes)
+                if transcribed:
+                    st.success(f"🗣️ Aapne kaha: **{transcribed}**")
+                    _push_and_respond(transcribed, page, gym_stats)
+                else:
+                    st.error("❌ Samajh nahi aaya. Dobara bolein.")
+    
+    st.divider()
+    
+    history = st.session_state.get("ai_chat_history", [])
+    for msg in history:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+    
+    if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", True):
+        play_tts(st.session_state["speak_trigger"])
+        st.session_state["speak_trigger"] = None
+    
+    st.divider()
+    
+    key = f"chat_input_{st.session_state.get('ai_input_counter', 0)}"
+    col1, col2, col3 = st.columns([6, 1, 1])
+    user_input = col1.text_input("💬 Roman Urdu mein likhein:", key=key, label_visibility="collapsed",
+                                 placeholder="e.g. Aaj kitne members aaye?")
+    send = col2.button("Send ➤", key="send_chat_btn", type="primary", use_container_width=True)
+    clear = col3.button("🗑 Clear", key="clear_chat_btn", use_container_width=True)
+    
+    if clear:
+        st.session_state["ai_chat_history"] = []
+        st.session_state["ai_last_question"] = ""
+        st.session_state["ai_input_counter"] += 1
+        st.rerun()
+    
+    if send and user_input.strip():
+        _push_and_respond(user_input.strip(), page, gym_stats)
+
+# ============================================
+# MAIN RENDER
+# ============================================
+
+def render(gym_id=None, role=None):
+    _init_state()
+    
+    st.markdown("""
+        <div style='text-align:center;padding:1rem;'>
+            <h1>🤖 AI Gym Assistant</h1>
+            <p style='font-size:1.1rem;'>💬 Chat • 🎵 Music • 🎬 Video</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.divider()
+    
+    current_page = st.session_state.get("page", "AI Assistant")
+    gym_stats = {}
+    try:
+        gym_stats = db.get_stats(gym_id)
+    except:
+        pass
+    
+    tab1, tab2, tab3 = st.tabs(["💬 AI Chat", "🎬 Video", "🎵 Music"])
     
     with tab1:
-        video_player()
+        _chat_tab(current_page, gym_stats)
     
     with tab2:
-        music_player()
+        _video_player()
     
     with tab3:
-        ai_chat()
-    
-    st.markdown("---")
-    st.markdown("""
-        <div style='text-align: center; color: gray;'>
-            <p>🌟 6 Media Platforms - Sab Free, Sab Online, YouTube ke ilawa!</p>
-            <p>🎬 Dailymotion | 🎬 Tubi (Free Movies) | 🚀 Playful (YouTube No Ads)</p>
-            <p>🎵 Spotify | 🎧 JioSaavn | 🌐 SoundCloud</p>
-        </div>
-    """, unsafe_allow_html=True)
+        _music_player()
+
+# ============================================
+# RUN
+# ============================================
 
 if __name__ == "__main__":
     render(None, "admin")

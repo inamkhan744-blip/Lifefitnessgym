@@ -1,18 +1,137 @@
-"""Attendance page with AI Traffic & Prediction Insights."""
+import streamlit as st
 import os
 import base64
 from datetime import date, datetime, timedelta
-import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import cv2
 import time
+from PIL import Image
+import io
 
 import database as db
 import styles
 
 # ── FIX: Photo path helper ────────────────────────────────────────────────
 UPLOAD_DIR = "gym-app/uploads"
+
+# ============================================
+# SESSION STATE INITIALIZATION (FIXED)
+# ============================================
+
+def init_session_state():
+    """Initialize all session state variables"""
+    if 'attendance_photo_cache' not in st.session_state:
+        st.session_state.attendance_photo_cache = {}
+    if 'gallery_loaded' not in st.session_state:
+        st.session_state.gallery_loaded = False
+    if 'gallery_html' not in st.session_state:
+        st.session_state.gallery_html = []
+    if 'selected_member_id' not in st.session_state:
+        st.session_state.selected_member_id = None
+    if 'photo_cache' not in st.session_state:
+        st.session_state.photo_cache = {}
+    if '_member_count' not in st.session_state:
+        st.session_state._member_count = 0
+    if 'all_members_data' not in st.session_state:
+        st.session_state.all_members_data = []
+
+# Initialize session state
+init_session_state()
+
+# ============================================
+# 🖼️ IMAGE ORIENTATION FIX
+# ============================================
+
+def fix_image_orientation(img):
+    """Fix image orientation using EXIF data"""
+    try:
+        if hasattr(img, '_getexif'):
+            exif = img._getexif()
+            if exif:
+                orientation = exif.get(274)
+                if orientation:
+                    if orientation == 3:
+                        img = img.rotate(180, expand=True)
+                    elif orientation == 6:
+                        img = img.rotate(270, expand=True)
+                    elif orientation == 8:
+                        img = img.rotate(90, expand=True)
+    except:
+        pass
+    return img
+
+def compress_image_with_orientation(image_path, max_size_kb=50, quality=70):
+    """Compress image with orientation fix"""
+    try:
+        img = Image.open(image_path)
+        img = fix_image_orientation(img)
+        
+        if img.mode in ('RGBA', 'LA', 'P'):
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+        
+        max_width = 400
+        if img.width > max_width:
+            ratio = max_width / img.width
+            new_size = (max_width, int(img.height * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        
+        while len(output.getvalue()) > max_size_kb * 1024 and quality > 20:
+            quality -= 10
+            output = io.BytesIO()
+            img.save(output, format='JPEG', quality=quality, optimize=True)
+        
+        return output.getvalue()
+    except Exception as e:
+        print(f"Image compression error: {e}")
+        return None
+
+def get_attendance_photo_b64(photo_field: str, serial_number: str = "") -> str | None:
+    """Get compressed photo with orientation fix"""
+    # Ensure session state is initialized
+    init_session_state()
+    
+    cache_key = f"attendance_{serial_number}_{photo_field}"
+    if cache_key in st.session_state.attendance_photo_cache:
+        return st.session_state.attendance_photo_cache[cache_key]
+    
+    photo_path = None
+    if photo_field:
+        photo_str = str(photo_field).strip()
+        if "<div" not in photo_str and "style=" not in photo_str:
+            filename = os.path.basename(photo_str)
+            paths_to_check = [
+                os.path.join(UPLOAD_DIR, filename),
+                os.path.join("gym-app/uploads", filename),
+                photo_str
+            ]
+            for path in paths_to_check:
+                if path and os.path.exists(path) and os.path.isfile(path):
+                    photo_path = path
+                    break
+    
+    if not photo_path and serial_number:
+        clean_serial = str(serial_number).strip().replace("-", "").lower()
+        if os.path.exists(UPLOAD_DIR):
+            for file_name in os.listdir(UPLOAD_DIR):
+                if clean_serial in file_name.lower().replace("_", "").replace("-", ""):
+                    path = os.path.join(UPLOAD_DIR, file_name)
+                    if os.path.isfile(path):
+                        photo_path = path
+                        break
+    
+    if photo_path:
+        compressed_data = compress_image_with_orientation(photo_path)
+        if compressed_data:
+            b64 = f"data:image/jpeg;base64,{base64.b64encode(compressed_data).decode()}"
+            st.session_state.attendance_photo_cache[cache_key] = b64
+            return b64
+    
+    return None
 
 def get_photo_path(filename):
     """Convert filename to full path for display"""
@@ -23,28 +142,72 @@ def get_photo_path(filename):
     full_path = os.path.join(UPLOAD_DIR, filename)
     return full_path if os.path.exists(full_path) else None
 
-def show_member_photo(photo_field, width=70):
-    """Safely display member photo"""
+def show_member_photo(photo_field, width=100):
+    """Safely display member photo with orientation fix - SQUARE FRAME"""
+    # Ensure session state is initialized
+    init_session_state()
+    
     if photo_field:
+        # Try to get compressed photo with orientation fix
+        photo_b64 = get_attendance_photo_b64(photo_field, "")
+        if photo_b64:
+            # SQUARE FRAME with bigger size
+            st.markdown(
+                f'''
+                <div style="width:{width}px; height:{width}px;
+                            border:3px solid #7C3AED; overflow:hidden;
+                            background:#1E293B; flex-shrink:0;
+                            border-radius:8px;">
+                    <img src="{photo_b64}" style="width:100%; height:100%;
+                                                  object-fit:cover; display:block;" />
+                </div>
+                ''',
+                unsafe_allow_html=True
+            )
+            return True
+        
+        # Fallback: try direct path
         path = get_photo_path(photo_field)
         if path:
             try:
-                st.image(path, width=width)
-                return True
+                # Compress and fix orientation on the fly
+                compressed = compress_image_with_orientation(path)
+                if compressed:
+                    b64 = base64.b64encode(compressed).decode()
+                    # SQUARE FRAME with bigger size
+                    st.markdown(
+                        f'''
+                        <div style="width:{width}px; height:{width}px;
+                                    border:3px solid #7C3AED; overflow:hidden;
+                                    background:#1E293B; flex-shrink:0;
+                                    border-radius:8px;">
+                            <img src="data:image/jpeg;base64,{b64}" style="width:100%; height:100%;
+                                                                          object-fit:cover; display:block;" />
+                        </div>
+                        ''',
+                        unsafe_allow_html=True
+                    )
+                    return True
             except Exception:
                 pass
+    
+    # Default placeholder - SQUARE
     st.markdown(
         f"""
-        <div style="width:{width}px; height:{width}px; border-radius:50%;
+        <div style="width:{width}px; height:{width}px;
                     background:#334155; display:flex;
                     align-items:center; justify-content:center;
-                    font-size:{width//2}px; color:#94A3B8;">👤</div>
+                    font-size:{width//2}px; color:#94A3B8;
+                    flex-shrink:0; border-radius:8px;
+                    border:3px solid #7C3AED44;">
+            👤
+        </div>
         """,
         unsafe_allow_html=True
     )
     return False
 
-# ── Audio (Web Audio API tone — no external files needed) ────────────────────
+# ── Audio (Web Audio API tone ── no external files needed) ────────────────────
 _AUDIO_PRIMER_JS = """
 <script>
 (function(){
@@ -98,10 +261,10 @@ _BEEP_JS = _tone_js(880, 180, "sine",   0.18)
 _BUZZ_JS = _tone_js(180, 450, "square", 0.22)
 
 def _play(kind: str):
-    components.html(_BEEP_JS if kind == "beep" else _BUZZ_JS, height=0)
+    st.components.v1.html(_BEEP_JS if kind == "beep" else _BUZZ_JS, height=0)
 
 def _autofocus_scan_input():
-    components.html(
+    st.components.v1.html(
         """
         <script>
         (function(){
@@ -266,29 +429,20 @@ def render_ai_dashboard_intel(sel_gid):
         st.error(f"🚨 ALERT: Aaj counter par {len(fraud_members)} Unpaid Members ko entry di gayi hai!")
         with st.expander("🔍 Click karein aur Unpaid Members ke Naam aur Pictures dekhein"):
             for m in fraud_members:
-                photo_path = get_photo_path(m.photo_path)
-                if photo_path:
-                    try:
-                        with open(photo_path, "rb") as f:
-                            encoded = base64.b64encode(f.read()).decode()
-                        photo_html = f'<img src="data:image/jpeg;base64,{encoded}" style="width:60px; height:60px; border-radius:50%; object-fit:cover; border:2px solid #EF4444; margin-right:15px;">'
-                    except:
-                        photo_html = '<div style="width:60px; height:60px; border-radius:50%; background:#334155; display:inline-block; text-align:center; line-height:60px; font-size:20px; margin-right:15px;">👤</div>'
-                else:
-                    photo_html = '<div style="width:60px; height:60px; border-radius:50%; background:#334155; display:inline-block; text-align:center; line-height:60px; font-size:20px; margin-right:15px;">👤</div>'
-
-                st.markdown(
-                    f"""
-                    <div style="display:flex; align-items:center; background-color:#1E293B; padding:10px 15px; border-radius:10px; margin-bottom:8px; border-left:5px solid #EF4444;">
-                        {photo_html}
-                        <div style="flex-grow:1;">
-                            <div style="font-weight:bold; color:#F8FAFC; font-size:1.1rem;">{m.full_name}</div>
-                            <div style="color:#94A3B8; font-size:0.9rem;">ID: {m.serial_number} | <span style="color:#FCA5A5;">Expired: {m.expiry_date}</span></div>
+                col_pic, col_info = st.columns([1, 4])
+                with col_pic:
+                    show_member_photo(m.photo_path, width=80)
+                with col_info:
+                    st.markdown(
+                        f"""
+                        <div style="padding:10px 0;">
+                            <div style="font-weight:bold; color:#F8FAFC; font-size:1.2rem;">{m.full_name}</div>
+                            <div style="color:#94A3B8; font-size:0.95rem;">ID: {m.serial_number} | <span style="color:#FCA5A5;">Expired: {m.expiry_date}</span></div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                        """,
+                        unsafe_allow_html=True
+                    )
+                st.divider()
     else:
         st.success("✅ **AI Security Audit:** Clear! Aaj koi unpaid member entry nahi le paya.")
 
@@ -362,6 +516,9 @@ def render_face_tab():
 
 # ── Page ─────────────────────────────────────────────────────────────────────
 def render(gym_id, role, current_user):
+    # Ensure session state is initialized
+    init_session_state()
+    
     styles.page_header("📅", "Daily Attendance Controls",
                        "Scan a member's QR code or monitor live AI security logs")
 
@@ -377,7 +534,7 @@ def render(gym_id, role, current_user):
 
     # ── QR Scan & Main Dashboard Intel Tab ───────────────────────────────────
     with tab_scan:
-        components.html(_AUDIO_PRIMER_JS, height=0)
+        st.components.v1.html(_AUDIO_PRIMER_JS, height=0)
         gym_opts = {g.name: g.id for g in gyms}
         if gym_id:
             sel_gid = gym_id
@@ -546,7 +703,7 @@ def render(gym_id, role, current_user):
                                      key="manual_att_search",
                                      label_visibility="collapsed")
         with info_col:
-            st.caption(f"💡 Mark karte jayein — naam list se hat jayega")
+            st.caption("💡 Mark karte jayein — naam list se hat jayega")
 
         if search_q:
             q = search_q.lower()
@@ -564,22 +721,22 @@ def render(gym_id, role, current_user):
         else:
             for m in pending_members:
                 with st.container():
-                    col_pic, col_info, col_p, col_a, col_l = st.columns([1, 3, 1.2, 1.2, 1.2])
+                    col_pic, col_info, col_p, col_a, col_l = st.columns([1.2, 3, 1.2, 1.2, 1.2])
 
                     with col_pic:
-                        show_member_photo(m.photo_path, width=70)
+                        show_member_photo(m.photo_path, width=90)
 
                     with col_info:
                         st.markdown(
                             f"""
-                            <div style="padding-top:8px;">
-                                <div style="font-size:1.1rem; font-weight:700; color:#F8FAFC;">
+                            <div style="padding-top:12px;">
+                                <div style="font-size:1.2rem; font-weight:700; color:#F8FAFC;">
                                     {m.full_name}
                                 </div>
-                                <div style="font-size:0.85rem; color:#94A3B8;">
+                                <div style="font-size:0.9rem; color:#94A3B8;">
                                     🆔 {m.serial_number} · {m.membership_type or 'N/A'}
                                 </div>
-                                <div style="font-size:0.8rem; color:#64748B;">
+                                <div style="font-size:0.85rem; color:#64748B;">
                                     📞 {m.phone or '—'}
                                 </div>
                             </div>
@@ -656,68 +813,68 @@ def render(gym_id, role, current_user):
 
                 st.caption("💡 Galti se mark kiya? Upar **'🔄 Reset Today's Marks'** button dabayein.")
 
-# ========== TAB 3: FACE CHECK-IN (WITH WiFi Camera) ==========
+    # ========== TAB 3: FACE CHECK-IN (WITH WiFi Camera) ==========
     with tab_face:
         st.subheader("📸 Live Face Check-in")
-    st.info("🎥 Camera will start automatically. Show your face to check in.")
-    
-    camera_source = st.radio(
-        "Select Camera:", 
-        ["💻 Laptop Webcam", "🔌 USB Camera", "📱 WiFi/IP Camera"],
-        horizontal=True
-    )
-    
-    ip_url = None
-    source = None
-    
-    if camera_source == "💻 Laptop Webcam":
-        source = 0
-    elif camera_source == "🔌 USB Camera":
-        source = 1
-    else:
-        ip_url = st.text_input(
-            "Enter IP Camera URL:", 
-            placeholder="http://192.168.100.4:8080/vide",
-            help="Get this from IP Webcam app on your phone"
+        st.info("🎥 Camera will start automatically. Show your face to check in.")
+        
+        camera_source = st.radio(
+            "Select Camera:", 
+            ["💻 Laptop Webcam", "🔌 USB Camera", "📱 WiFi/IP Camera"],
+            horizontal=True
         )
-        if ip_url:
-            source = ip_url
-    
-    if st.button("🎥 Start Camera", use_container_width=True):
-        if camera_source == "📱 WiFi/IP Camera" and not ip_url:
-            st.error("❌ Please enter IP Camera URL first!")
-        elif source is None:
-            st.error("❌ Please select/enter camera source!")
+        
+        ip_url = None
+        source = None
+        
+        if camera_source == "💻 Laptop Webcam":
+            source = 0
+        elif camera_source == "🔌 USB Camera":
+            source = 1
         else:
-            try:
-                import cv2
-                cap = cv2.VideoCapture(source)
-                if not cap.isOpened():
-                    st.error("❌ Camera not found! Check connection.")
-                else:
-                    st.success("✅ Camera started!")
-                    frame_placeholder = st.empty()
-                    stop_placeholder = st.empty()
-                    stop = False
-                    
-                    while not stop:
-                        ret, frame = cap.read()
-                        if ret:
-                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                            time.sleep(0.1)
-                        else:
-                            st.error("Camera error")
-                            break
+            ip_url = st.text_input(
+                "Enter IP Camera URL:", 
+                placeholder="http://192.168.100.4:8080/video",
+                help="Get this from IP Webcam app on your phone"
+            )
+            if ip_url:
+                source = ip_url
+        
+        if st.button("🎥 Start Camera", use_container_width=True):
+            if camera_source == "📱 WiFi/IP Camera" and not ip_url:
+                st.error("❌ Please enter IP Camera URL first!")
+            elif source is None:
+                st.error("❌ Please select/enter camera source!")
+            else:
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(source)
+                    if not cap.isOpened():
+                        st.error("❌ Camera not found! Check connection.")
+                    else:
+                        st.success("✅ Camera started!")
+                        frame_placeholder = st.empty()
+                        stop_placeholder = st.empty()
+                        stop = False
                         
-                        with stop_placeholder.container():
-                            if st.button("⏹️ Stop Camera", key="stop_cam_btn", use_container_width=True):
-                                stop = True
-                    
-                    cap.release()
-                    st.info("Camera stopped.")
-            except Exception as e:
-                st.error(f"Camera error: {e}")
+                        while not stop:
+                            ret, frame = cap.read()
+                            if ret:
+                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                                frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                                time.sleep(0.1)
+                            else:
+                                st.error("Camera error")
+                                break
+                            
+                            with stop_placeholder.container():
+                                if st.button("⏹️ Stop Camera", key="stop_cam_btn", use_container_width=True):
+                                    stop = True
+                        
+                        cap.release()
+                        st.info("Camera stopped.")
+                except Exception as e:
+                    st.error(f"Camera error: {e}")
 
     # ── View Records ──────────────────────────────────────────────────────────
     with tab_view:
@@ -737,8 +894,11 @@ def render(gym_id, role, current_user):
         with vc3:
             st.write("")
             st.write("")
-            st.button("🔄 Refresh Records", use_container_width=True,
-                      key="vatt_refresh")
+            if st.button("🔄 Fix Photo Orientations", use_container_width=True,
+                        help="Clear photo cache and reload with correct orientation"):
+                st.session_state.attendance_photo_cache = {}
+                st.success("✅ Photo cache cleared! Images will reload with correct orientation.")
+                st.rerun()
 
         records = db.get_attendance(gym_id=vgid, check_date=vdate)
         members_map = {m.id: m for m in db.get_members(gym_id=vgid)}

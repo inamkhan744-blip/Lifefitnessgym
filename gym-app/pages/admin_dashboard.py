@@ -1,14 +1,107 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime, timedelta
 import database as db
 import styles
 
-def render(gym_id, role):
-    # Custom 3D CSS for modern look
+def render(gym_id, role, username):
+    
+    # ============================================
+    # GET GYMS
+    # ============================================
+    
+    gyms = db.get_all_gyms()
+    
+    # ============================================
+    # ANNOUNCEMENT SECTION
+    # ============================================
+    
+    if role.lower() in ["admin", "owner"] and gyms:
+        with st.expander("📢 Post Announcement", expanded=False):
+            with st.form("announcement_form", clear_on_submit=True):
+                if gym_id:
+                    sel_gid = gym_id
+                    gym_name = next((g.name for g in gyms if g.id == gym_id), "")
+                    st.text_input("🏋️ Gym", value=gym_name, disabled=True)
+                else:
+                    opts = {"All Gyms": None} | {g.name: g.id for g in gyms}
+                    chosen = st.selectbox("🏋️ Gym", list(opts.keys()))
+                    sel_gid = opts[chosen]
+                
+                message = st.text_area("📝 Announcement Message", placeholder="Type your announcement here...", height=80)
+                
+                col_exp1, col_exp2 = st.columns(2)
+                with col_exp1:
+                    set_expiry = st.checkbox("Set Expiry Date")
+                with col_exp2:
+                    if set_expiry:
+                        expiry_date = st.date_input("Expiry Date", value=date.today() + timedelta(days=7))
+                    else:
+                        expiry_date = None
+                
+                if st.form_submit_button("📢 Post Announcement", type="primary", use_container_width=True):
+                    if not message.strip():
+                        st.error("❌ Please enter a message!")
+                    else:
+                        expires_at = datetime.combine(expiry_date, datetime.min.time()) if expiry_date else None
+                        ok, msg = db.add_announcement(sel_gid, message, username, expires_at)
+                        if ok:
+                            st.success("✅ Announcement posted!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {msg}")
+        
+        st.divider()
+    
+    # ============================================
+    # SHOW ACTIVE ANNOUNCEMENT BANNER
+    # ============================================
+    
+    active_announcement = db.get_active_announcement(gym_id=gym_id)
+    
+    if active_announcement:
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg, #7C3AED, #6D28D9);
+                    border-radius:12px;
+                    padding:0.8rem 1.2rem;
+                    margin-bottom:1rem;
+                    border:1px solid rgba(255,255,255,0.1);
+                    box-shadow:0 4px 20px rgba(124,58,237,0.3);
+                    display:flex;
+                    justify-content:space-between;
+                    align-items:center;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.3rem;">📢</span>
+                <div>
+                    <div style="color:rgba(255,255,255,0.6); font-size:0.6rem; font-weight:600; text-transform:uppercase; letter-spacing:0.08em;">
+                        Announcement
+                    </div>
+                    <div style="color:white; font-weight:500; font-size:0.95rem;">
+                        {active_announcement.message}
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                <span style="background:rgba(255,255,255,0.12); padding:2px 10px; border-radius:9999px; font-size:0.55rem; color:rgba(255,255,255,0.8);">
+                    {active_announcement.created_by}
+                </span>
+                <span style="background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:4px; font-size:0.5rem; color:rgba(255,255,255,0.5);">
+                    {active_announcement.created_at.strftime('%d %b') if active_announcement.created_at else ''}
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ============================================
+    # DASHBOARD HEADER
+    # ============================================
+    
+    styles.page_header("📊", "Dashboard", "Real-time overview across all operations")
+
+    # Custom 3D CSS
     st.markdown("""
     <style>
-    /* 3D Glass Card Effect */
     .glass-card-3d {
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
         backdrop-filter: blur(12px);
@@ -86,16 +179,13 @@ def render(gym_id, role):
     </style>
     """, unsafe_allow_html=True)
 
-    styles.page_header("📊", "Dashboard", "Real-time overview across all operations")
-
-    gyms = db.get_all_gyms()
     if not gyms and role == "admin":
         st.info("👋 Welcome! Head to **Gym Setup** to create your first gym.")
         return
 
     stats = db.get_stats(gym_id)
 
-    # ── 5 KPI Cards (3D Glass) ────────────────────────────────────────────────
+    # ── 5 KPI Cards ────────────────────────────────────────────────────────────
     st.markdown("---")
     c1, c2, c3, c4, c5 = st.columns(5)
     
@@ -149,13 +239,12 @@ def render(gym_id, role):
 
     st.markdown("---")
 
-    # ── ALERTS SECTION (Categorized: Critical/Urgent/Absent) ──────────────────
+    # ── ALERTS SECTION ────────────────────────────────────────────────────────
     bday_members = db.get_birthday_members(days_ahead=3, gym_id=gym_id)
-    expiring_now = db.get_expiring_members(days=7, gym_id=gym_id)  # Get all expiring
+    expiring_now = db.get_expiring_members(days=7, gym_id=gym_id)
     absent_alert = db.get_absent_members(days=3, gym_id=gym_id)
     low_stock = db.get_stock_items(gym_id=gym_id, low_stock_only=True)
 
-    # Categorize expiring
     critical = [(m, d) for m, d in expiring_now if d <= 1]
     urgent = [(m, d) for m, d in expiring_now if 2 <= d <= 3]
     
@@ -187,7 +276,6 @@ def render(gym_id, role):
         else:
             st.write("✅ Everyone active")
     
-    # Birthday + Low Stock as small notes
     if bday_members:
         bday_text = "🎂 " + ", ".join([f"{m.full_name} ({d} day(s))" for m, d in bday_members[:3]])
         st.info(bday_text)
@@ -197,7 +285,7 @@ def render(gym_id, role):
 
     st.markdown("---")
 
-    # ── LEADERBOARD + PEAK HOUR (No Graphs) ───────────────────────────────────
+    # ── LEADERBOARD + PEAK HOUR ──────────────────────────────────────────────
     col_lb, col_ph = st.columns(2)
     
     with col_lb:
@@ -243,7 +331,7 @@ def render(gym_id, role):
     
     st.markdown("---")
     
-    # ── RECENT SCAN-INS ───────────────────────────────────────────────────────
+    # ── RECENT SCAN-INS ──────────────────────────────────────────────────────
     st.markdown("### 🎯 Recent Scan-Ins (Today)")
     scans = db.get_recent_scans(gym_id=gym_id, limit=10, today_only=True)
     if scans:
@@ -259,7 +347,7 @@ def render(gym_id, role):
     
     st.markdown("---")
     
-    # ── MEMBERS & FEE STATUS TABLE ─────────────────────────────────────────────
+    # ── MEMBERS & FEE STATUS ─────────────────────────────────────────────────
     st.markdown("### 👥 Members & Fee Status")
     st.caption("Recent registrations + fee status ek hi jagah")
     
@@ -301,7 +389,6 @@ def render(gym_id, role):
             "_status_key": status_key,
         })
     
-    # Stats cards
     total_count = len(unified_rows)
     paid_count = sum(1 for r in unified_rows if r["_status_key"] == "paid")
     unpaid_count = sum(1 for r in unified_rows if r["_status_key"] == "unpaid")
@@ -317,7 +404,6 @@ def render(gym_id, role):
     with s4:
         st.markdown(styles.metric_card("🔴 Unpaid", unpaid_count, "Need to collect", "red"), unsafe_allow_html=True)
     
-    # Filter buttons
     if "fee_filter" not in st.session_state:
         st.session_state.fee_filter = "all"
     
@@ -357,7 +443,7 @@ def render(gym_id, role):
     
     st.markdown("---")
     
-    # ── EXPIRING MEMBERSHIPS (Enhanced) ───────────────────────────────────────
+    # ── EXPIRING MEMBERSHIPS ─────────────────────────────────────────────────
     expiring = db.get_expiring_members(days=7, gym_id=gym_id)
     if expiring:
         st.markdown(f"### ⚠️ {len(expiring)} Membership(s) Expiring in 7 Days")
@@ -388,5 +474,228 @@ def render(gym_id, role):
         st.dataframe(pd.DataFrame(exp_rows), use_container_width=True, hide_index=True)
         st.info("💡 **Tip:** Critical members ko foran WhatsApp/Call karein renewal ke liye!")
     
+    st.markdown("---")
+    st.caption("✨ Simplified dashboard · No graphs · Clean 3D design · Just what matters")
+
+    # ============================================
+    # ✅ STAFF TARGETS SECTION (Function ke ANDAR)
+    # ============================================
+    
+    if role.lower() not in ["admin", "owner"]:
+        st.divider()
+        st.subheader("🎯 My Performance Targets")
+        
+        current_month = date.today().strftime("%Y-%m")
+        progress = db.get_staff_progress(username, current_month)
+        
+        if progress:
+            targets_exist = any([
+                progress['new_members']['target'] > 0,
+                progress['fee_collection']['target'] > 0,
+                progress['attendance']['target'] > 0
+            ])
+            
+            if targets_exist:
+                overall_pct = progress['overall']
+                prize_amount = progress.get('prize_amount', 0)
+                prize_status = progress.get('prize_status', 'Pending')
+                
+                if prize_status == "Awarded":
+                    prize_color = "#34D399"
+                    prize_emoji = "🏆"
+                    prize_text = "🎉 Prize Awarded!"
+                elif prize_status == "Pending":
+                    prize_color = "#FBBF24"
+                    prize_emoji = "🎯"
+                    prize_text = "⏳ Target In Progress"
+                else:
+                    prize_color = "#94A3B8"
+                    prize_emoji = "📌"
+                    prize_text = "⏳ Not Completed"
+                
+                st.markdown(f"""
+                <div style="background:linear-gradient(145deg, #1E293B, #0F172A);
+                            border:2px solid {prize_color};
+                            border-radius:16px;
+                            padding:1.5rem;
+                            margin-bottom:1rem;
+                            text-align:center;
+                            box-shadow:0 8px 30px rgba(0,0,0,0.3);">
+                    <div style="font-size:3rem;margin-bottom:0.3rem;">{prize_emoji}</div>
+                    <div style="font-size:1.5rem;font-weight:800;color:#F8FAFC;">
+                        Prize / Inam
+                    </div>
+                    <div style="font-size:2.5rem;font-weight:900;color:{prize_color};margin:0.3rem 0;">
+                        PKR {prize_amount:,.2f}
+                    </div>
+                    <div style="font-size:1rem;font-weight:600;color:{prize_color};">
+                        {prize_text}
+                    </div>
+                    <div style="font-size:0.8rem;color:#94A3B8;margin-top:0.3rem;">
+                        {progress['completed_targets']}/{progress['total_targets']} targets completed
+                    </div>
+                    <div style="font-size:0.7rem;color:#64748B;margin-top:0.2rem;">
+                        💡 All 3 targets must be completed to win the prize!
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("📊 Overall Progress", f"{overall_pct:.0f}%", f"{progress['completed_targets']}/{progress['total_targets']} targets completed")
+                with col2:
+                    pct = progress['new_members']['percentage']
+                    st.metric("👤 New Members", f"{progress['new_members']['achieved']:.0f}/{progress['new_members']['target']:.0f}", f"{pct:.0f}% done")
+                with col3:
+                    pct = progress['fee_collection']['percentage']
+                    st.metric("💰 Fee Collection", f"PKR {progress['fee_collection']['achieved']:,.0f}/{progress['fee_collection']['target']:,.0f}", f"{pct:.0f}% done")
+                with col4:
+                    pct = progress['attendance']['percentage']
+                    st.metric("✅ Attendance", f"{progress['attendance']['achieved']:.0f}/{progress['attendance']['target']:.0f}", f"{pct:.0f}% done")
+                
+                st.markdown("#### 📈 Target Progress")
+                pct = min(100, progress['new_members']['percentage'])
+                st.progress(pct / 100, text=f"👤 New Members: {pct:.0f}%")
+                pct = min(100, progress['fee_collection']['percentage'])
+                st.progress(pct / 100, text=f"💰 Fee Collection: {pct:.0f}%")
+                pct = min(100, progress['attendance']['percentage'])
+                st.progress(pct / 100, text=f"✅ Attendance: {pct:.0f}%")
+                
+                if overall_pct >= 80:
+                    st.success("🏆 Excellent! You're crushing your targets! Keep it up! 💪")
+                elif overall_pct >= 50:
+                    st.info("💪 Good progress! You're halfway there! Keep pushing!")
+                elif overall_pct > 0:
+                    st.warning("🎯 You've started! Focus on completing your targets this month.")
+                else:
+                    st.info("📝 No targets achieved yet. Keep working towards your goals!")
+                
+                if overall_pct >= 100:
+                    st.balloons()
+                    st.success(f"🎉 Congratulations! You've won PKR {prize_amount:,.2f}! 🏆")
+            else:
+                st.info("📝 No targets assigned for this month. Your admin will assign targets soon!")
+                st.caption("💡 Tip: Targets are set monthly by your admin for New Members, Fee Collection, and Attendance.")
+        else:
+            st.info("📝 No targets found. Your admin will assign targets soon!")
+
+    # ============================================
+    # ✅ STAFF ATTENDANCE SECTION (Function ke ANDAR)
+    # ============================================
+    
+    st.divider()
+    
+    if role.lower() == "admin":
+        # Admin view - All staff
+        st.subheader("👥 Staff Attendance Overview")
+        st.caption("All staff login/logout status")
+        
+        staff_summary = db.get_staff_attendance_summary(gym_id=gym_id)
+        
+        if staff_summary:
+            online_count = sum(1 for s in staff_summary if "Online" in s['status'])
+            total_staff = len(staff_summary)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("👥 Total Staff", total_staff)
+            with col2:
+                st.metric("🟢 Online Now", online_count)
+            with col3:
+                st.metric("⏳ Today's Logins", sum(1 for s in staff_summary if s['logins'] > 0))
+            
+            staff_data = []
+            for s in staff_summary:
+                staff_data.append({
+                    "Name": s['full_name'],
+                    "Role": s['role'],
+                    "Status": s['status'],
+                    "Today": s['today_status'],
+                    "Logins (30d)": s['logins'],
+                    "Hours This Month": f"{s['total_hours']}h"
+                })
+            
+            st.dataframe(pd.DataFrame(staff_data), use_container_width=True, hide_index=True)
+        else:
+            st.info("No staff attendance data available")
+    
+    else:
+        # Staff view - Only their own attendance
+        st.subheader("📋 My Attendance")
+        st.caption("Track your daily login/logout history")
+        
+        try:
+            my_summary = db.get_my_attendance_summary(username)
+            
+            if my_summary:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("📅 Today", my_summary['today_status'])
+                with col2:
+                    st.metric("📊 This Month", f"{my_summary['total_days']} days")
+                with col3:
+                    st.metric("⏱️ Total Hours", f"{my_summary['total_hours']}h")
+                with col4:
+                    st.metric("🔥 Streak", f"{my_summary['current_streak']} days")
+                
+                if my_summary['today_login']:
+                    st.caption(f"Logged in at: {my_summary['today_login']}")
+            
+            with st.expander("📋 Recent Attendance History", expanded=False):
+                history = db.get_staff_attendance(staff_username=username, date_from=date.today() - timedelta(days=30))
+                
+                if history:
+                    rows = []
+                    for r in history[:30]:
+                        status = "🟢 Online" if r.logout_time is None else "🔴 Offline"
+                        duration = f"{r.session_duration or 0} min"
+                        rows.append({
+                            "Date": r.login_time.strftime("%Y-%m-%d"),
+                            "Login": r.login_time.strftime("%I:%M %p"),
+                            "Logout": r.logout_time.strftime("%I:%M %p") if r.logout_time else "—",
+                            "Duration": duration,
+                            "Status": status
+                        })
+                    
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No attendance records found")
+        except:
+            pass
+
+    # ============================================
+    # ✅ STAFF STATUS SECTION - MOVED INSIDE FUNCTION
+    # ============================================
+    
+    st.markdown("---")
+    
+    if role.lower() == "admin":
+        st.subheader("👥 Staff Status")
+        
+        # 🔥 Auto logout inactive staff before showing
+        inactive_count = db.check_and_update_staff_status()
+        if inactive_count > 0:
+            st.info(f"⏳ {inactive_count} staff auto-logged out due to inactivity")
+        
+        staff_summary = db.get_staff_attendance_summary(gym_id=gym_id)
+        
+        if staff_summary:
+            online = sum(1 for s in staff_summary if "Online" in s['status'])
+            total = len(staff_summary)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("🟢 Online Now", online)
+            with col2:
+                st.metric("👥 Total Staff", total)
+            
+            # Show staff list with status
+            for s in staff_summary[:5]:
+                st.write(f"• {s['full_name']} — {s['status']}")
+            if len(staff_summary) > 5:
+                st.write(f"... and {len(staff_summary)-5} more")
+        else:
+            st.info("No staff attendance data")
+
     st.markdown("---")
     st.caption("✨ Simplified dashboard · No graphs · Clean 3D design · Just what matters")

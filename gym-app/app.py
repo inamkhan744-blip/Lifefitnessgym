@@ -10,6 +10,10 @@ import database as db
 import auth
 import styles
 import base64
+from pages import (
+    # ... other imports
+    staff_targets,  # ✅ Yeh hona chahiye
+)
 # -----------------------------------------
 #get_ai_response1111111
 
@@ -30,17 +34,14 @@ except:
 
 conn.close()
 #111111
-from pages import (admin_dashboard, setup, members, attendance, fee_collection, expenses, 
-                   whatsapp, auditor, user_management, reports, membership_card, progress, 
-                   inventory, complaints, message_center,
-)
 
 
 
 
 
 st.set_page_config(page_title="GymPro", page_icon="🏋️", layout="wide")
-db.init_db()
+def init_db():
+    db.init_db()
 styles.inject_css()
 
 # ----- SIMPLE FLOATING MUSIC PLAYER -----
@@ -77,19 +78,7 @@ add_floating_music_player()
 if not auth.require_login():
     auth.login_page()
     st.stop()
-# ya naya code ha bd ma sagid delete karna par jaye
-# Sahi tareeka:
-st.markdown("""
-    <link rel="manifest" href="manifest.json">
-    <script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/service-worker.js');
-    }
-    </script>
-""", unsafe_allow_html=True)
 
-
-# (Yahan woh import lines aur baki logic rakhein jo aapne pehle likha tha)
 # Sahi tareeqa: Har module ka naam likhein
 from pages import (
     admin_dashboard, 
@@ -108,6 +97,7 @@ from pages import (
     complaints, 
     message_center,
     ai_assistant,
+    staff_targets,  # 🆕 NEW: Staff Targets page
 )
 
 
@@ -147,6 +137,7 @@ from pages import (
     complaints,
     message_center,
     ai_assistant,
+    staff_targets,  # 🆕 NEW: Staff Targets page
 )
 
 role        = st.session_state.get("role", "staff")
@@ -194,7 +185,7 @@ with st.sidebar:
             list(gym_options.keys()),
             index=list(gym_options.keys()).index(cur_gym_key),
             label_visibility="collapsed",
-            key="main_gym_selector"  # <--- Yeh line error khatam kar degi
+            key="main_gym_selector"
         )
 
         st.session_state["selected_gym_id"] = gym_options[chosen_gym]
@@ -213,7 +204,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Navigation
     # Navigation
     allowed = auth.allowed_pages()
     nav_sections = {
@@ -235,6 +225,10 @@ with st.sidebar:
             "Expenses":          ("📉", "Expenses"),
             "Inventory":         ("📦", "Inventory"),
             "Reports":           ("📈", "Reports"),
+        },
+        # 🆕 NEW: Staff Targets Section
+        "Staff Management": {
+            "Staff Targets":     ("🎯", "Staff Targets"),
         },
         "Communication": {
             "Message Center":    ("📨", "Message Center"),
@@ -309,6 +303,13 @@ with st.sidebar:
 
 
     st.divider()
+    # ── Persistent AI chat widget ──────────────────────────────────────────────
+    ai_assistant.render_sidebar_widget(
+        current_page=st.session_state.get("page", "Dashboard"),
+        gym_id=gym_id,
+    )
+
+    st.divider()
     if st.button("🚪 Sign Out", use_container_width=True):
         auth.logout()
 
@@ -324,8 +325,7 @@ if not auth.can_access(page):
 gid = st.session_state.get("selected_gym_id")
 
 if   page == "Dashboard":
-    admin_dashboard.render(gid, role,)
-
+    admin_dashboard.render(gid, role, username)  # ✅ Fixed - 2 arguments
 
 elif page == "Gym Setup":        setup.render()
 elif page == "Members":          members.render(gid, role)
@@ -335,12 +335,11 @@ elif page == "Progress Tracker": progress.render(gid, role)
 elif page == "Fee Collection":   fee_collection.render(gid, role, username)
 elif page == "Expenses":         expenses.render(gid, role, username)
 elif page == "Inventory":        inventory.render(gid, role)
-elif page == "Reports":          reports.render(gid, role)
+elif page == "Reports":          reports.render(gid, role, username)
 elif page == "Message Center":   message_center.render(gid, role)
 elif page == "WhatsApp":         whatsapp.render(gid, role)
 elif page == "Complaints":       complaints.render(gid, role)
 elif page == "Audit":            auditor.render(gid, role, username)
 elif page == "User Management":  user_management.render(user_id)
-elif page == "AI Assistant":
-    st.write("DEBUG: AI PAGE OPENED")
-    ai_assistant.render(gid, role)
+elif page == "AI Assistant":     ai_assistant.render(gid, role)
+elif page == "Staff Targets":    staff_targets.render(gid, role, username)

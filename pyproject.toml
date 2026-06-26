@@ -10,6 +10,7 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "sqlalchemy>=2.0.49",
     "streamlit>=1.57.0",
-    "pydub>=0.25.1",          # Ye line add karein
-    "SpeechRecognition>=3.10.0" # Ye line add karein
+    "pydub>=0.25.1", # Ye line add karein # Ye line add karein
+    "SpeechRecognition>=3.10.0",
+    "requests>=2.33.1",
 ]

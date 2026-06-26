@@ -111,7 +111,10 @@ class Gym(Base):
     stock_items = relationship("StockItem", back_populates="gym", cascade="all, delete-orphan")
     stock_sales = relationship("StockSale", back_populates="gym", cascade="all, delete-orphan")
     complaints = relationship("Complaint", back_populates="gym", cascade="all, delete-orphan")
-
+    
+    # 🔥 ADD THIS LINE - Staff Targets relationship
+    staff_targets = relationship("StaffTarget", back_populates="gym", cascade="all, delete-orphan")
+    announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -357,10 +360,53 @@ def _ensure_column(table: str, column: str, ddl: str):
 
 def init_db():
     Base.metadata.create_all(engine)
-    _ensure_column("members",     "whatsapp_sent",
+    _ensure_column("members", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
     _ensure_column("fee_records", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
+
+# 🔥 Create StaffAttendance table
+    try:
+        StaffAttendance.__table__.create(engine, checkfirst=True)
+    except:
+        pass
+    
+    
+    # 🔥 ADD THIS - Announcement table create
+    try:
+        Announcement.__table__.create(engine, checkfirst=True)
+    except:
+        pass
+    
+    # 🔥 ADD THIS - Ensure announcement columns exist (PostgreSQL)
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            # Check if table exists, if not create it
+            if IS_POSTGRES:
+                result = conn.execute(text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'announcements'
+                    )
+                """))
+                if not result.fetchone()[0]:
+                    # Create table
+                    conn.execute(text("""
+                        CREATE TABLE announcements (
+                            id SERIAL PRIMARY KEY,
+                            gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                            message TEXT NOT NULL,
+                            is_active BOOLEAN DEFAULT TRUE,
+                            created_by VARCHAR(60),
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            expires_at TIMESTAMP
+                        )
+                    """))
+                    conn.commit()
+                    print("✅ Announcements table created")
+    except Exception as e:
+        print(f"⚠️ Announcement table creation error: {e}")
 
     seeds = [
         ("admin",   "Administrator", "admin",   "ADMIN_DEFAULT_PASSWORD",   "admin123"),
@@ -1562,5 +1608,809 @@ def get_todays_fees(gym_id):
     except Exception as e:
         print(f"DEBUG Error in get_todays_fees: {e}")
         return []
+    finally:
+        db.close()
+
+# ====================
+# ============================================
+# ============================================
+# STAFF TARGET SYSTEM - COMPLETE (FIXED)
+# ============================================
+
+class StaffTarget(Base):
+    __tablename__ = "staff_targets"
+    __table_args__ = {'extend_existing': True}
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    staff_username = Column(String(60), nullable=False)
+    
+    # Target Types (No target_type column)
+    new_members_target = Column(Float, default=0.0)
+    new_members_achieved = Column(Float, default=0.0)
+    fee_collection_target = Column(Float, default=0.0)
+    fee_collection_achieved = Column(Float, default=0.0)
+    attendance_target_percentage = Column(Float, default=80.0)
+    attendance_achieved = Column(Float, default=0.0)
+    
+    # Overall
+    total_score = Column(Float, default=0.0)
+    prize_amount = Column(Float, default=0.0)
+    prize_status = Column(String(20), default="Pending")
+    
+    target_month = Column(String(7), nullable=False)
+    status = Column(String(20), default="Active")
+    created_by = Column(String(60))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    gym = relationship("Gym", back_populates="staff_targets")
+
+
+# ============================================
+# STAFF TARGET FUNCTIONS
+# ============================================
+
+def add_staff_target(gym_id, staff_username, new_members_target, fee_collection_target, 
+                     attendance_target_percentage, target_month, created_by, prize_amount=0):
+    """Add complete targets for a staff member"""
+    db = get_db()
+    try:
+        existing = db.query(StaffTarget).filter(
+            StaffTarget.gym_id == gym_id,
+            StaffTarget.staff_username == staff_username,
+            StaffTarget.target_month == target_month
+        ).first()
+        
+        if existing:
+            return False, f"Target already exists for {staff_username} this month"
+        
+        target = StaffTarget(
+            gym_id=gym_id,
+            staff_username=staff_username,
+            new_members_target=new_members_target,
+            fee_collection_target=fee_collection_target,
+            attendance_target_percentage=attendance_target_percentage,
+            target_month=target_month,
+            created_by=created_by,
+            prize_amount=prize_amount,
+            status="Active"
+        )
+        db.add(target)
+        db.commit()
+        return True, "Targets added successfully"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_staff_targets(gym_id=None, staff_username=None, target_month=None):
+    """Get targets for staff"""
+    db = get_db()
+    try:
+        query = db.query(StaffTarget)
+        if gym_id:
+            query = query.filter(StaffTarget.gym_id == gym_id)
+        if staff_username:
+            query = query.filter(StaffTarget.staff_username == staff_username)
+        if target_month:
+            query = query.filter(StaffTarget.target_month == target_month)
+        return query.order_by(StaffTarget.created_at.desc()).all()
+    finally:
+        db.close()
+
+
+def get_all_staff_targets(gym_id=None, target_month=None):
+    """Get targets for all staff (for history page)"""
+    db = get_db()
+    try:
+        query = db.query(StaffTarget)
+        if gym_id:
+            query = query.filter(StaffTarget.gym_id == gym_id)
+        if target_month:
+            query = query.filter(StaffTarget.target_month == target_month)
+        return query.order_by(StaffTarget.created_at.desc()).all()
+    finally:
+        db.close()
+
+
+def get_staff_target(staff_username, target_month=None):
+    """Get complete target for a staff member"""
+    if not target_month:
+        target_month = date.today().strftime("%Y-%m")
+    
+    db = get_db()
+    try:
+        target = db.query(StaffTarget).filter(
+            StaffTarget.staff_username == staff_username,
+            StaffTarget.target_month == target_month
+        ).first()
+        
+        if not target:
+            return None
+        
+        # Get total active members
+        total_members = db.query(Member).filter_by(gym_id=target.gym_id, status="Active").count()
+        
+        # Calculate attendance target from percentage
+        attendance_target_count = (target.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
+        
+        # Calculate percentages
+        new_members_pct = (target.new_members_achieved / target.new_members_target * 100) if target.new_members_target > 0 else 0
+        fee_pct = (target.fee_collection_achieved / target.fee_collection_target * 100) if target.fee_collection_target > 0 else 0
+        attendance_pct = (target.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
+        
+        overall_pct = (new_members_pct + fee_pct + attendance_pct) / 3
+        
+        return {
+            'target': target,
+            'total_members': total_members,
+            'attendance_target_percentage': target.attendance_target_percentage,
+            'attendance_target_count': attendance_target_count,
+            'new_members': {'target': target.new_members_target, 'achieved': target.new_members_achieved, 'percentage': min(100, new_members_pct)},
+            'fee_collection': {'target': target.fee_collection_target, 'achieved': target.fee_collection_achieved, 'percentage': min(100, fee_pct)},
+            'attendance': {'target': attendance_target_count, 'achieved': target.attendance_achieved, 'percentage': min(100, attendance_pct)},
+            'overall': min(100, overall_pct),
+            'total_score': target.total_score,
+            'prize_amount': target.prize_amount,
+            'prize_status': target.prize_status,
+            'status': target.status,
+        }
+    finally:
+        db.close()
+
+
+def update_staff_achievement(staff_username, target_type, achieved_value, target_month=None):
+    """Update achieved value for staff"""
+    db = get_db()
+    try:
+        if not target_month:
+            target_month = date.today().strftime("%Y-%m")
+        
+        target = db.query(StaffTarget).filter(
+            StaffTarget.staff_username == staff_username,
+            StaffTarget.target_month == target_month,
+            StaffTarget.status == "Active"
+        ).first()
+        
+        if not target:
+            return False, "No active target found"
+        
+        if target_type == "new_members":
+            target.new_members_achieved += achieved_value
+        elif target_type == "fee_collection":
+            target.fee_collection_achieved += achieved_value
+        elif target_type == "attendance":
+            target.attendance_achieved += achieved_value
+        
+        # Calculate attendance target from percentage
+        total_members = db.query(Member).filter_by(gym_id=target.gym_id, status="Active").count()
+        attendance_target_count = (target.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
+        
+        # Calculate total score
+        target.total_score = (
+            (target.new_members_achieved / target.new_members_target * 100) if target.new_members_target > 0 else 0 +
+            (target.fee_collection_achieved / target.fee_collection_target * 100) if target.fee_collection_target > 0 else 0 +
+            (target.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
+        ) / 3
+        
+        # Check if all targets completed
+        if (target.new_members_achieved >= target.new_members_target and
+            target.fee_collection_achieved >= target.fee_collection_target and
+            target.attendance_achieved >= attendance_target_count and
+            target.new_members_target > 0 and target.fee_collection_target > 0 and attendance_target_count > 0):
+            target.status = "Completed"
+            target.prize_status = "Awarded"
+        
+        db.commit()
+        return True, "Achievement updated"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_all_staff_progress(gym_id=None, target_month=None):
+    """Get progress for all staff members"""
+    if not target_month:
+        target_month = date.today().strftime("%Y-%m")
+    
+    all_users = get_all_users()
+    if gym_id:
+        all_users = [u for u in all_users if u.gym_id == gym_id]
+    
+    results = []
+    for user in all_users:
+        if user.role.lower() == "admin":
+            continue
+        progress = get_staff_target(user.username, target_month)
+        
+        if progress:
+            results.append({
+                'username': user.username,
+                'full_name': user.full_name,
+                'role': user.role,
+                'progress': progress,
+                'is_active': user.is_active
+            })
+        else:
+            results.append({
+                'username': user.username,
+                'full_name': user.full_name,
+                'role': user.role,
+                'progress': None,
+                'is_active': user.is_active
+            })
+    
+    return results
+
+
+def delete_staff_target(target_id):
+    """Delete a staff target"""
+    db = get_db()
+    try:
+        target = db.query(StaffTarget).filter(StaffTarget.id == target_id).first()
+        if target:
+            db.delete(target)
+            db.commit()
+            return True, "Target deleted"
+        return False, "Target not found"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_staff_progress(staff_username, target_month=None):
+    """Get complete progress for a staff member"""
+    if not target_month:
+        target_month = date.today().strftime("%Y-%m")
+    
+    db_session = get_db()
+    try:
+        target = db_session.query(StaffTarget).filter(
+            StaffTarget.staff_username == staff_username,
+            StaffTarget.target_month == target_month
+        ).first()
+        
+        progress = {
+            'new_members': {'target': 0, 'achieved': 0, 'percentage': 0},
+            'fee_collection': {'target': 0, 'achieved': 0, 'percentage': 0},
+            'attendance': {'target': 0, 'achieved': 0, 'percentage': 0},
+            'overall': 0,
+            'total_targets': 0,
+            'completed_targets': 0,
+            'prize_amount': 0,
+            'prize_status': 'Pending',
+            'status': 'Active',
+            'attendance_target_percentage': 80,
+            'attendance_target_count': 0,
+            'total_members': 0,
+        }
+        
+        if target:
+            # New Members
+            progress['new_members']['target'] = target.new_members_target or 0
+            progress['new_members']['achieved'] = target.new_members_achieved or 0
+            if target.new_members_target > 0:
+                progress['new_members']['percentage'] = min(100, (target.new_members_achieved / target.new_members_target) * 100)
+            
+            # Fee Collection
+            progress['fee_collection']['target'] = target.fee_collection_target or 0
+            progress['fee_collection']['achieved'] = target.fee_collection_achieved or 0
+            if target.fee_collection_target > 0:
+                progress['fee_collection']['percentage'] = min(100, (target.fee_collection_achieved / target.fee_collection_target) * 100)
+            
+            # Attendance
+            progress['attendance_target_percentage'] = target.attendance_target_percentage or 80
+            progress['attendance']['achieved'] = target.attendance_achieved or 0
+            
+            total_members = db_session.query(Member).filter_by(gym_id=target.gym_id, status="Active").count()
+            progress['total_members'] = total_members
+            attendance_target_count = (target.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
+            progress['attendance']['target'] = attendance_target_count
+            progress['attendance_target_count'] = attendance_target_count
+            
+            if attendance_target_count > 0:
+                progress['attendance']['percentage'] = min(100, (target.attendance_achieved / attendance_target_count) * 100)
+            
+            progress['total_targets'] = 3
+            if target.status == "Completed":
+                progress['completed_targets'] = 3
+            
+            progress['prize_amount'] = target.prize_amount or 0
+            progress['prize_status'] = target.prize_status or 'Pending'
+            progress['status'] = target.status or 'Active'
+            
+            total_pct = progress['new_members']['percentage'] + progress['fee_collection']['percentage'] + progress['attendance']['percentage']
+            progress['overall'] = total_pct / 3
+        
+        return progress
+    finally:
+        db_session.close()
+
+# ============================================
+# ANNOUNCEMENT SYSTEM
+# ============================================
+
+class Announcement(Base):
+    __tablename__ = "announcements"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=True)
+    message = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(String(60))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+
+    gym = relationship("Gym", back_populates="announcements")
+
+
+# Add relationship to Gym model (find Gym class and add this line)
+# Inside Gym class, add: announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
+
+
+def add_announcement(gym_id, message, created_by, expires_at=None):
+    """Add a new announcement"""
+    db = get_db()
+    try:
+        # Deactivate old announcements
+        db.query(Announcement).filter(
+            Announcement.gym_id == gym_id,
+            Announcement.is_active == True
+        ).update({Announcement.is_active: False})
+        
+        announcement = Announcement(
+            gym_id=gym_id,
+            message=message,
+            created_by=created_by,
+            expires_at=expires_at,
+            is_active=True
+        )
+        db.add(announcement)
+        db.commit()
+        return True, "Announcement added successfully"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_active_announcement(gym_id=None):
+    """Get active announcement for gym"""
+    db = get_db()
+    try:
+        query = db.query(Announcement).filter(
+            Announcement.is_active == True
+        )
+        if gym_id:
+            query = query.filter(Announcement.gym_id == gym_id)
+        else:
+            query = query.filter(Announcement.gym_id == None)
+        
+        # Check expiry
+        now = datetime.utcnow()
+        query = query.filter(
+            (Announcement.expires_at == None) | (Announcement.expires_at > now)
+        )
+        
+        return query.order_by(Announcement.created_at.desc()).first()
+    finally:
+        db.close()
+
+
+def get_all_announcements(gym_id=None):
+    """Get all announcements for gym"""
+    db = get_db()
+    try:
+        query = db.query(Announcement)
+        if gym_id:
+            query = query.filter(Announcement.gym_id == gym_id)
+        return query.order_by(Announcement.created_at.desc()).all()
+    finally:
+        db.close()
+
+
+def delete_announcement(announcement_id):
+    """Delete an announcement"""
+    db = get_db()
+    try:
+        announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+        if announcement:
+            db.delete(announcement)
+            db.commit()
+            return True, "Announcement deleted"
+        return False, "Announcement not found"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+# ============================================
+# STAFF ATTENDANCE TRACKING
+# ============================================
+
+class StaffAttendance(Base):
+    __tablename__ = "staff_attendance"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    staff_username = Column(String(60), nullable=False)
+    login_time = Column(DateTime, nullable=False)
+    logout_time = Column(DateTime, nullable=True)
+    session_duration = Column(Integer, default=0)  # Minutes
+    ip_address = Column(String(45))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+def log_staff_login(staff_username, ip_address=None):
+    """Log staff login time"""
+    db = get_db()
+    try:
+        today = date.today()
+        existing = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today,
+            StaffAttendance.logout_time == None
+        ).first()
+        
+        if existing:
+            return False, "Staff already logged in today"
+        
+        attendance = StaffAttendance(
+            staff_username=staff_username,
+            login_time=datetime.utcnow(),
+            ip_address=ip_address
+        )
+        db.add(attendance)
+        db.commit()
+        return True, "Login recorded"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def log_staff_logout(staff_username):
+    """Log staff logout time"""
+    db = get_db()
+    try:
+        today = date.today()
+        record = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today,
+            StaffAttendance.logout_time == None
+        ).order_by(StaffAttendance.login_time.desc()).first()
+        
+        if not record:
+            return False, "No active session found"
+        
+        record.logout_time = datetime.utcnow()
+        duration = (record.logout_time - record.login_time).seconds // 60
+        record.session_duration = duration
+        db.commit()
+        return True, f"Logout recorded (Duration: {duration} minutes)"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_staff_attendance(staff_username=None, date_from=None, date_to=None):
+    """Get staff attendance records"""
+    db = get_db()
+    try:
+        query = db.query(StaffAttendance)
+        if staff_username:
+            query = query.filter(StaffAttendance.staff_username == staff_username)
+        if date_from:
+            query = query.filter(StaffAttendance.login_time >= date_from)
+        if date_to:
+            query = query.filter(StaffAttendance.login_time <= date_to)
+        return query.order_by(StaffAttendance.login_time.desc()).all()
+    finally:
+        db.close()
+
+
+def get_staff_attendance_summary(gym_id=None, date_range=30):
+    """Get staff attendance summary for all staff"""
+    db = get_db()
+    try:
+        # Get all staff (excluding admin)
+        staff_list = db.query(User).filter(User.role != "admin")
+        if gym_id:
+            staff_list = staff_list.filter(User.gym_id == gym_id)
+        staff_list = staff_list.all()
+        
+        today = date.today()
+        date_from = today - timedelta(days=date_range)
+        
+        results = []
+        for staff in staff_list:
+            # Get login count in date range
+            logins = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                StaffAttendance.login_time >= date_from
+            ).count()
+            
+            # Get today's status
+            today_record = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                func.date(StaffAttendance.login_time) == today,
+                StaffAttendance.logout_time == None
+            ).first()
+            
+            status = "🟢 Online" if today_record else "⚪ Offline"
+            
+            # Get total hours this month
+            month_start = today.replace(day=1)
+            month_records = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                StaffAttendance.login_time >= month_start,
+                StaffAttendance.logout_time != None
+            ).all()
+            
+            total_minutes = sum(r.session_duration or 0 for r in month_records)
+            total_hours = total_minutes // 60
+            
+            results.append({
+                'username': staff.username,
+                'full_name': staff.full_name,
+                'role': staff.role,
+                'logins': logins,
+                'status': status,
+                'total_hours': total_hours,
+                'today_status': "✅ Logged In" if today_record else "⏳ Not Logged In"
+            })
+        
+        return results
+    finally:
+        db.close()
+
+
+def get_my_attendance_summary(staff_username):
+    """Get attendance summary for a specific staff member"""
+    db = get_db()
+    try:
+        today = date.today()
+        month_start = today.replace(day=1)
+        
+        # Today's record
+        today_record = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today
+        ).first()
+        
+        # This month records
+        month_records = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            StaffAttendance.login_time >= month_start
+        ).all()
+        
+        total_days = len(month_records)
+        total_minutes = sum(r.session_duration or 0 for r in month_records)
+        total_hours = total_minutes // 60
+        
+        # Last 7 days
+        week_start = today - timedelta(days=7)
+        week_records = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            StaffAttendance.login_time >= week_start
+        ).all()
+        
+        return {
+            'today_status': "✅ Logged In" if today_record and today_record.logout_time is None else "⏳ Not Logged In",
+            'today_login': today_record.login_time.strftime('%I:%M %p') if today_record else None,
+            'total_days': total_days,
+            'total_hours': total_hours,
+            'week_days': len(week_records),
+            'current_streak': _get_attendance_streak(staff_username)
+        }
+    finally:
+        db.close()
+
+
+def _get_attendance_streak(staff_username):
+    """Calculate continuous attendance streak"""
+    db = get_db()
+    try:
+        streak = 0
+        check_date = date.today()
+        
+        for _ in range(365):
+            record = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff_username,
+                func.date(StaffAttendance.login_time) == check_date
+            ).first()
+            
+            if record:
+                streak += 1
+                check_date -= timedelta(days=1)
+            else:
+                break
+        
+        return streak
+    finally:
+        db.close()
+
+# ============================================
+# COMPLETE STAFF ATTENDANCE FIX
+# ============================================
+
+# database.py mein add karein
+
+def check_and_update_staff_status():
+    """Check all staff and update status"""
+    db = get_db()
+    try:
+        today = date.today()
+        now = datetime.utcnow()
+        timeout = timedelta(hours=2)  # 2 hours timeout
+        
+        # Get all active sessions
+        active_sessions = db.query(StaffAttendance).filter(
+            func.date(StaffAttendance.login_time) == today,
+            StaffAttendance.logout_time == None
+        ).all()
+        
+        updated_count = 0
+        for session in active_sessions:
+            # Check if session is expired (no activity for 2 hours)
+            if (now - session.login_time) > timeout:
+                session.logout_time = now
+                session.session_duration = (session.logout_time - session.login_time).seconds // 60
+                updated_count += 1
+        
+        db.commit()
+        return updated_count
+    except Exception as e:
+        db.rollback()
+        return 0
+    finally:
+        db.close()
+
+
+def get_staff_attendance_summary(gym_id=None, date_range=30):
+    """Get staff attendance summary (with auto logout check)"""
+    # 🔥 First check and update inactive staff
+    check_and_update_staff_status()
+    
+    db = get_db()
+    try:
+        # Get all staff (excluding admin)
+        staff_list = db.query(User).filter(User.role != "admin")
+        if gym_id:
+            staff_list = staff_list.filter(User.gym_id == gym_id)
+        staff_list = staff_list.all()
+        
+        today = date.today()
+        date_from = today - timedelta(days=date_range)
+        
+        results = []
+        for staff in staff_list:
+            # Get login count in date range
+            logins = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                StaffAttendance.login_time >= date_from
+            ).count()
+            
+            # Get today's status (after auto-logout check)
+            today_record = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                func.date(StaffAttendance.login_time) == today,
+                StaffAttendance.logout_time == None
+            ).first()
+            
+            status = "🟢 Online" if today_record else "⚪ Offline"
+            
+            # Get total hours this month
+            month_start = today.replace(day=1)
+            month_records = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff.username,
+                StaffAttendance.login_time >= month_start,
+                StaffAttendance.logout_time != None
+            ).all()
+            
+            total_minutes = sum(r.session_duration or 0 for r in month_records)
+            total_hours = total_minutes // 60
+            
+            results.append({
+                'username': staff.username,
+                'full_name': staff.full_name,
+                'role': staff.role,
+                'logins': logins,
+                'status': status,
+                'total_hours': total_hours,
+                'today_status': "✅ Logged In" if today_record else "⏳ Not Logged In"
+            })
+        
+        return results
+    finally:
+        db.close()
+
+
+def get_my_attendance_summary(staff_username):
+    """Get attendance summary for a specific staff member"""
+    # 🔥 Check and update this staff's status
+    db = get_db()
+    try:
+        today = date.today()
+        now = datetime.utcnow()
+        timeout = timedelta(hours=2)
+        
+        # Check if this staff has an active session
+        active = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today,
+            StaffAttendance.logout_time == None
+        ).first()
+        
+        # Auto logout if inactive
+        if active and (now - active.login_time) > timeout:
+            active.logout_time = now
+            active.session_duration = (active.logout_time - active.login_time).seconds // 60
+            db.commit()
+        
+        # Now get the summary
+        month_start = today.replace(day=1)
+        
+        today_record = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today
+        ).first()
+        
+        month_records = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            StaffAttendance.login_time >= month_start
+        ).all()
+        
+        total_days = len(month_records)
+        total_minutes = sum(r.session_duration or 0 for r in month_records)
+        total_hours = total_minutes // 60
+        
+        week_start = today - timedelta(days=7)
+        week_records = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            StaffAttendance.login_time >= week_start
+        ).all()
+        
+        return {
+            'today_status': "✅ Logged In" if today_record and today_record.logout_time is None else "⏳ Not Logged In",
+            'today_login': today_record.login_time.strftime('%I:%M %p') if today_record else None,
+            'total_days': total_days,
+            'total_hours': total_hours,
+            'week_days': len(week_records),
+            'current_streak': _get_attendance_streak(staff_username)
+        }
+    finally:
+        db.close()
+
+
+def _get_attendance_streak(staff_username):
+    """Calculate continuous attendance streak"""
+    db = get_db()
+    try:
+        streak = 0
+        check_date = date.today()
+        
+        for _ in range(365):
+            record = db.query(StaffAttendance).filter(
+                StaffAttendance.staff_username == staff_username,
+                func.date(StaffAttendance.login_time) == check_date
+            ).first()
+            
+            if record:
+                streak += 1
+                check_date -= timedelta(days=1)
+            else:
+                break
+        
+        return streak
     finally:
         db.close()

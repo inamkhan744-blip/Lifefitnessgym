@@ -1,0 +1,69 @@
+"Mera GymPro PWA software Replit par chal raha hai. Ye sab maslay hain, ek saath fix karo:
+
+🔴 **Critical Issues:**
+1. App open hoti hai lekin kuch pages slow load hotay hain
+2. Offline mode kabhi kabhi kaam nahi karta
+3. Attendance QR code scan nahi ho raha
+4. WhatsApp bulk messages bhejte error aata hai
+5. Reports generate karte time loading bahut zyada hai
+6. Face Recognition attendance kaam nahi kar raha
+7. **API Server alag se chal raha hai, proxy ke saath conflict ho raha hai** ❗
+8. **Workflows sahi se configure nahi hain** ❗
+
+🟡 **Minor Issues:**
+9. Music player har page pe reload ho jata hai
+10. AI Assistant kabhi kabhi response nahi deta
+11. Fee collection mein partial payment save nahi ho rahi
+12. Membership cards print nahi ho rahe
+13. Inventory stock update mein delay hai
+
+⚙️ **Technical Issues - API Server:**
+- `artifacts/api-server` folder mein API server chal raha hai
+- Yeh port 8080/8082 par chal raha hai
+- Proxy server (run.py) port 8083 par hai
+- Dono ek saath conflict kar rahe hain
+- API server ko proxy ke through route karna hai
+- Ya phir API server ko hi proxy banana hai
+
+⚙️ **Technical Issues - Workflows:**
+- Replit Workflows sahi se configure nahi hain
+- `cd gym-app && python run.py` command kaam kar rahi hai
+- Lekin workflows mein port mapping sahi nahi hai
+- Auto-start sahi se nahi ho raha
+- Environment variables sahi set nahi hain
+
+🤖 **Face Recognition:**
+- Camera access kaam nahi kar raha
+- Face capture ke baad save nahi ho raha
+- Attendance mark karte time face match nahi ho raha
+- Face dataset train nahi ho raha
+
+💾 **Data Safe Rakho:**
+- 96 members, 4 gyms, fees records sab safe rakhna
+- Face data (images/encodings) bhi safe rakhna
+- Database backup pehle karna
+
+✅ **Checklist:**
+- [ ] Sab pages fast load hon
+- [ ] Offline mode 100% kaam kare
+- [ ] QR scan kaam kare
+- [ ] Face recognition kaam kare 📸
+- [ ] WhatsApp kaam kare
+- [ ] Reports generate hon
+- [ ] Music player sahi chale
+- [ ] AI Assistant sahi jawab de
+- [ ] Payments save hon
+- [ ] Membership cards print hon
+- [ ] Inventory update ho
+- [ ] API Server proxy ke saath merge ho jaye
+- [ ] Workflows sahi se configure ho jaye
+- [ ] Auto-start kaam kare
+
+🔧 **Solutions:**
+1. API Server ko `run.py` mein merge karo
+2. Ya API Server ko subprocess mein chalao
+3. Workflows mein ports sahi set karo
+4. `.replit` file update karo
+5. `replit.nix` dependencies update karo
+
+**Pehle backup lo, phir fixes karo, data mat delete karna!** "
