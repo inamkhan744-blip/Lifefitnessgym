@@ -14,6 +14,21 @@ from pages import (
     # ... other imports
     staff_targets,  # ✅ Yeh hona chahiye
 )
+
+import streamlit as st
+from datetime import datetime, timedelta
+
+# 👇 YEH 4 LINES ADD KAREIN
+if "last_activity" not in st.session_state:
+    st.session_state.last_activity = datetime.now()
+else:
+    if datetime.now() - st.session_state.last_activity > timedelta(hours=24):
+        st.session_state.clear()
+        st.warning("⏰ Session expired. Please login again.")
+        st.rerun()
+        st.stop()
+    else:
+        st.session_state.last_activity = datetime.now()
 # -----------------------------------------
 #get_ai_response1111111
 
