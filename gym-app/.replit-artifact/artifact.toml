@@ -1,0 +1,15 @@
+kind = "web"
+previewPath = "/"
+title = "GymPro"
+version = "1.0.0"
+
+[[services]]
+localPort = 5000
+name = "GymPro App"
+paths = ["/"]
+
+[services.development]
+run = "cd /home/runner/workspace/gym-app && python run.py"
+
+[services.production]
+run = "cd /home/runner/workspace/gym-app && python run.py"

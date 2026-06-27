@@ -1,0 +1,1 @@
+- [GymPro deployment fix](gymro-deployment.md) — Python app in pnpm workspace needs artifact.toml created via bash; verifyAndReplaceArtifactToml cannot create new files or change id/version fields.
