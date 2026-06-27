@@ -1,202 +1,194 @@
-# printer_utils.py
+# printer_utils.py - Replit/Linux version
 import os
 import subprocess
 import tempfile
 from datetime import datetime
-import streamlit as st
 import uuid
 
 class ReceiptPrinter:
     def __init__(self, printer_name="BC-87AC"):
         self.printer_name = printer_name
-        self._check_printer()
     
     def _check_printer(self):
-        """Check if printer is available"""
+        """Check if printer is available on Linux"""
         try:
-            if os.name == 'nt':  # Windows
-                result = subprocess.run(
-                    ['wmic', 'printer', 'get', 'name'],
-                    capture_output=True, text=True
-                )
-                if self.printer_name not in result.stdout:
-                    # Try to find any thermal printer
-                    for line in result.stdout.split('\n'):
-                        if 'thermal' in line.lower() or 'pos' in line.lower() or '80mm' in line.lower():
-                            self.printer_name = line.strip()
-                            return True
-                    return False
-            return True
+            # Check CUPS printers
+            result = subprocess.run(
+                ['lpstat', '-p', '-d'],
+                capture_output=True, text=True, timeout=5
+            )
+            if 'printer' in result.stdout.lower():
+                return True
+            
+            # Check USB devices
+            result = subprocess.run(
+                ['ls', '/dev/usb/lp*'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
         except:
             return False
     
-    def print_dual_copies(self, data):
-        """Print 2 copies - Member copy and Gym copy"""
-        
-        receipt_no = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
-        data['receipt_no'] = receipt_no
-        
-        # === MEMBER COPY ===
-        member_receipt = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-║           📍 {data.get('gym_address', '123 Main St'):^33} ║
-║           📞 {data.get('gym_phone', '+92-300-1234567'):^33} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 MEMBER COPY                              ║
-║   RECEIPT #: {receipt_no:<27} ║
-║   DATE: {data.get('date', datetime.now().strftime('%Y-%m-%d')):<30} ║
-║   TIME: {data.get('time', datetime.now().strftime('%I:%M %p')):<30} ║
-║   COLLECTED BY: {data.get('collected_by', 'Staff'):<23} ║
-║                                               ║
-║   ─── MEMBER DETAILS ───                      ║
-║   Name: {data.get('member_name', 'N/A'):<32} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Phone: {data.get('phone', 'N/A'):<30}      ║
-║                                               ║
-║   ─── PAYMENT DETAILS ───                     ║
-║   Amount: PKR {data.get('amount', 0):>14,.2f} ║
-║   Method: {data.get('method', 'Cash'):<30}    ║
-║   Status: ✅ PAID                             ║
-║                                               ║
-║   ─── MEMBERSHIP ───                         ║
-║   Valid From: {data.get('period_start', 'N/A'):<24} ║
-║   Valid Till: {data.get('period_end', 'N/A'):<26} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║          💪 Thank you for your payment!       ║
-║          🏷️ KEEP THIS COPY WITH YOU          ║
-║                                               ║
-║      ════════════════════════════════          ║
-║         Have a great workout! 🏋️             ║
-╚═══════════════════════════════════════════════╝
-"""
-
-        # === GYM COPY ===
-        gym_receipt = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 GYM COPY (OFFICE RECORD)                 ║
-║   RECEIPT #: {receipt_no:<27} ║
-║   DATE: {data.get('date', datetime.now().strftime('%Y-%m-%d')):<30} ║
-║   TIME: {data.get('time', datetime.now().strftime('%I:%M %p')):<30} ║
-║   COLLECTED BY: {data.get('collected_by', 'Staff'):<23} ║
-║                                               ║
-║   ─── MEMBER DETAILS ───                      ║
-║   Name: {data.get('member_name', 'N/A'):<32} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Phone: {data.get('phone', 'N/A'):<30}      ║
-║                                               ║
-║   ─── PAYMENT DETAILS ───                     ║
-║   Amount: PKR {data.get('amount', 0):>14,.2f} ║
-║   Method: {data.get('method', 'Cash'):<30}    ║
-║   Status: ✅ PAID                             ║
-║                                               ║
-║   ─── MEMBERSHIP ───                         ║
-║   Valid From: {data.get('period_start', 'N/A'):<24} ║
-║   Valid Till: {data.get('period_end', 'N/A'):<26} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║          🏢 GYM OFFICE COPY                   ║
-║          Keep for record keeping              ║
-║                                               ║
-║      ════════════════════════════════          ║
-║         Payment recorded in system            ║
-╚═══════════════════════════════════════════════╝
-"""
-
-        # Print both copies
-        success1 = self._send_to_printer(member_receipt)
-        success2 = self._send_to_printer(gym_receipt)
-        
-        return success1 and success2
-    
-    def print_attendance(self, data):
-        """Print attendance slip"""
-        
-        slip = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 ATTENDANCE SLIP                          ║
-║                                               ║
-║   Member: {data.get('member_name', 'N/A'):<29} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Date: {data.get('date', datetime.now().strftime('%Y-%m-%d')):<30} ║
-║   Time: {data.get('time', datetime.now().strftime('%I:%M %p')):<30} ║
-║   Status: ✅ CHECKED IN                       ║
-║                                               ║
-║                                               ║
-║          ✅ Welcome to the gym!               ║
-║          💪 Have a great workout!             ║
-║                                               ║
-╚═══════════════════════════════════════════════╝
-"""
-        return self._send_to_printer(slip)
-    
-    def _send_to_printer(self, content):
-        """Send content to printer"""
+    def _send_raw(self, raw_data):
+        """Send raw ESC/POS data to printer"""
+        temp_file = None
         try:
-            if os.name == 'nt':  # Windows
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                    f.write(content)
-                    temp_file = f.name
-                
-                # Print using Notepad
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as f:
+                f.write(raw_data)
+                temp_file = f.name
+            
+            # Method 1: CUPS raw
+            try:
                 result = subprocess.run([
-                    'notepad', '/p', temp_file
+                    'lp', '-d', self.printer_name,
+                    '-o', 'raw',
+                    temp_file
                 ], capture_output=True, timeout=10)
-                
-                os.unlink(temp_file)
-                return result.returncode == 0
-            else:  # Linux/Mac
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                    f.write(content)
-                    temp_file = f.name
-                
+                if result.returncode == 0:
+                    return True
+            except:
+                pass
+            
+            # Method 2: Direct USB
+            try:
+                for device in ['/dev/usb/lp0', '/dev/usb/lp1', '/dev/ttyUSB0', '/dev/ttyUSB1']:
+                    if os.path.exists(device):
+                        with open(device, 'wb') as f:
+                            f.write(raw_data)
+                        return True
+            except:
+                pass
+            
+            # Method 3: lpr fallback
+            try:
                 result = subprocess.run([
-                    'lp', '-d', self.printer_name, temp_file
+                    'lpr', '-P', self.printer_name,
+                    temp_file
                 ], capture_output=True, timeout=10)
-                
-                os.unlink(temp_file)
                 return result.returncode == 0
+            except:
+                pass
+            
+            return False
+            
         except Exception as e:
             print(f"Print error: {e}")
             return False
-
-    def test_print(self):
-        """Test print to check printer connection"""
-        test_receipt = """
-╔═══════════════════════════════════════════════╗
-║                 TEST PRINT                    ║
-║                                               ║
-║   🖨️ Printer is working correctly!            ║
-║   ✅ Connection successful                    ║
-║                                               ║
-║   Date: {0}                                   ║
-║   Time: {1}                                   ║
-║                                               ║
-║   ════════════════════════════════             ║
-║         Print test successful!                ║
-╚═══════════════════════════════════════════════╝
-""".format(datetime.now().strftime('%Y-%m-%d'), datetime.now().strftime('%I:%M %p'))
+        finally:
+            try:
+                if temp_file and os.path.exists(temp_file):
+                    os.unlink(temp_file)
+            except:
+                pass
+    
+    def _build_receipt(self, data, copy_type="MEMBER COPY"):
+        """Build receipt content with ESC/POS commands"""
+        receipt_no = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
+        current_time = datetime.now().strftime('%I:%M %p')
         
-        return self._send_to_printer(test_receipt)
+        lines = [
+            "=" * 40,
+            f"{data.get('gym_name', 'FITNESS PRO'):^40}",
+            "🏋️ GYM & FITNESS CENTER",
+            "",
+            f"📍 {data.get('gym_address', 'Your Gym Address')}",
+            f"📞 {data.get('gym_phone', '+92-XXX-XXXXXXX')}",
+            "-" * 40,
+            "",
+            f"📋 {copy_type}",
+            f"RECEIPT #: {receipt_no}",
+            f"DATE: {data.get('date', datetime.now().strftime('%Y-%m-%d'))}",
+            f"TIME: {current_time}",
+            f"COLLECTED BY: {data.get('collected_by', 'Staff')}",
+            "",
+            "─── MEMBER DETAILS ───",
+            f"Name: {data.get('member_name', 'N/A')}",
+            f"Serial: {data.get('serial', 'N/A')}",
+            f"Phone: {data.get('phone', 'N/A')}",
+            "",
+            "─── PAYMENT DETAILS ───",
+            f"Amount: PKR {data.get('amount', 0):,.2f}",
+            f"Method: {data.get('method', 'Cash')}",
+            "Status: ✅ PAID",
+            "",
+            "─── MEMBERSHIP ───",
+            f"Valid From: {data.get('period_start', 'N/A')}",
+            f"Valid Till: {data.get('period_end', 'N/A')}",
+            "",
+            "=" * 40,
+            "",
+            "💪 Thank you! Keep this copy." if copy_type == "MEMBER COPY" else "🏢 GYM OFFICE COPY",
+            "=" * 40,
+            "",
+        ]
+        return lines
+    
+    def print_dual_copies(self, data):
+        """Print 2 copies"""
+        data['receipt_no'] = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
+        
+        # ESC/POS commands
+        init = b'\x1B\x40'
+        align_center = b'\x1B\x61\x01'
+        cut = b'\x1B\x6D'
+        
+        raw_data = init + align_center
+        
+        # Member copy
+        for line in self._build_receipt(data, "MEMBER COPY"):
+            raw_data += (line + "\n").encode('utf-8')
+        raw_data += cut + b'\x0C'
+        
+        # Gym copy
+        for line in self._build_receipt(data, "GYM COPY"):
+            raw_data += (line + "\n").encode('utf-8')
+        raw_data += cut
+        
+        return self._send_raw(raw_data)
+    
+    def print_single_copy(self, data):
+        """Print single copy"""
+        data['receipt_no'] = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
+        
+        init = b'\x1B\x40'
+        align_center = b'\x1B\x61\x01'
+        cut = b'\x1B\x6D'
+        
+        raw_data = init + align_center
+        for line in self._build_receipt(data, "MEMBER COPY"):
+            raw_data += (line + "\n").encode('utf-8')
+        raw_data += cut
+        
+        return self._send_raw(raw_data)
+    
+    def test_print(self):
+        """Test print"""
+        init = b'\x1B\x40'
+        align_center = b'\x1B\x61\x01'
+        cut = b'\x1B\x6D'
+        
+        lines = [
+            "=" * 40,
+            "TEST PRINT",
+            "",
+            "🖨️ Printer is working correctly!",
+            "✅ Connection successful",
+            "",
+            f"Date: {datetime.now().strftime('%Y-%m-%d')}",
+            f"Time: {datetime.now().strftime('%I:%M %p')}",
+            "",
+            "=" * 40,
+        ]
+        
+        raw_data = init + align_center
+        for line in lines:
+            raw_data += (line + "\n").encode('utf-8')
+        raw_data += cut
+        
+        return self._send_raw(raw_data)
 
-# Global printer instance
+# Global instance
 _printer = None
 
 def get_printer():
