@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/gym-pro/"
+title = "GymPro"
+version = "1.0.0"
+id = "artifacts/gym-pro"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/gym-pro/" ]
+localPort = 20141
+
+[services.development]
+run = "pnpm --filter @workspace/gym-pro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gym-pro", "run", "build" ]
+publicDir = "artifacts/gym-pro/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20141"
+BASE_PATH = "/gym-pro/"
