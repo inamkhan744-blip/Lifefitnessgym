@@ -1,24 +1,16 @@
 import streamlit as st
-import sqlite3
 import sys
 import os
+import base64
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(__file__))
-
 
 import database as db
 import auth
 import styles
-import base64
-from pages import (
-    # ... other imports
-    staff_targets,  # ✅ Yeh hona chahiye
-)
 
-import streamlit as st
-from datetime import datetime, timedelta
-
-# 👇 YEH 4 LINES ADD KAREIN
+# ── Session timeout (24 h) ─────────────────────────────────────────────────────
 if "last_activity" not in st.session_state:
     st.session_state.last_activity = datetime.now()
 else:
@@ -29,39 +21,15 @@ else:
         st.stop()
     else:
         st.session_state.last_activity = datetime.now()
-# -----------------------------------------
-#get_ai_response1111111
-
-import pandas as pd
-
-conn = sqlite3.connect('gym_pro.db')
-
-# Tables check karein
-tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
-print("Available tables:", tables)
-
-# Members table structure
-try:
-    members = pd.read_sql_query("SELECT * FROM members LIMIT 5", conn)
-    print("\nMembers data:", members)
-except:
-    print("Members table not found")
-
-conn.close()
-#111111
-
-
-
-
 
 st.set_page_config(page_title="GymPro", page_icon="🏋️", layout="wide")
-def init_db():
-    db.init_db()
+
+db.init_db()
 styles.inject_css()
 
-# ----- SIMPLE FLOATING MUSIC PLAYER -----
+# ── Floating music player ──────────────────────────────────────────────────────
 def add_floating_music_player():
-    music_file = "gym_music.mp3"
+    music_file = os.path.join(os.path.dirname(__file__), "gym_music.mp3")
     if os.path.exists(music_file):
         try:
             with open(music_file, "rb") as f:
@@ -82,45 +50,17 @@ def add_floating_music_player():
                 </audio>
             </div>
             """, unsafe_allow_html=True)
-        except:
+        except Exception:
             pass
-add_floating_music_player()
-# ---------------------------------
-# ----- MUSIC PLAYER END -----
 
-# play_persistent_music()   <--- IS LINE KO COMMENT KARO YA DELETE KARO
-# ── Auth Gate ──
+add_floating_music_player()
+
+# ── Auth gate ──────────────────────────────────────────────────────────────────
 if not auth.require_login():
     auth.login_page()
     st.stop()
 
-# Sahi tareeqa: Har module ka naam likhein
-from pages import (
-    admin_dashboard, 
-    setup, 
-    members, 
-    attendance, 
-    fee_collection, 
-    expenses, 
-    whatsapp, 
-    auditor, 
-    user_management, 
-    reports, 
-    membership_card, 
-    progress, 
-    inventory, 
-    complaints, 
-    message_center,
-    ai_assistant,
-    staff_targets,  # 🆕 NEW: Staff Targets page
-)
-
-
-
-
 # ── Public profile route (no login required) ──────────────────────────────────
-# Triggered by ?profile=<token> where <token> is an HMAC-signed reference to
-# the member id. Prevents anonymous enumeration of the member roster.
 _profile_param = st.query_params.get("profile")
 if _profile_param:
     from pages import public_profile
@@ -129,12 +69,7 @@ if _profile_param:
     public_profile.render(_mid if _mid is not None else -1)
     st.stop()
 
-# ── Auth gate ──────────────────────────────────────────────────────────────────
-if not auth.require_login():
-    auth.login_page()
-    st.stop()
-
-# ── Lazy-import pages ──────────────────────────────────────────────────────────
+# ── Page imports ───────────────────────────────────────────────────────────────
 from pages import (
     admin_dashboard,
     setup,
@@ -152,7 +87,7 @@ from pages import (
     complaints,
     message_center,
     ai_assistant,
-    staff_targets,  # 🆕 NEW: Staff Targets page
+    staff_targets,
 )
 
 role        = st.session_state.get("role", "staff")
@@ -163,7 +98,6 @@ gym_id      = st.session_state.get("selected_gym_id")
 user_gym_id = st.session_state.get("user_gym_id")
 
 gyms = db.get_all_gyms()
-
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -177,7 +111,7 @@ with st.sidebar:
 
     st.divider()
 
-    role_icon = auth.ROLE_ICONS.get(role, "👤")
+    role_icon  = auth.ROLE_ICONS.get(role, "👤")
     role_label = {"admin": "Administrator", "staff": "Staff Member",
                   "auditor": "Independent Auditor"}.get(role, role.upper())
     st.markdown(f"""
@@ -188,21 +122,20 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Switch Gym Location
+    # Gym selector (admin sees all; staff sees assigned gym)
     if role == "admin" and gyms:
         st.markdown("""<div style="font-size:0.65rem;color:#64748B;text-transform:uppercase;
             letter-spacing:0.08em;margin-bottom:0.3rem;">Switch Gym Location</div>""",
                     unsafe_allow_html=True)
         gym_options = {"🌐 All Gyms": None} | {f"🏋️ {g.name}": g.id for g in gyms}
         cur_gym_key = next((f"🏋️ {g.name}" for g in gyms if g.id == gym_id), "🌐 All Gyms")
-        chosen_gym = st.selectbox(
-            "Switch Gym Location", 
+        chosen_gym  = st.selectbox(
+            "Switch Gym Location",
             list(gym_options.keys()),
             index=list(gym_options.keys()).index(cur_gym_key),
             label_visibility="collapsed",
-            key="main_gym_selector"
+            key="main_gym_selector",
         )
-
         st.session_state["selected_gym_id"] = gym_options[chosen_gym]
         gym_id = st.session_state["selected_gym_id"]
         st.markdown(f"""<div style="font-size:0.7rem;color:#64748B;text-align:right;
@@ -241,7 +174,6 @@ with st.sidebar:
             "Inventory":         ("📦", "Inventory"),
             "Reports":           ("📈", "Reports"),
         },
-        # 🆕 NEW: Staff Targets Section
         "Staff Management": {
             "Staff Targets":     ("🎯", "Staff Targets"),
         },
@@ -253,11 +185,8 @@ with st.sidebar:
         "Audit & Access": {
             "Audit":             ("🔍", "Audit"),
             "User Management":   ("🔐", "User Management"),
-
         },
     }
-
-
 
     current_page = st.session_state.get("page", "Dashboard")
     for section_label, pages in nav_sections.items():
@@ -271,8 +200,8 @@ with st.sidebar:
         )
         for page_key in visible:
             icon, label = pages[page_key]
-            is_active = current_page == page_key
-            btn_style = "nav-btn-active" if is_active else "nav-btn"
+            is_active   = current_page == page_key
+            btn_style   = "nav-btn-active" if is_active else "nav-btn"
             st.markdown(f'<div class="{btn_style}">', unsafe_allow_html=True)
             if st.button(f"{icon}  {label}", key=f"nav_{page_key}", use_container_width=True):
                 st.session_state["page"] = page_key
@@ -281,11 +210,11 @@ with st.sidebar:
 
     st.divider()
 
-    # Alerts summary
+    # Alert badges
     try:
         bdays = db.get_birthday_members(days_ahead=1, gym_id=gym_id)
         absent = db.get_absent_members(days=3, gym_id=gym_id)
-        low_s = db.get_stock_items(gym_id=gym_id, low_stock_only=True)
+        low_s  = db.get_stock_items(gym_id=gym_id, low_stock_only=True)
         if bdays:
             st.markdown(f'<div style="background:#1E3A1E;border-radius:6px;padding:0.4rem 0.6rem;'
                         f'font-size:0.75rem;color:#34D399;margin-bottom:0.3rem;">🎂 {len(bdays)} birthday today</div>',
@@ -313,12 +242,9 @@ with st.sidebar:
     st.markdown(styles.metric_card("Month Expenses", f"PKR {stats['month_expenses']:,.0f}",
                                    "", "red"), unsafe_allow_html=True)
 
-
-
-
-
     st.divider()
-    # ── Persistent AI chat widget ──────────────────────────────────────────────
+
+    # Persistent AI chat widget
     ai_assistant.render_sidebar_widget(
         current_page=st.session_state.get("page", "Dashboard"),
         gym_id=gym_id,
@@ -328,9 +254,7 @@ with st.sidebar:
     if st.button("🚪 Sign Out", use_container_width=True):
         auth.logout()
 
-
-
-# ── Page Router ────────────────────────────────────────────────────────────────
+# ── Page router ────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "Dashboard")
 
 if not auth.can_access(page):
@@ -339,9 +263,7 @@ if not auth.can_access(page):
 
 gid = st.session_state.get("selected_gym_id")
 
-if   page == "Dashboard":
-    admin_dashboard.render(gid, role, username)  # ✅ Fixed - 2 arguments
-
+if   page == "Dashboard":        admin_dashboard.render(gid, role, username)
 elif page == "Gym Setup":        setup.render()
 elif page == "Members":          members.render(gid, role)
 elif page == "Membership Cards": membership_card.render(gid, role)
