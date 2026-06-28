@@ -2,48 +2,27 @@ import streamlit as st
 import pandas as pd
 import os
 import uuid
-import sqlite3
 from PIL import Image
 from datetime import date, timedelta
 import database as db
 import styles
 from qr_utils import member_qr_png
-
-# Purani pictures ka seedha path set kar diya gaya hai
-# Absolute path — CWD se koi farq nahi padta
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+import object_store
 
 GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
 STATUSES = ["Active", "Inactive", "Suspended", "Frozen"]
 
 
-def save_photo(f):
-    ext = os.path.splitext(f.name)[-1].lower()
-    filename = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(UPLOAD_DIR, filename)
-    with open(path, "wb") as fp:
-        fp.write(f.getbuffer())
-    return path
+def save_photo(f) -> str:
+    """Photo save karo Object Storage mein. Returns storage key."""
+    file_bytes = f.getbuffer()
+    key = object_store.upload_photo(bytes(file_bytes), f.name)
+    return key
 
 
 def show_photo(photo_field, w=100):
-    """Show member photo — UPLOAD_DIR is absolute so always works."""
-    filename = os.path.basename(photo_field) if photo_field else ""
-
-    img_b64 = None
-    if filename:
-        abs_path = os.path.join(UPLOAD_DIR, filename)
-        if os.path.exists(abs_path):
-            try:
-                import base64
-                with open(abs_path, "rb") as f:
-                    raw = f.read()
-                img_b64 = base64.b64encode(raw).decode()
-                ext = os.path.splitext(abs_path)[-1].lower().lstrip(".")
-                mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
-            except Exception:
-                img_b64 = None
+    """Member photo dikhao — Object Storage se (hamesha safe)."""
+    img_b64, mime = object_store.get_photo_b64(photo_field or "")
 
     size = f"{w}px"
     if img_b64:
@@ -416,11 +395,8 @@ def _member_detail(m, gyms, role):
                 st.warning("⚠️ Permanently delete this member? This action cannot be undone!")
                 col_del1, col_del2 = st.columns(2)
                 if col_del1.button("✅ Yes, Delete", key=f"cdy_{m.id}", type="primary"):
-                    if m.photo_path and os.path.exists(m.photo_path):
-                        try:
-                            os.remove(m.photo_path)
-                        except:
-                            pass
+                    if m.photo_path:
+                        object_store.delete_photo(m.photo_path)
                     db.delete_member(m.id)
                     st.success("✅ Member deleted successfully.")
                     st.session_state.pop(f"confirm_del_m_{m.id}", None)

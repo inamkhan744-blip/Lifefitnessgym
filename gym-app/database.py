@@ -1527,17 +1527,12 @@ def get_stats(gym_id=None):
         db.close()
 
 def update_member_photo_path(member_id, photo_path):
-    """
-    Jab admin card page se ya kahin se bhi photo upload kare, 
-    toh database mein uska path bilkul sahi folder ke sath update ho jaye.
-    """
+    """Update member photo_path — accepts object storage key or any path as-is."""
     db = SessionLocal()
     try:
         member = db.query(Member).filter(Member.id == member_id).first()
         if member:
-            # Agar poora path save ho raha ho, toh sirf filename nikal kar standard folder set karein
-            filename = os.path.basename(photo_path)
-            member.photo_path = f"gym-app/uploads/{filename}"
+            member.photo_path = photo_path
             db.commit()
             return True
         return False

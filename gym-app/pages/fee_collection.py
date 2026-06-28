@@ -78,42 +78,16 @@ def _get_cached_image(photo_path: str, max_size: tuple = (200, 200), quality: in
         return None
 
 def get_photo_b64(photo_field: str, serial_number: str = "", max_size: tuple = (200, 200)) -> str | None:
-    """Get optimized photo with orientation fix"""
+    """Get member photo from Object Storage (permanent) or local fallback."""
+    import object_store as _os
     if not photo_field:
         return None
-    
-    photo_path = None
-    
-    # Try to find photo path
-    if photo_field:
-        photo_str = str(photo_field).strip()
-        if "<div" not in photo_str and "style=" not in photo_str:
-            filename = os.path.basename(photo_str)
-            _abs_uploads = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
-            paths_to_check = [
-                os.path.join(_abs_uploads, filename),
-                photo_str,
-            ]
-            for path in paths_to_check:
-                if path and os.path.exists(path) and os.path.isfile(path):
-                    photo_path = path
-                    break
-    
-    # Try by serial number
-    if not photo_path and serial_number:
-        clean_serial = str(serial_number).strip().replace("-", "").lower()
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
-        if os.path.exists(upload_dir):
-            for file_name in os.listdir(upload_dir):
-                if clean_serial in file_name.lower().replace("_", "").replace("-", ""):
-                    path = os.path.join(upload_dir, file_name)
-                    if os.path.isfile(path):
-                        photo_path = path
-                        break
-    
-    if photo_path:
-        return _get_cached_image(photo_path, max_size)
-    
+    photo_str = str(photo_field).strip()
+    if "<div" in photo_str or "style=" in photo_str:
+        return None
+    b64, mime = _os.get_photo_b64(photo_str)
+    if b64:
+        return f"data:image/{mime};base64,{b64}"
     return None
 
 # ============================================

@@ -1,3 +1,4 @@
 - [Thermal printer refactor](thermal-printer-refactor.md) — ReceiptPrinter class moved to printer_utils.py; fee_collection.py uses import-based functions, not class instances.
 - [Receipt audit log](receipt-audit-log.md) — receipt_logs table logs every fee payment; PrintIssued updated only if thermal print succeeds; admin-only reprint + audit tab.
-- [Streamlit radio empty label](streamlit-quirks.md) — st.radio with label="" raises accessibility warning since Streamlit 1.45+; always provide real label + label_visibility="collapsed" instead.
+- [Streamlit radio empty label](streamlit-quirks.md) — st.radio with label="" raises accessibility warning; always provide real label + label_visibility="collapsed".
+- [Object Storage for photos](object-storage-photos.md) — member photos stored in Replit Object Storage (permanent); object_store.py is the helper module; photos survive restarts.
