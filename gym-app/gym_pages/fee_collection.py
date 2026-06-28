@@ -124,6 +124,19 @@ def render_collect_fee(gym_id, current_user):
         st.info("Add a gym first.")
         return
 
+    # ── Show pending print button after rerun ──────────────────────────────
+    pending = st.session_state.pop('pending_print', None)
+    if pending:
+        st.success("✅ Payment recorded! Click below to print the receipt:")
+        render_browser_print_button(
+            pending['data'],
+            copies=pending['copies'],
+            label=f"🖨️ Print Receipt ({pending['copies']} {'Copy' if pending['copies'] == 1 else 'Copies'})",
+        )
+        with st.expander("Preview receipt", expanded=False):
+            render_print_preview(pending['data'], copies=pending['copies'])
+        st.divider()
+
     st.subheader("➕ Collect Fee")
 
     gym_opts = {g.name: g.id for g in gyms}
@@ -374,19 +387,16 @@ def render_collect_fee(gym_id, current_user):
 
                     if print_receipt:
                         copies = 2 if "2" in print_copies else 1
-                        render_browser_print_button(receipt_data, copies=copies)
+                        st.session_state['pending_print'] = {
+                            'data': receipt_data,
+                            'copies': copies,
+                        }
                         if hasattr(db, 'update_print_issued'):
                             try:
                                 db.update_print_issued(receipt_no, True)
                             except Exception:
                                 pass
 
-                    # On-screen preview
-                    with st.expander("Print Preview (80mm)", expanded=False):
-                        render_print_preview(receipt_data, copies=2 if print_receipt and "2" in print_copies else 1)
-
-                    st.success(f"✅ {msg} · Membership extended to {period_end}!")
-                    st.balloons()
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
