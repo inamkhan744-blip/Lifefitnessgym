@@ -3,10 +3,15 @@ import os
 import base64
 from datetime import date, datetime, timedelta
 import pandas as pd
-import cv2
 import time
 from PIL import Image
 import io
+
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    _CV2_AVAILABLE = False
 
 import database as db
 import styles
@@ -483,6 +488,9 @@ def render_face_tab():
     source = 0 if camera_option == "💻 Laptop Webcam" else 1
     
     # Auto-start camera when tab opens
+    if not _CV2_AVAILABLE:
+        st.error("❌ Camera not available on this server. Use manual check-in instead.")
+        return
     try:
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():

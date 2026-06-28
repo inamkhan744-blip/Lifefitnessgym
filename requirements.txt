@@ -53,3 +53,5 @@ python-multipart>=0.0.28
 idna>=3.8
 replit-object-storage
 reportlab
+auth
+pygments-agentspeak
