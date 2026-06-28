@@ -14,26 +14,21 @@ GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
 STATUSES = ["Active", "Inactive", "Suspended", "Frozen"]
 
 
-def save_photo(f) -> str:
-    """Photo save karo Object Storage mein. Returns storage key."""
+def save_photo(f, serial: str = "") -> str:
+    """Photo save karo Object Storage mein. serial dene par key mein serial number hoga."""
     file_bytes = f.getbuffer()
-    key = object_store.upload_photo(bytes(file_bytes), f.name)
+    key = object_store.upload_photo(bytes(file_bytes), f.name, serial=serial)
     return key
 
 
 def show_photo(photo_field, w=100):
-    """Member photo dikhao — Object Storage se (hamesha safe)."""
-    img_b64, mime = object_store.get_photo_b64(photo_field or "")
+    """Member photo dikhao — st.image() se (reliable, no base64 HTML)."""
+    photo_bytes = object_store.get_photo_bytes(photo_field or "")
 
     size = f"{w}px"
-    if img_b64:
-        st.markdown(
-            f'<div style="width:{size};height:{size};border-radius:10px;overflow:hidden;'
-            f'border:1px solid #334155;flex-shrink:0;">'
-            f'<img src="data:image/{mime};base64,{img_b64}" '
-            f'style="width:100%;height:100%;object-fit:cover;object-position:center;" /></div>',
-            unsafe_allow_html=True,
-        )
+    if photo_bytes:
+        import io as _io
+        st.image(_io.BytesIO(photo_bytes), width=w)
     else:
         st.markdown(
             f'<div style="width:{size};height:{size};border-radius:10px;'
@@ -497,6 +492,13 @@ def _register_form(gyms, gym_id, role):
                     photo_path=photo_path, status=status, notes=notes,
                 )
                 if ok:
+                    # Photo key ko serial number se rename karo
+                    if photo_path and serial:
+                        new_key = f"member_photos/{serial}.jpg"
+                        if object_store.rename_photo(photo_path, new_key):
+                            member = db.get_member_by_serial(serial)
+                            if member:
+                                db.update_member_photo_path(member.id, new_key)
                     st.success(f"🎉 {msg}")
                     st.balloons()
                 else:
@@ -553,7 +555,15 @@ def _edit_form(m, gyms):
         if save:
             photo_path = m.photo_path
             if photo:
-                photo_path = save_photo(photo)
+                new_key = f"member_photos/{m.serial_number}.jpg"
+                photo_bytes = photo.getbuffer()
+                object_store.upload_photo(bytes(photo_bytes), photo.name, serial=m.serial_number)
+                if m.photo_path and m.photo_path != new_key:
+                    try:
+                        object_store.delete_photo(m.photo_path)
+                    except Exception:
+                        pass
+                photo_path = new_key
             ok, msg = db.update_member(
                 m.id, full_name=full_name, phone=phone, email=email,
                 gender=gender, dob=str(dob) if dob else "",
