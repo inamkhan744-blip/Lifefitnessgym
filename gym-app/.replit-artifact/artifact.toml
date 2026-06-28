@@ -6,7 +6,7 @@ id = "gymPro5000PythonStreamlit"
 
 [[services]]
 localPort = 5000
-name = "GymPro App"
+name = "Start application"
 paths = ["/"]
 
 [services.development]
