@@ -248,3 +248,80 @@ def render_print_preview(data: dict, copies: int = 2):
             st.code(text, language=None)
     except Exception as e:
         pass
+
+
+def generate_print_html(data: dict, copies: int = 2) -> str:
+    """
+    Generate a self-contained HTML page for browser printing.
+    Auto-triggers window.print() on load and shows a manual Print button.
+    Sized for 80mm thermal paper.
+    """
+    if copies == 2:
+        member_text, gym_text = format_dual_receipts(data)
+        body = (
+            f'<div class="receipt"><pre>{member_text}</pre></div>'
+            f'<div class="page-break"></div>'
+            f'<div class="receipt"><pre>{gym_text}</pre></div>'
+        )
+    else:
+        text = format_receipt(data, copy_label="MEMBER COPY")
+        body = f'<div class="receipt"><pre>{text}</pre></div>'
+
+    receipt_no = data.get("receipt_no", "")
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Receipt {receipt_no}</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family:'Courier New',Courier,monospace; font-size:12px; background:#fff; color:#000; }}
+  .receipt {{ width:72mm; padding:2mm; }}
+  pre {{ font-family:'Courier New',Courier,monospace; font-size:11px; white-space:pre; line-height:1.4; }}
+  .page-break {{ page-break-after:always; height:0; }}
+  .print-btn {{ display:block; margin:12px auto; padding:10px 24px; background:#7C3AED;
+                color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
+  @page {{ size:80mm auto; margin:2mm; }}
+  @media print {{
+    body {{ width:80mm; }}
+    .receipt {{ width:76mm; }}
+    .no-print {{ display:none !important; }}
+  }}
+</style>
+</head>
+<body>
+{body}
+<div class="no-print" style="text-align:center;margin-top:12px;">
+  <button class="print-btn" onclick="window.print()">🖨️ Print</button>
+  <p style="font-size:11px;color:#666;margin-top:6px;">If print dialog did not open, click the button above.</p>
+</div>
+<script>
+  window.onload = function() {{ setTimeout(function() {{ window.print(); }}, 400); }};
+</script>
+</body>
+</html>"""
+
+
+def render_browser_print_button(data: dict, copies: int = 2,
+                                 label: str = "🖨️ Open & Print Receipt"):
+    """
+    Render a link that opens the receipt in a new browser tab and auto-triggers
+    the print dialog. Uses a data URI — never blocked by popup blockers.
+    """
+    try:
+        import streamlit as st
+        import base64
+        html = generate_print_html(data, copies)
+        b64 = base64.b64encode(html.encode("utf-8")).decode()
+        href = f"data:text/html;base64,{b64}"
+        st.markdown(
+            f'<a href="{href}" target="_blank" style="'
+            "display:inline-block;padding:10px 22px;background:#7C3AED;color:#fff;"
+            "border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;"
+            f'">{label}</a>'
+            '<span style="font-size:12px;color:#aaa;margin-left:10px;">'
+            "(opens print dialog in new tab)</span>",
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass

@@ -25,8 +25,8 @@ except ImportError:
 # ============================================
 
 from printer_utils import (
-    format_receipt, print_single, print_dual,
-    render_print_preview, check_printer
+    format_receipt, render_print_preview,
+    render_browser_print_button
 )
 
 # ============================================
@@ -113,49 +113,6 @@ def get_member_payment_status(member):
             return "unpaid", f"🔴 Unpaid ({days_expired}d ago)", "#EF4444", "white"
     except:
         return "unpaid", "⚠️ Invalid", "#F59E0B", "#1E293B"
-
-def _generate_fee_receipt_html(receipt_number, member_name, serial, gym_name, amount, payment_method, period_end):
-    today_str = date.today().strftime("%Y-%m-%d")
-    
-    html_code = f"""
-    <html>
-    <head>
-        <style>
-            @media print {{
-                body {{ width: 80mm; margin: 0; padding: 5px; font-family: 'Courier New', Courier, monospace; font-size: 12px; }}
-            }}
-            .receipt-box {{ width: 100%; max-width: 300px; padding: 10px; border: 1px dashed #000; font-family: 'Courier New', Courier, monospace; color: #000; background: #fff; }}
-            .text-center {{ text-align: center; }}
-            .bold {{ font-weight: bold; }}
-            .divider {{ border-top: 1px dashed #000; margin: 8px 0; }}
-            .flex-space {{ display: flex; justify-content: space-between; }}
-        </style>
-    </head>
-    <body>
-        <div class="receipt-box">
-            <div class="text-center bold" style="font-size: 16px;">{gym_name.upper()}</div>
-            <div class="text-center" style="font-size: 10px;">FEE PAYMENT RECEIPT</div>
-            <div class="divider"></div>
-            <div class="flex-space"><span>Receipt No:</span><span class="bold">{receipt_number}</span></div>
-            <div class="flex-space"><span>Date:</span><span>{today_str}</span></div>
-            <div class="divider"></div>
-            <div class="flex-space"><span>Member:</span><span class="bold">{member_name}</span></div>
-            <div class="flex-space"><span>Serial:</span><span class="bold">{serial}</span></div>
-            <div class="divider"></div>
-            <div class="bold">PAYMENT DETAILS:</div>
-            <div class="flex-space"><span>Amount:</span><span class="bold">PKR {amount:,.2f}</span></div>
-            <div class="flex-space"><span>Method:</span><span>{payment_method}</span></div>
-            <div class="flex-space"><span>Valid Till:</span><span class="bold">{period_end}</span></div>
-            <div class="divider"></div>
-            <div class="text-center bold" style="margin-top: 10px;">Thank You!</div>
-        </div>
-        <script>
-            window.print();
-        </script>
-    </body>
-    </html>
-    """
-    return html_code
 
 # ============================================
 # TAB 1: COLLECT FEE
@@ -416,46 +373,17 @@ def render_collect_fee(gym_id, current_user):
                         st.warning(f"Receipt logging failed: {e}")
 
                     if print_receipt:
-                        try:
-                            if print_copies == "2 (Member + Gym)":
-                                ok_p, pm = print_dual(receipt_data)
-                                copy_msg = "2 copies"
-                            else:
-                                ok_p, pm = print_single(receipt_data)
-                                copy_msg = "1 copy"
-
-                            if ok_p:
-                                # Update print status
-                                if hasattr(db, 'update_print_issued'):
-                                    db.update_print_issued(receipt_no, True)
-                                st.success(f"Printed {copy_msg} successfully.")
-                            else:
-                                st.warning(f"Payment saved. Printer: {pm}")
-                        except Exception as e:
-                            st.warning(f"Payment saved. Print error: {e}")
+                        copies = 2 if "2" in print_copies else 1
+                        render_browser_print_button(receipt_data, copies=copies)
+                        if hasattr(db, 'update_print_issued'):
+                            try:
+                                db.update_print_issued(receipt_no, True)
+                            except Exception:
+                                pass
 
                     # On-screen preview
                     with st.expander("Print Preview (80mm)", expanded=False):
                         render_print_preview(receipt_data, copies=2 if print_receipt and "2" in print_copies else 1)
-
-                    # 🔥 FIX: Use generated_rcp in HTML receipt
-                    receipt_html = _generate_fee_receipt_html(
-                        receipt_number=generated_rcp,  # Fixed: was using undefined variable
-                        member_name=sel_mem.full_name,
-                        serial=sel_mem.serial_number,
-                        gym_name=gym_sel,
-                        amount=amount,
-                        payment_method=payment_method,
-                        period_end=str(period_end)
-                    )
-
-                    st.components.v1.html(f"""
-                        <script>
-                            var w = window.open('', '_blank');
-                            w.document.write({repr(receipt_html)});
-                            w.document.close();
-                        </script>
-                    """, height=0)
 
                     st.success(f"✅ {msg} · Membership extended to {period_end}!")
                     st.balloons()
@@ -748,31 +676,34 @@ def render_history_admin(gym_id, role):
 
                     with col_r1:
                         if st.button("Reprint 2 Copies", use_container_width=True, type="primary"):
+                            st.session_state['reprint_copies'] = 2
+                            st.session_state['reprint_data'] = reprint_data
                             try:
-                                ok_p, pm = print_dual(reprint_data)
-                                if ok_p:
-                                    db.update_print_issued(selected_record['Receipt'], True)
-                                    st.success("2 copies reprinted.")
-                                else:
-                                    st.error(f"Reprint failed: {pm}")
-                            except Exception as e:
-                                st.error(f"Reprint error: {e}")
+                                db.update_print_issued(selected_record['Receipt'], True)
+                            except Exception:
+                                pass
 
                     with col_r2:
                         if st.button("Reprint 1 Copy", use_container_width=True):
+                            st.session_state['reprint_copies'] = 1
+                            st.session_state['reprint_data'] = reprint_data
                             try:
-                                ok_p, pm = print_single(reprint_data)
-                                if ok_p:
-                                    db.update_print_issued(selected_record['Receipt'], True)
-                                    st.success("1 copy reprinted.")
-                                else:
-                                    st.error(f"Reprint failed: {pm}")
-                            except Exception as e:
-                                st.error(f"Reprint error: {e}")
+                                db.update_print_issued(selected_record['Receipt'], True)
+                            except Exception:
+                                pass
 
                     with col_r3:
                         if st.button("Print Preview", use_container_width=True):
                             st.session_state['show_reprint_preview'] = not st.session_state.get('show_reprint_preview', False)
+
+                    # Show browser print link after button click
+                    rp_data = st.session_state.get('reprint_data')
+                    rp_copies = st.session_state.get('reprint_copies', 2)
+                    if rp_data and rp_data.get('receipt_no') == reprint_data.get('receipt_no'):
+                        render_browser_print_button(
+                            rp_data, copies=rp_copies,
+                            label=f"🖨️ Open & Print ({rp_copies} {'Copy' if rp_copies == 1 else 'Copies'})"
+                        )
 
                     if st.session_state.get('show_reprint_preview', False):
                         render_print_preview(reprint_data, copies=2)
@@ -922,15 +853,6 @@ def render(gym_id, role, current_user):
     
     st.title("💰 Fee Collection")
     st.caption("Collect membership fees and manage payment records")
-    
-    try:
-        ok_p, pm = check_printer()
-        if ok_p:
-            st.success(f"Printer: {pm}")
-        else:
-            st.info(f"No thermal printer detected — receipts can be previewed on screen.")
-    except Exception:
-        pass
     
     tabs = ["📝 Collect Fee", "📋 History & Admin"]
     if role == 'admin':
