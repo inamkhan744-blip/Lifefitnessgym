@@ -90,40 +90,64 @@ def upload_photo(file_bytes: bytes, original_name: str) -> str:
     return key
 
 
+def _to_display_jpeg(raw: bytes, max_px: int = 400) -> bytes:
+    """
+    Raw bytes ko display ke liye compress karo.
+    Max 400px, quality 75 — browser easily render karta hai.
+    """
+    try:
+        from PIL import Image
+        import io as _io
+        img = Image.open(_io.BytesIO(raw))
+        img.thumbnail((max_px, max_px), Image.LANCZOS)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=75, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return raw
+
+
 def get_photo_b64(key: str) -> tuple[str | None, str]:
     """
-    Photo download karo as base64.
+    Photo download karo as base64 (display size — compressed).
     Returns (b64_string, mime_type) or (None, '')
     """
     if not key:
         return None, ""
 
     filename = os.path.basename(key)
-    ext = os.path.splitext(filename)[-1].lower().lstrip(".")
-    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
+
+    raw = None
 
     # 1. Object Storage se try karo
     if STORAGE_AVAILABLE:
         try:
-            data = _client.download_as_bytes(key)
-            return base64.b64encode(data).decode(), mime
+            raw = _client.download_as_bytes(key)
         except Exception:
-            pass
+            raw = None
 
     # 2. Local uploads fallback
-    for local_path in [
-        os.path.join(_LOCAL_UPLOADS, filename),
-        key if os.path.isabs(key) else None,
-    ]:
-        if local_path and os.path.exists(local_path):
-            try:
-                with open(local_path, "rb") as f:
-                    data = f.read()
-                return base64.b64encode(data).decode(), mime
-            except Exception:
-                pass
+    if raw is None:
+        for local_path in [
+            os.path.join(_LOCAL_UPLOADS, filename),
+            key if os.path.isabs(key) else None,
+        ]:
+            if local_path and os.path.exists(local_path):
+                try:
+                    with open(local_path, "rb") as f:
+                        raw = f.read()
+                    break
+                except Exception:
+                    pass
 
-    return None, ""
+    if raw is None:
+        return None, ""
+
+    # Display ke liye compress karo (4MB → ~15KB)
+    display_bytes = _to_display_jpeg(raw)
+    return base64.b64encode(display_bytes).decode(), "jpeg"
 
 
 def migrate_local_to_storage(local_path: str) -> str | None:
