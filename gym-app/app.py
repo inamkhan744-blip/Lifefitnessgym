@@ -63,14 +63,14 @@ if not auth.require_login():
 # ── Public profile route (no login required) ──────────────────────────────────
 _profile_param = st.query_params.get("profile")
 if _profile_param:
-    from pages import public_profile
+    from gym_pages import public_profile
     from profile_token import parse_token
     _mid = parse_token(_profile_param)
     public_profile.render(_mid if _mid is not None else -1)
     st.stop()
 
 # ── Page imports ───────────────────────────────────────────────────────────────
-from pages import (
+from gym_pages import (
     admin_dashboard,
     setup,
     members,
