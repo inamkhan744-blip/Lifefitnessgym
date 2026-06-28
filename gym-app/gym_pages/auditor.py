@@ -5,6 +5,7 @@ import base64
 from datetime import date, datetime, timedelta
 import database as db
 import styles
+import object_store
 from PIL import Image
 import io
 
@@ -160,48 +161,52 @@ def fix_image_orientation(img):
         pass
     return img
 
-def get_audit_photo_b64(photo_path):
-    if not photo_path:
+def get_audit_photo_b64(photo_path, serial_number: str = ""):
+    if not photo_path and not serial_number:
         return None
-    
-    cache_key = f"audit_{photo_path}"
+
+    cache_key = f"audit_{photo_path}_{serial_number}"
     if cache_key in st.session_state.audit_photo_cache:
         return st.session_state.audit_photo_cache[cache_key]
-    
-    paths_to_check = [
-        photo_path,
-        os.path.join("gym-app", "uploads", os.path.basename(photo_path)),
-        os.path.join(os.getcwd(), "gym-app", "uploads", os.path.basename(photo_path)),
-        os.path.join("uploads", os.path.basename(photo_path)),
-    ]
-    
-    for path in paths_to_check:
-        if os.path.exists(path) and os.path.isfile(path):
-            try:
-                img = Image.open(path)
-                img = fix_image_orientation(img)
-                
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                    rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-                    img = rgb_img
-                
-                max_width = 300
-                if img.width > max_width:
-                    ratio = max_width / img.width
-                    new_size = (max_width, int(img.height * ratio))
-                    img = img.resize(new_size, Image.Resampling.LANCZOS)
-                
-                output = io.BytesIO()
-                img.save(output, format='JPEG', quality=80, optimize=True)
-                b64 = base64.b64encode(output.getvalue()).decode()
-                
+
+    # 1. Object Storage — primary source
+    for key in filter(None, [photo_path, f"member_photos/{serial_number}.jpg" if serial_number else None]):
+        try:
+            b64, _ = object_store.get_photo_b64(key)
+            if b64:
                 st.session_state.audit_photo_cache[cache_key] = b64
                 return b64
-            except Exception as e:
-                print(f"Photo error: {e}")
-                return None
-    
+        except Exception:
+            pass
+
+    # 2. Local filesystem fallback
+    if photo_path:
+        paths_to_check = [
+            photo_path,
+            os.path.join("gym-app", "uploads", os.path.basename(photo_path)),
+            os.path.join(os.getcwd(), "gym-app", "uploads", os.path.basename(photo_path)),
+            os.path.join("uploads", os.path.basename(photo_path)),
+        ]
+        for path in paths_to_check:
+            if os.path.exists(path) and os.path.isfile(path):
+                try:
+                    img = Image.open(path)
+                    img = fix_image_orientation(img)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                        rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                        img = rgb_img
+                    if img.width > 300:
+                        ratio = 300 / img.width
+                        img = img.resize((300, int(img.height * ratio)), Image.Resampling.LANCZOS)
+                    output = io.BytesIO()
+                    img.save(output, format='JPEG', quality=80, optimize=True)
+                    b64 = base64.b64encode(output.getvalue()).decode()
+                    st.session_state.audit_photo_cache[cache_key] = b64
+                    return b64
+                except Exception:
+                    pass
+
     return None
 
 def show_audit_photo(photo_path, width=120, height=180):

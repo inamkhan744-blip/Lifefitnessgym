@@ -5,6 +5,7 @@ import json
 from datetime import date, datetime
 import database as db
 import styles
+import object_store
 from PIL import Image, ImageOps
 import io
 
@@ -87,22 +88,29 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
     cache_key = f"compressed_{serial_number}_{photo_field}"
     if cache_key in st.session_state.photo_cache:
         return st.session_state.photo_cache[cache_key]
-    
+
+    # 1. Object Storage — primary source
+    for key in filter(None, [photo_field, f"member_photos/{serial_number}.jpg" if serial_number else None]):
+        try:
+            b64, _ = object_store.get_photo_b64(key)
+            if b64:
+                result = f"data:image/jpeg;base64,{b64}"
+                st.session_state.photo_cache[cache_key] = result
+                return result
+        except Exception:
+            pass
+
+    # 2. Local filesystem fallback
     photo_path = None
     if photo_field:
         photo_str = str(photo_field).strip()
         if "<div" not in photo_str and "style=" not in photo_str:
             filename = os.path.basename(photo_str)
-            paths_to_check = [
-                os.path.join(UPLOAD_DIR, filename),
-                os.path.join("gym-app/uploads", filename),
-                photo_str
-            ]
-            for path in paths_to_check:
+            for path in [os.path.join(UPLOAD_DIR, filename), os.path.join("gym-app/uploads", filename), photo_str]:
                 if path and os.path.exists(path) and os.path.isfile(path):
                     photo_path = path
                     break
-    
+
     if not photo_path and serial_number:
         clean_serial = str(serial_number).strip().replace("-", "").lower()
         if os.path.exists(UPLOAD_DIR):
@@ -112,14 +120,14 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
                     if os.path.isfile(path):
                         photo_path = path
                         break
-    
+
     if photo_path:
         compressed_data = compress_image(photo_path)
         if compressed_data:
             b64 = f"data:image/jpeg;base64,{base64.b64encode(compressed_data).decode()}"
             st.session_state.photo_cache[cache_key] = b64
             return b64
-    
+
     return None
 
 def get_member_with_photo(member, gym_name=""):
