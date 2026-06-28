@@ -26,7 +26,7 @@ except ImportError:
 
 from printer_utils import (
     format_receipt, render_print_preview,
-    render_browser_print_button
+    render_print_component
 )
 
 # ============================================
@@ -127,14 +127,8 @@ def render_collect_fee(gym_id, current_user):
     # ── Show pending print button after rerun ──────────────────────────────
     pending = st.session_state.pop('pending_print', None)
     if pending:
-        st.success("✅ Payment recorded! Click below to print the receipt:")
-        render_browser_print_button(
-            pending['data'],
-            copies=pending['copies'],
-            label=f"🖨️ Print Receipt ({pending['copies']} {'Copy' if pending['copies'] == 1 else 'Copies'})",
-        )
-        with st.expander("Preview receipt", expanded=False):
-            render_print_preview(pending['data'], copies=pending['copies'])
+        st.success("✅ Payment recorded! Print dialog should open automatically — or press the PRINT button below:")
+        render_print_component(pending['data'], copies=pending['copies'])
         st.divider()
 
     st.subheader("➕ Collect Fee")
@@ -706,14 +700,11 @@ def render_history_admin(gym_id, role):
                         if st.button("Print Preview", use_container_width=True):
                             st.session_state['show_reprint_preview'] = not st.session_state.get('show_reprint_preview', False)
 
-                    # Show browser print link after button click
+                    # Show print component after button click
                     rp_data = st.session_state.get('reprint_data')
                     rp_copies = st.session_state.get('reprint_copies', 2)
                     if rp_data and rp_data.get('receipt_no') == reprint_data.get('receipt_no'):
-                        render_browser_print_button(
-                            rp_data, copies=rp_copies,
-                            label=f"🖨️ Open & Print ({rp_copies} {'Copy' if rp_copies == 1 else 'Copies'})"
-                        )
+                        render_print_component(rp_data, copies=rp_copies)
 
                     if st.session_state.get('show_reprint_preview', False):
                         render_print_preview(reprint_data, copies=2)

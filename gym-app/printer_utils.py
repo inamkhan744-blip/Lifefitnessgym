@@ -1,22 +1,16 @@
 """
 printer_utils.py
 ================
-Universal 80mm thermal printer utility.
-- 32-character line limit
-- Plain text only (no emojis, no box-drawing chars)
-- try-except everywhere so app never crashes on printer failure
-- Works on Linux via 'lp' command
+Browser-based 80mm thermal receipt printing for Streamlit.
+No CUPS, no system commands — works on any device (mobile, desktop).
 """
 
-import os
-import subprocess
-import tempfile
 from datetime import datetime
 
 W = 32  # 80mm thermal = 32 usable chars at standard font
 
 
-# ── Formatting Helpers ─────────────────────────────────────────────────────────
+# ── Text Formatting Helpers ────────────────────────────────────────────────────
 
 def _line(char="-"):
     return char * W
@@ -35,10 +29,8 @@ def _left_right(left, right, width=W):
     return left + " " * gap + right
 
 def _wrap(text, width=W):
-    """Wrap long text into multiple lines."""
     words = str(text).split()
-    lines = []
-    current = ""
+    lines, current = [], ""
     for word in words:
         if len(current) + len(word) + (1 if current else 0) <= width:
             current = (current + " " + word).strip()
@@ -51,19 +43,9 @@ def _wrap(text, width=W):
     return lines or [""]
 
 
-# ── Receipt Formatter ──────────────────────────────────────────────────────────
+# ── Receipt Text Formatter ─────────────────────────────────────────────────────
 
 def format_receipt(data: dict, copy_label: str = "MEMBER COPY") -> str:
-    """
-    Build a 32-char-wide plain-text receipt string.
-
-    Required keys in data:
-        gym_name, receipt_no, date, time, collected_by,
-        member_name, serial, phone, amount, method,
-        period_start, period_end
-    Optional:
-        gym_address, gym_phone
-    """
     gym_name    = str(data.get("gym_name",    "GYM CENTER"))[:W]
     gym_addr    = str(data.get("gym_address", ""))[:W]
     gym_phone   = str(data.get("gym_phone",   ""))[:W]
@@ -86,7 +68,6 @@ def format_receipt(data: dict, copy_label: str = "MEMBER COPY") -> str:
 
     lines = []
     a = lines.append
-
     a(_line("="))
     a(_center(gym_name))
     a(_center("FITNESS CENTER"))
@@ -119,118 +100,20 @@ def format_receipt(data: dict, copy_label: str = "MEMBER COPY") -> str:
     a(_center("Thank you for payment!"))
     a(_center("Keep this receipt."))
     a(_line("="))
-    a("")  # trailing newline for paper feed
-
+    a("")
     return "\n".join(lines)
 
 
 def format_dual_receipts(data: dict) -> tuple:
-    """Return (member_copy_text, gym_copy_text)."""
-    member = format_receipt(data, copy_label="MEMBER COPY")
-    gym    = format_receipt(data, copy_label="GYM COPY")
-    return member, gym
+    return (
+        format_receipt(data, copy_label="MEMBER COPY"),
+        format_receipt(data, copy_label="GYM COPY"),
+    )
 
 
-# ── Printer Detection ──────────────────────────────────────────────────────────
-
-def get_printer_name() -> str | None:
-    """
-    Return the first available thermal/POS printer name found via 'lpstat'.
-    Returns None if nothing found or command fails.
-    """
-    try:
-        result = subprocess.run(
-            ["lpstat", "-a"],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in result.stdout.splitlines():
-            lo = line.lower()
-            if any(k in lo for k in ("thermal", "pos", "80mm", "bc-", "receipt")):
-                return line.split()[0]
-        # fallback: first printer
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
-        if lines:
-            return lines[0].split()[0]
-    except Exception:
-        pass
-    return None
-
-
-def check_printer() -> tuple[bool, str]:
-    """
-    Returns (is_available: bool, message: str).
-    Never raises an exception.
-    """
-    try:
-        name = get_printer_name()
-        if name:
-            return True, f"Printer ready: {name}"
-        return False, "No printer detected. Install CUPS or connect printer."
-    except Exception as e:
-        return False, f"Printer check failed: {e}"
-
-
-# ── Print to Thermal ───────────────────────────────────────────────────────────
-
-def print_thermal(text: str, printer_name: str = None) -> tuple[bool, str]:
-    """
-    Send plain-text receipt to thermal printer via 'lp'.
-    Returns (success: bool, message: str).
-    Never crashes the app.
-    """
-    try:
-        if not printer_name:
-            printer_name = get_printer_name()
-        if not printer_name:
-            return False, "No printer found. Check CUPS installation."
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(text)
-            tmp_path = f.name
-
-        try:
-            cmd = ["lp", "-d", printer_name, tmp_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if result.returncode == 0:
-                return True, "Printed successfully."
-            else:
-                return False, f"lp error: {result.stderr.strip() or 'Unknown error'}"
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-
-    except FileNotFoundError:
-        return False, "Print command 'lp' not found. Install CUPS."
-    except subprocess.TimeoutExpired:
-        return False, "Printer timed out. Check connection."
-    except Exception as e:
-        return False, f"Print failed: {e}"
-
-
-def print_single(data: dict, printer_name: str = None) -> tuple[bool, str]:
-    """Print one member copy."""
-    text = format_receipt(data, copy_label="MEMBER COPY")
-    return print_thermal(text, printer_name)
-
-
-def print_dual(data: dict, printer_name: str = None) -> tuple[bool, str]:
-    """Print member copy then gym copy back-to-back."""
-    member_text, gym_text = format_dual_receipts(data)
-    combined = member_text + "\n" + _line("*") + "\n" + gym_text
-    return print_thermal(combined, printer_name)
-
-
-# ── Streamlit Preview ──────────────────────────────────────────────────────────
+# ── On-screen Preview (uses st.code) ──────────────────────────────────────────
 
 def render_print_preview(data: dict, copies: int = 2):
-    """
-    Show an on-screen preview of the receipt using st.code().
-    Import streamlit here lazily so this module is importable without streamlit.
-    """
     try:
         import streamlit as st
         st.markdown("**Print Preview (80mm Thermal)**")
@@ -244,84 +127,132 @@ def render_print_preview(data: dict, copies: int = 2):
                 st.caption("Gym Copy")
                 st.code(gym_text, language=None)
         else:
-            text = format_receipt(data, copy_label="MEMBER COPY")
-            st.code(text, language=None)
-    except Exception as e:
+            st.code(format_receipt(data, "MEMBER COPY"), language=None)
+    except Exception:
         pass
 
 
-def generate_print_html(data: dict, copies: int = 2) -> str:
-    """
-    Generate a self-contained HTML page for browser printing.
-    Auto-triggers window.print() on load and shows a manual Print button.
-    Sized for 80mm thermal paper.
-    """
+# ── Browser Print Component ────────────────────────────────────────────────────
+
+def _build_receipt_html_body(data: dict, copies: int) -> str:
+    """Build the <body> receipt blocks (escaped for HTML <pre>)."""
+    import html as html_lib
     if copies == 2:
         member_text, gym_text = format_dual_receipts(data)
-        body = (
-            f'<div class="receipt"><pre>{member_text}</pre></div>'
-            f'<div class="page-break"></div>'
-            f'<div class="receipt"><pre>{gym_text}</pre></div>'
+        return (
+            f'<div class="receipt"><pre>{html_lib.escape(member_text)}</pre></div>'
+            f'<div class="cut"></div>'
+            f'<div class="receipt"><pre>{html_lib.escape(gym_text)}</pre></div>'
         )
     else:
-        text = format_receipt(data, copy_label="MEMBER COPY")
-        body = f'<div class="receipt"><pre>{text}</pre></div>'
+        text = format_receipt(data, "MEMBER COPY")
+        return f'<div class="receipt"><pre>{html_lib.escape(text)}</pre></div>'
 
-    receipt_no = data.get("receipt_no", "")
-    return f"""<!DOCTYPE html>
+
+def render_print_component(data: dict, copies: int = 2):
+    """
+    Embed a printable receipt directly in the Streamlit page as an iframe.
+    Contains a Print button + auto-triggers window.print() on load.
+    Works on mobile Chrome, desktop Chrome, Safari, Firefox.
+    No popups, no data-URIs, no CUPS.
+    """
+    try:
+        import streamlit as st
+
+        body_html = _build_receipt_html_body(data, copies)
+        receipt_no = data.get("receipt_no", "")
+        line_count = body_html.count("\n") + (copies * 30)
+        height = min(max(line_count * 14 + 200, 500), 900)
+
+        full_html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Receipt {receipt_no}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ font-family:'Courier New',Courier,monospace; font-size:12px; background:#fff; color:#000; }}
-  .receipt {{ width:72mm; padding:2mm; }}
-  pre {{ font-family:'Courier New',Courier,monospace; font-size:11px; white-space:pre; line-height:1.4; }}
-  .page-break {{ page-break-after:always; height:0; }}
-  .print-btn {{ display:block; margin:12px auto; padding:10px 24px; background:#7C3AED;
-                color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
-  @page {{ size:80mm auto; margin:2mm; }}
+  body {{
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    background: #f5f5f5;
+    color: #000;
+    padding: 10px;
+  }}
+  .receipt {{
+    background: #fff;
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto 12px auto;
+    padding: 8px;
+    border: 1px dashed #999;
+    border-radius: 4px;
+  }}
+  pre {{
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    white-space: pre;
+    line-height: 1.45;
+    color: #000;
+  }}
+  .cut {{
+    text-align: center;
+    color: #999;
+    font-size: 10px;
+    margin: 4px 0;
+    letter-spacing: 4px;
+  }}
+  .cut::before {{ content: "- - - - - - - - - - - - - - - -"; }}
+  .btn-bar {{
+    text-align: center;
+    margin: 16px 0 8px 0;
+  }}
+  .print-btn {{
+    padding: 14px 36px;
+    background: #7C3AED;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }}
+  .print-btn:active {{ background: #6D28D9; }}
+  .hint {{
+    text-align: center;
+    font-size: 11px;
+    color: #666;
+    margin-top: 6px;
+  }}
+  @page {{ size: 80mm auto; margin: 2mm; }}
   @media print {{
-    body {{ width:80mm; }}
-    .receipt {{ width:76mm; }}
-    .no-print {{ display:none !important; }}
+    body {{ background:#fff; padding:0; }}
+    .btn-bar, .hint {{ display: none !important; }}
+    .receipt {{ border: none; max-width: 100%; }}
+    .cut {{ color: #ccc; }}
   }}
 </style>
 </head>
 <body>
-{body}
-<div class="no-print" style="text-align:center;margin-top:12px;">
-  <button class="print-btn" onclick="window.print()">🖨️ Print</button>
-  <p style="font-size:11px;color:#666;margin-top:6px;">If print dialog did not open, click the button above.</p>
+{body_html}
+<div class="btn-bar">
+  <button class="print-btn" onclick="window.print()">🖨️ PRINT</button>
 </div>
+<p class="hint">Select your thermal printer in the print dialog</p>
 <script>
-  window.onload = function() {{ setTimeout(function() {{ window.print(); }}, 400); }};
+  window.addEventListener('load', function() {{
+    setTimeout(function() {{ window.print(); }}, 600);
+  }});
 </script>
 </body>
 </html>"""
 
+        st.components.v1.html(full_html, height=height, scrolling=True)
 
-def render_browser_print_button(data: dict, copies: int = 2,
-                                 label: str = "🖨️ Open & Print Receipt"):
-    """
-    Render a link that opens the receipt in a new browser tab and auto-triggers
-    the print dialog. Uses a data URI — never blocked by popup blockers.
-    """
-    try:
-        import streamlit as st
-        import base64
-        html = generate_print_html(data, copies)
-        b64 = base64.b64encode(html.encode("utf-8")).decode()
-        href = f"data:text/html;base64,{b64}"
-        st.markdown(
-            f'<a href="{href}" target="_blank" style="'
-            "display:inline-block;padding:10px 22px;background:#7C3AED;color:#fff;"
-            "border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;"
-            f'">{label}</a>'
-            '<span style="font-size:12px;color:#aaa;margin-left:10px;">'
-            "(opens print dialog in new tab)</span>",
-            unsafe_allow_html=True,
-        )
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            import streamlit as st
+            st.error(f"Could not render print component: {e}")
+        except Exception:
+            pass
