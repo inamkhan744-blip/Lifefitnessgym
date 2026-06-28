@@ -140,8 +140,7 @@ def _build_receipt_html_body(data: dict, copies: int) -> str:
     if copies == 2:
         member_text, gym_text = format_dual_receipts(data)
         return (
-            f'<div class="receipt"><pre>{html_lib.escape(member_text)}</pre></div>'
-            f'<div class="cut"></div>'
+            f'<div class="receipt page-cut"><pre>{html_lib.escape(member_text)}</pre></div>'
             f'<div class="receipt"><pre>{html_lib.escape(gym_text)}</pre></div>'
         )
     else:
@@ -230,7 +229,10 @@ def render_print_component(data: dict, copies: int = 2):
     body {{ background:#fff; padding:0; }}
     .btn-bar, .hint {{ display: none !important; }}
     .receipt {{ border: none; max-width: 100%; }}
-    .cut {{ color: #ccc; }}
+    .page-cut {{
+      page-break-after: always;
+      break-after: page;
+    }}
   }}
 </style>
 </head>
