@@ -5,8 +5,10 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import time
 import object_store
+import face_engine
 from PIL import Image
 import io
+import numpy as np
 
 try:
     import cv2
@@ -481,53 +483,400 @@ def render_ai_dashboard_intel(sel_gid):
     st.divider()
 
 
-def render_face_tab():
-    st.subheader("📸 Live Face Check-in")
-    st.info("🎥 Camera will start automatically. Show your face to check in.")
-    
-    camera_option = st.radio(
-        "Select Camera:",
-        ["💻 Laptop Webcam", "🔌 USB Camera"],
-        horizontal=True,
-        key="face_cam_select"
+_AUTO_CLICK_JS = """
+<script>
+(function(){
+  var _faceInterval = null;
+  function clickCamBtn() {
+    var doc = window.parent ? window.parent.document : document;
+    var btns = doc.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) {
+      var t = btns[i].innerText.trim().toLowerCase();
+      if (t === 'take photo' || t === '📷' || t.includes('take photo')) {
+        btns[i].click();
+        return;
+      }
+    }
+  }
+  clearInterval(_faceInterval);
+  _faceInterval = setInterval(clickCamBtn, 3500);
+  setTimeout(clickCamBtn, 1800);
+})();
+</script>
+"""
+
+_FACE_TAB_SS_DEFAULTS = {
+    "face_auto_mode": False,
+    "face_unknown_log": [],       # list of {time, snapshot_b64}
+    "face_today_marked": set(),   # member ids marked via face today
+    "face_last_result": None,     # dict with last detection info
+    "face_enc_cache": None,       # cached encodings list
+    "face_enc_cache_gym": None,   # gym_id for the cached encodings
+    "face_enroll_member_id": None,
+}
+
+def _face_ss_init():
+    for k, v in _FACE_TAB_SS_DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = v if not callable(v) else v()
+
+
+def _load_encodings(gym_id):
+    """Load and cache face encodings for the selected gym."""
+    if (st.session_state.face_enc_cache is None
+            or st.session_state.face_enc_cache_gym != gym_id):
+        st.session_state.face_enc_cache = db.get_face_encodings(gym_id)
+        st.session_state.face_enc_cache_gym = gym_id
+    return st.session_state.face_enc_cache
+
+
+def _match_face(encoding, encodings_list) -> dict | None:
+    """Find best matching member. Returns member dict or None."""
+    best_score = 0.0
+    best = None
+    for m in encodings_list:
+        stored = face_engine.str_to_encoding(m["encoding_json"])
+        if stored is None:
+            continue
+        score = face_engine.similarity(encoding, stored)
+        if score > best_score:
+            best_score = score
+            best = m
+    if best and best_score >= face_engine.SIMILARITY_THRESHOLD:
+        return {**best, "score": best_score}
+    return None
+
+
+def _result_banner(kind: str, name: str = "", detail: str = ""):
+    colors = {
+        "success": ("#064E3B", "#10B981"),
+        "expired": ("#78350F", "#F59E0B"),
+        "unknown": ("#1E1B4B", "#6366F1"),
+        "error":   ("#1E1B4B", "#EF4444"),
+    }
+    icons = {"success": "✅", "expired": "⚠️", "unknown": "❓", "error": "🚫"}
+    bg, border = colors.get(kind, ("#1E293B", "#475569"))
+    icon = icons.get(kind, "ℹ️")
+    st.markdown(
+        f"""
+        <div style="background:{bg};border:3px solid {border};border-radius:16px;
+                    padding:1.2rem 1rem;text-align:center;margin:0.6rem 0;">
+          <div style="font-size:2.8rem;line-height:1;">{icon}</div>
+          <div style="font-size:1.6rem;font-weight:900;color:#fff;margin-top:.3rem;">{name}</div>
+          <div style="font-size:.9rem;color:#CBD5E1;margin-top:.3rem;">{detail}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    
-    source = 0 if camera_option == "💻 Laptop Webcam" else 1
-    
-    # Auto-start camera when tab opens
-    if not _CV2_AVAILABLE:
-        st.error("❌ Camera not available on this server. Use manual check-in instead.")
-        return
-    try:
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            st.error("❌ Camera not found! Check connection.")
+
+
+def _process_face_image(pil_img, gym_id, current_user):
+    """
+    Detect face → match → mark attendance.
+    Returns result dict with keys: kind, name, detail, member (optional).
+    """
+    img_bgr = face_engine.pil_to_bgr(pil_img)
+    encoding = face_engine.get_encoding(img_bgr)
+
+    if encoding is None:
+        return {"kind": "error", "name": "NO FACE DETECTED",
+                "detail": "Camera ke saamne aayein — seedha / clear light mein"}
+
+    encodings = _load_encodings(gym_id)
+    if not encodings:
+        return {"kind": "error", "name": "NO FACES ENROLLED",
+                "detail": "Pehle members ke faces enroll karein (neeche ↓)"}
+
+    match = _match_face(encoding, encodings)
+
+    if match is None:
+        snap_b64 = base64.b64encode(pil_img.resize((160, 160)).tobytes()).decode()
+        entry = {"time": datetime.now().strftime("%H:%M:%S"), "snap": snap_b64}
+        st.session_state.face_unknown_log.append(entry)
+        return {"kind": "unknown", "name": "UNKNOWN PERSON",
+                "detail": "Is shaks ki face enrollment nahi hai ya match nahi hua"}
+
+    member_id = match["id"]
+    status = (match["status"] or "active").lower()
+
+    # Expired check
+    if match["expiry_date"]:
+        try:
+            exp = date.fromisoformat(match["expiry_date"])
+            if exp < date.today():
+                return {"kind": "expired", "name": match["full_name"],
+                        "detail": f"Membership expired {match['expiry_date']} — please pay at counter",
+                        "member": match}
+        except Exception:
+            pass
+
+    # Inactive check
+    if status not in ("active",):
+        return {"kind": "error", "name": match["full_name"],
+                "detail": f"Account {match['status']} — please see counter",
+                "member": match}
+
+    # Mark attendance
+    ok, msg = db.mark_attendance(member_id, match["gym_id"],
+                                  date.today(), "Present", current_user)
+    st.session_state.face_today_marked.add(member_id)
+    # Invalidate encoding cache so fresh list is shown
+    st.session_state.face_enc_cache = None
+
+    score_pct = f"{match['score']*100:.0f}%"
+    return {
+        "kind": "success",
+        "name": f"WELCOME  {match['full_name']}",
+        "detail": f"✅ Attendance marked · Match {score_pct} · {match['serial_number']}",
+        "member": match,
+    }
+
+
+def render_face_recognition_tab(gym_id, role, current_user, gyms):
+    _face_ss_init()
+
+    gym_opts = {g.name: g.id for g in gyms}
+
+    # ── Controls row ─────────────────────────────────────────────────────────
+    ctrl_l, ctrl_r = st.columns([3, 1])
+    with ctrl_l:
+        if gym_id:
+            face_gym_id = gym_id
+            st.caption(f"📍 Gym: **{next((g.name for g in gyms if g.id==gym_id), '')}**")
         else:
-            st.success("✅ Camera started automatically!")
-            frame_placeholder = st.empty()
-            status_placeholder = st.empty()
-            stop_placeholder = st.empty()
-            stop = False
-            
-            while not stop:
-                ret, frame = cap.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                    status_placeholder.info("👀 Camera ON - Face check-in active")
-                    time.sleep(0.1)
-                else:
-                    status_placeholder.error("Camera error")
-                    break
-                
-                with stop_placeholder.container():
-                    if st.button("⏹️ Stop Camera", key="stop_cam_btn", use_container_width=True):
-                        stop = True
-            
-            cap.release()
-            st.info("Camera stopped.")
-    except Exception as e:
-        st.error(f"Camera error: {e}")
+            chosen = st.selectbox("Select Gym", list(gym_opts.keys()),
+                                  key="face_gym_sel")
+            face_gym_id = gym_opts[chosen]
+    with ctrl_r:
+        auto = st.toggle("⚡ Auto Mode",
+                         value=st.session_state.face_auto_mode,
+                         key="face_auto_toggle",
+                         help="Auto-clicks camera every 3.5 seconds")
+        st.session_state.face_auto_mode = auto
+
+    if auto:
+        st.components.v1.html(_AUTO_CLICK_JS, height=0)
+        st.info("⚡ Auto Mode ON — camera is capturing every 3–4 seconds")
+
+    # ── Main 2-column layout ──────────────────────────────────────────────────
+    cam_col, stat_col = st.columns([6, 4], gap="medium")
+
+    with cam_col:
+        st.markdown("##### 📷 Live Camera Feed")
+        cam_img = st.camera_input(
+            "Camera",
+            key=f"face_cam_{int(time.time()//8)}",
+            label_visibility="collapsed",
+        )
+
+        if cam_img is not None:
+            pil = Image.open(cam_img)
+            with st.spinner("🔍 Recognizing..."):
+                result = _process_face_image(pil, face_gym_id, current_user)
+            st.session_state.face_last_result = result
+
+            # Annotate image
+            img_bgr = face_engine.pil_to_bgr(pil)
+            color_map = {"success":(0,220,100), "expired":(0,180,255),
+                         "unknown":(200,60,220), "error":(60,60,255)}
+            color = color_map.get(result["kind"], (200,200,200))
+            label = result["name"][:20]
+            annotated = face_engine.annotate(img_bgr, label, color)
+            ann_pil = Image.fromarray(
+                __import__("cv2").cvtColor(annotated, __import__("cv2").COLOR_BGR2RGB)
+            )
+            st.image(ann_pil, use_container_width=True)
+
+            _result_banner(result["kind"], result["name"], result["detail"])
+
+            # Beep sounds
+            if result["kind"] == "success":
+                st.components.v1.html(_BEEP_JS, height=0)
+            elif result["kind"] in ("expired", "unknown"):
+                st.components.v1.html(_BUZZ_JS, height=0)
+        else:
+            # No capture yet — show last result if any
+            lr = st.session_state.face_last_result
+            if lr:
+                _result_banner(lr["kind"], lr["name"], lr["detail"])
+            else:
+                st.markdown(
+                    """<div style="background:#0F172A;border:2px dashed #334155;
+                                  border-radius:12px;padding:2rem;text-align:center;
+                                  color:#64748B;font-size:1rem;">
+                    📷 Camera band hai — upar "Take photo" dabayein<br>
+                    ya Auto Mode ON karein
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+    with stat_col:
+        st.markdown("##### 📊 Today's Summary")
+        enrolled = db.get_face_encodings(face_gym_id)
+        all_today_att = db.get_attendance(gym_id=face_gym_id, check_date=date.today())
+        present_today = [r for r in all_today_att if r.status == "Present"]
+        unknown_count = len(st.session_state.face_unknown_log)
+        all_members  = db.get_members(gym_id=face_gym_id)
+        expired_list = [
+            m for m in all_members
+            if m.expiry_date and date.fromisoformat(m.expiry_date) < date.today()
+        ]
+
+        m1, m2 = st.columns(2)
+        m1.metric("✅ Present", len(present_today))
+        m2.metric("❓ Unknown", unknown_count)
+        m3, m4 = st.columns(2)
+        m3.metric("⚠️ Expired", len(expired_list))
+        m4.metric("👤 Enrolled", len(enrolled))
+
+        st.divider()
+
+        # ── Face Enrollment ────────────────────────────────────────────────
+        with st.expander("👤 Face Enrollment", expanded=len(enrolled) == 0):
+            st.caption("Pehli baar: har member ka face enroll karein")
+            members = db.get_members(gym_id=face_gym_id, status="Active")
+            if not members:
+                st.info("Koi Active member nahi mila.")
+            else:
+                enrolled_ids = {e["id"] for e in enrolled}
+                search_e = st.text_input("Search", placeholder="Name ya serial...",
+                                         key="face_enroll_search", label_visibility="collapsed")
+                if search_e:
+                    q = search_e.lower()
+                    members = [m for m in members
+                               if q in m.full_name.lower()
+                               or q in (m.serial_number or "").lower()]
+
+                for m in members[:20]:
+                    tag = "✅ Enrolled" if m.id in enrolled_ids else "⬜ Not enrolled"
+                    with st.container():
+                        ec1, ec2 = st.columns([3, 2])
+                        with ec1:
+                            st.markdown(
+                                f"**{m.full_name}**  \n"
+                                f"<span style='color:#94A3B8;font-size:.8rem;'>"
+                                f"{m.serial_number} · {tag}</span>",
+                                unsafe_allow_html=True,
+                            )
+                        with ec2:
+                            if st.button("📷 Enroll",
+                                         key=f"enroll_{m.id}",
+                                         use_container_width=True):
+                                st.session_state.face_enroll_member_id = m.id
+                                st.rerun()
+
+                # If enrollment capture active
+                enroll_id = st.session_state.face_enroll_member_id
+                if enroll_id:
+                    em = next((m for m in members if m.id == enroll_id), None)
+                    if em:
+                        st.info(f"📷 **{em.full_name}** ka face enroll kar rahe hain")
+                        enroll_photo = st.camera_input(
+                            f"Enroll: {em.full_name}",
+                            key=f"enroll_cam_{enroll_id}",
+                        )
+                        col_save, col_cancel = st.columns(2)
+                        with col_save:
+                            if enroll_photo and st.button("💾 Save Face",
+                                                           key="enroll_save",
+                                                           type="primary",
+                                                           use_container_width=True):
+                                pil = Image.open(enroll_photo)
+                                enc = face_engine.get_encoding_from_pil(pil)
+                                if enc is None:
+                                    st.error("❌ No face detected — seedha camera ke saamne aayein")
+                                else:
+                                    ok, msg = db.save_face_encoding(
+                                        enroll_id, face_engine.encoding_to_str(enc)
+                                    )
+                                    if ok:
+                                        st.success(f"✅ {em.full_name} enrolled!")
+                                        st.session_state.face_enroll_member_id = None
+                                        st.session_state.face_enc_cache = None
+                                        st.rerun()
+                                    else:
+                                        st.error(f"DB error: {msg}")
+                        with col_cancel:
+                            if st.button("❌ Cancel", key="enroll_cancel",
+                                         use_container_width=True):
+                                st.session_state.face_enroll_member_id = None
+                                st.rerun()
+
+    # ── Bottom tabs ───────────────────────────────────────────────────────────
+    st.divider()
+    bt1, bt2, bt3 = st.tabs(["✅ Attendance Today", "❓ Unknown Log", "⚠️ Expired List"])
+
+    members_map = {m.id: m for m in db.get_members(gym_id=face_gym_id)}
+
+    with bt1:
+        if not present_today:
+            st.info("Abhi koi face attendance nahi hua aaj.")
+        else:
+            for rec in reversed(present_today[-50:]):
+                m = members_map.get(rec.member_id)
+                if not m:
+                    continue
+                rc1, rc2, rc3 = st.columns([1, 3, 1])
+                with rc1:
+                    show_member_photo(m.photo_path, width=70)
+                with rc2:
+                    t = rec.created_at.strftime("%H:%M") if rec.created_at else "—"
+                    st.markdown(
+                        f"**{m.full_name}**  \n"
+                        f"<span style='color:#94A3B8;font-size:.85rem;'>"
+                        f"{m.serial_number} · {t}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with rc3:
+                    st.markdown("✅ Present", unsafe_allow_html=True)
+                st.divider()
+
+    with bt2:
+        unknowns = st.session_state.face_unknown_log
+        if not unknowns:
+            st.success("✅ Aaj koi unknown person nahi aya.")
+        else:
+            st.warning(f"⚠️ {len(unknowns)} unknown person(s) detected today (is session mein)")
+            for i, u in enumerate(reversed(unknowns[-30:])):
+                st.markdown(
+                    f"<div style='background:#1E1B4B;border:1px solid #4338CA;"
+                    f"border-radius:8px;padding:.6rem .8rem;margin:.3rem 0;"
+                    f"color:#E0E7FF;'>❓ Unknown visitor — {u['time']}</div>",
+                    unsafe_allow_html=True,
+                )
+            if st.button("🗑️ Clear Log", key="clear_unknown_log"):
+                st.session_state.face_unknown_log = []
+                st.rerun()
+
+    with bt3:
+        if not expired_list:
+            st.success("✅ Koi expired member nahi hai.")
+        else:
+            st.error(f"⚠️ {len(expired_list)} members ki membership expire ho chuki hai!")
+            for m in expired_list:
+                ec1, ec2, ec3 = st.columns([1, 3, 1])
+                with ec1:
+                    show_member_photo(m.photo_path, width=70)
+                with ec2:
+                    st.markdown(
+                        f"**{m.full_name}**  \n"
+                        f"<span style='color:#FCA5A5;font-size:.85rem;'>"
+                        f"Expired: {m.expiry_date} · {m.serial_number}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with ec3:
+                    days_ago = (date.today() - date.fromisoformat(m.expiry_date)).days
+                    st.markdown(
+                        f"<span style='color:#FCA5A5;font-size:.8rem;'>"
+                        f"{days_ago}d ago</span>",
+                        unsafe_allow_html=True,
+                    )
+                st.divider()
+
+    # Auto-mode rerun loop
+    if st.session_state.face_auto_mode:
+        time.sleep(3)
+        st.rerun()
 
 # ── Page ─────────────────────────────────────────────────────────────────────
 def render(gym_id, role, current_user):
@@ -828,68 +1177,9 @@ def render(gym_id, role, current_user):
 
                 st.caption("💡 Galti se mark kiya? Upar **'🔄 Reset Today's Marks'** button dabayein.")
 
-    # ========== TAB 3: FACE CHECK-IN (WITH WiFi Camera) ==========
+    # ========== TAB 3: FACE RECOGNITION ==========
     with tab_face:
-        st.subheader("📸 Live Face Check-in")
-        st.info("🎥 Camera will start automatically. Show your face to check in.")
-        
-        camera_source = st.radio(
-            "Select Camera:", 
-            ["💻 Laptop Webcam", "🔌 USB Camera", "📱 WiFi/IP Camera"],
-            horizontal=True
-        )
-        
-        ip_url = None
-        source = None
-        
-        if camera_source == "💻 Laptop Webcam":
-            source = 0
-        elif camera_source == "🔌 USB Camera":
-            source = 1
-        else:
-            ip_url = st.text_input(
-                "Enter IP Camera URL:", 
-                placeholder="http://192.168.100.4:8080/video",
-                help="Get this from IP Webcam app on your phone"
-            )
-            if ip_url:
-                source = ip_url
-        
-        if st.button("🎥 Start Camera", use_container_width=True):
-            if camera_source == "📱 WiFi/IP Camera" and not ip_url:
-                st.error("❌ Please enter IP Camera URL first!")
-            elif source is None:
-                st.error("❌ Please select/enter camera source!")
-            else:
-                try:
-                    import cv2
-                    cap = cv2.VideoCapture(source)
-                    if not cap.isOpened():
-                        st.error("❌ Camera not found! Check connection.")
-                    else:
-                        st.success("✅ Camera started!")
-                        frame_placeholder = st.empty()
-                        stop_placeholder = st.empty()
-                        stop = False
-                        
-                        while not stop:
-                            ret, frame = cap.read()
-                            if ret:
-                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                                frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                                time.sleep(0.1)
-                            else:
-                                st.error("Camera error")
-                                break
-                            
-                            with stop_placeholder.container():
-                                if st.button("⏹️ Stop Camera", key="stop_cam_btn", use_container_width=True):
-                                    stop = True
-                        
-                        cap.release()
-                        st.info("Camera stopped.")
-                except Exception as e:
-                    st.error(f"Camera error: {e}")
+        render_face_recognition_tab(gym_id, role, current_user, gyms)
 
     # ── View Records ──────────────────────────────────────────────────────────
     with tab_view:

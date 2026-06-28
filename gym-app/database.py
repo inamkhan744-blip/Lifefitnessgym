@@ -166,6 +166,7 @@ class Member(Base):
     expiry_date = Column(String(15))
     status = Column(String(20), default="Active")
     notes = Column(Text)
+    face_encoding = Column(Text, nullable=True)
     whatsapp_sent = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -400,6 +401,7 @@ def init_db():
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
     _ensure_column("fee_records", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
+    _ensure_column("members", "face_encoding", "face_encoding TEXT")
 
 # 🔥 Create StaffAttendance table
     try:
@@ -748,6 +750,49 @@ def update_member(member_id, **kwargs):
     except Exception as e:
         db.rollback()
         return False, str(e)
+    finally:
+        db.close()
+
+
+# ── Face Encoding CRUD ────────────────────────────────────────────────────────
+
+def save_face_encoding(member_id: int, encoding_json: str) -> tuple[bool, str]:
+    """Save face encoding JSON for a member."""
+    db = get_db()
+    try:
+        m = db.query(Member).filter_by(id=member_id).first()
+        if not m:
+            return False, "Member not found"
+        m.face_encoding = encoding_json
+        db.commit()
+        return True, "Face enrolled"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_face_encodings(gym_id=None) -> list[dict]:
+    """Return all members with enrolled face encodings."""
+    db = get_db()
+    try:
+        q = db.query(Member).filter(Member.face_encoding.isnot(None))
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return [
+            {
+                "id": m.id,
+                "gym_id": m.gym_id,
+                "serial_number": m.serial_number,
+                "full_name": m.full_name,
+                "photo_path": m.photo_path,
+                "status": m.status or "Active",
+                "expiry_date": m.expiry_date,
+                "encoding_json": m.face_encoding,
+            }
+            for m in q.all()
+        ]
     finally:
         db.close()
 

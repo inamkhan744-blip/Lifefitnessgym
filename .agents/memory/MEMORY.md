@@ -3,3 +3,4 @@
 - [Streamlit radio empty label](streamlit-quirks.md) — st.radio with label="" raises accessibility warning; always provide real label + label_visibility="collapsed".
 - [Object Storage for photos](object-storage-photos.md) — member photos stored in Replit Object Storage (permanent); object_store.py is the helper module; photos survive restarts.
 - [Python path in production](python-prod-path.md) — `python`/`python3` not in PATH on Cloud Run autoscale; use absolute path `/home/runner/workspace/.pythonlibs/bin/python3` in artifact.toml production run commands.
+- [Face recognition system](face-recognition.md) — OpenCV Haar Cascade + cosine similarity (threshold 0.90); face_engine.py is the core; face_encoding TEXT column added to Member ORM + _ensure_column migration; libGL system dep required for cv2 headless; opencv-python-headless already installed.
