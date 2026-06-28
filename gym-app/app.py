@@ -74,6 +74,7 @@ from pages import (
     admin_dashboard,
     setup,
     members,
+    bulk_id_cards,
     attendance,
     fee_collection,
     expenses,
@@ -165,6 +166,7 @@ with st.sidebar:
         "Member & Identity": {
             "Members":           ("👥", "Members"),
             "Membership Cards":  ("🪪", "Membership Cards"),
+            "Bulk ID Cards":     ("🖨️", "Bulk ID Cards"),
             "Attendance":        ("📅", "Attendance"),
             "Progress Tracker":  ("📏", "Progress Tracker"),
         },
@@ -267,6 +269,7 @@ if   page == "Dashboard":        admin_dashboard.render(gid, role, username)
 elif page == "Gym Setup":        setup.render()
 elif page == "Members":          members.render(gid, role)
 elif page == "Membership Cards": membership_card.render(gid, role)
+elif page == "Bulk ID Cards":    bulk_id_cards.render(gid, role)
 elif page == "Attendance":       attendance.render(gid, role, username)
 elif page == "Progress Tracker": progress.render(gid, role)
 elif page == "Fee Collection":   fee_collection.render(gid, role, username)
