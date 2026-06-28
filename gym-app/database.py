@@ -111,8 +111,7 @@ class Gym(Base):
     stock_items = relationship("StockItem", back_populates="gym", cascade="all, delete-orphan")
     stock_sales = relationship("StockSale", back_populates="gym", cascade="all, delete-orphan")
     complaints = relationship("Complaint", back_populates="gym", cascade="all, delete-orphan")
-    
-    # 🔥 ADD THIS LINE - Staff Targets relationship
+    receipt_logs = relationship("ReceiptLog", back_populates="gym", cascade="all, delete-orphan")
     staff_targets = relationship("StaffTarget", back_populates="gym", cascade="all, delete-orphan")
     announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
 
@@ -289,6 +288,23 @@ class Complaint(Base):
 
     gym = relationship("Gym", back_populates="complaints")
     member = relationship("Member", back_populates="complaints")
+
+
+class ReceiptLog(Base):
+    __tablename__ = "receipt_logs"
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    fee_record_id  = Column(Integer, ForeignKey("fee_records.id", ondelete="SET NULL"), nullable=True)
+    gym_id         = Column(Integer, ForeignKey("gyms.id",        ondelete="SET NULL"), nullable=True)
+    member_name    = Column(String(120), nullable=False)
+    receipt_number = Column(String(40),  nullable=False)
+    amount         = Column(Float,       nullable=False)
+    collected_by   = Column(String(60))
+    pay_date       = Column(String(15),  nullable=False)
+    pay_time       = Column(String(10),  nullable=False)
+    print_issued   = Column(Boolean, default=False, nullable=False)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    gym = relationship("Gym", back_populates="receipt_logs")
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -950,6 +966,76 @@ def add_fee_record(member_id, gym_id, amount, payment_method, payment_date,
     except Exception as e:
         db.rollback()
         return False, str(e)
+    finally:
+        db.close()
+
+
+def log_receipt(fee_record_id, gym_id, member_name, receipt_number, amount,
+                collected_by, print_issued=False):
+    """Log a fee receipt into receipt_logs table."""
+    db = get_db()
+    try:
+        now = datetime.utcnow()
+        db.add(ReceiptLog(
+            fee_record_id  = fee_record_id,
+            gym_id         = gym_id,
+            member_name    = str(member_name),
+            receipt_number = str(receipt_number),
+            amount         = float(amount),
+            collected_by   = str(collected_by),
+            pay_date       = now.strftime("%Y-%m-%d"),
+            pay_time       = now.strftime("%H:%M"),
+            print_issued   = print_issued,
+        ))
+        db.commit()
+        return True, "Receipt logged."
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_print_issued(receipt_number: str, issued: bool = True):
+    """Mark a receipt as printed (or not)."""
+    db = get_db()
+    try:
+        db.query(ReceiptLog)\
+          .filter(ReceiptLog.receipt_number == receipt_number)\
+          .update({"print_issued": issued})
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def get_receipt_logs(gym_id=None, limit=500):
+    """Return receipt log rows, newest first."""
+    db = get_db()
+    try:
+        q = db.query(ReceiptLog)
+        if gym_id:
+            q = q.filter(ReceiptLog.gym_id == gym_id)
+        rows = q.order_by(ReceiptLog.created_at.desc()).limit(limit).all()
+        result = []
+        for r in rows:
+            result.append({
+                "id":             r.id,
+                "receipt_number": r.receipt_number,
+                "member_name":    r.member_name,
+                "amount":         r.amount,
+                "collected_by":   r.collected_by or "",
+                "pay_date":       r.pay_date,
+                "pay_time":       r.pay_time,
+                "print_issued":   r.print_issued,
+                "created_at":     r.created_at,
+            })
+        return result
+    except Exception as e:
+        return []
     finally:
         db.close()
 

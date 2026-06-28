@@ -6,8 +6,6 @@ import uuid
 from datetime import date, timedelta, datetime
 import database as db
 import base64
-import subprocess
-import tempfile
 
 # ============================================
 # PIL IMPORT (Image Optimization)
@@ -24,195 +22,10 @@ except ImportError:
 # PRINTER UTILITY
 # ============================================
 
-class ReceiptPrinter:
-    def __init__(self, printer_name="BC-87AC"):
-        self.printer_name = printer_name
-    
-    def _check_printer(self):
-        """Check if printer is available"""
-        try:
-            if os.name == 'nt':  # Windows
-                result = subprocess.run(
-                    ['wmic', 'printer', 'get', 'name'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if self.printer_name not in result.stdout:
-                    for line in result.stdout.split('\n'):
-                        if 'thermal' in line.lower() or 'pos' in line.lower() or '80mm' in line.lower():
-                            self.printer_name = line.strip()
-                            return True
-                    return False
-            return True
-        except:
-            return False
-    
-    def print_dual_copies(self, data):
-        """Print 2 copies - Member copy and Gym copy"""
-        receipt_no = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
-        data['receipt_no'] = receipt_no
-        current_time = datetime.now().strftime('%I:%M %p')
-        
-        member_receipt = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-║           📍 {data.get('gym_address', 'Your Gym Address'):^33} ║
-║           📞 {data.get('gym_phone', '+92-XXX-XXXXXXX'):^33} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 MEMBER COPY                              ║
-║   RECEIPT #: {receipt_no:<27} ║
-║   DATE: {data.get('date', date.today().strftime('%Y-%m-%d')):<30} ║
-║   TIME: {current_time:<30} ║
-║   COLLECTED BY: {data.get('collected_by', 'Staff'):<23} ║
-║                                               ║
-║   ─── MEMBER DETAILS ───                      ║
-║   Name: {data.get('member_name', 'N/A'):<32} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Phone: {data.get('phone', 'N/A'):<30}      ║
-║                                               ║
-║   ─── PAYMENT DETAILS ───                     ║
-║   Amount: PKR {data.get('amount', 0):>14,.2f} ║
-║   Method: {data.get('method', 'Cash'):<30}    ║
-║   Status: ✅ PAID                             ║
-║                                               ║
-║   ─── MEMBERSHIP ───                         ║
-║   Valid From: {data.get('period_start', 'N/A'):<24} ║
-║   Valid Till: {data.get('period_end', 'N/A'):<26} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║          💪 Thank you for your payment!       ║
-║          🏷️ KEEP THIS COPY WITH YOU          ║
-║                                               ║
-║      ════════════════════════════════          ║
-║         Have a great workout! 🏋️             ║
-╚═══════════════════════════════════════════════╝
-"""
-
-        gym_receipt = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 GYM COPY (OFFICE RECORD)                 ║
-║   RECEIPT #: {receipt_no:<27} ║
-║   DATE: {data.get('date', date.today().strftime('%Y-%m-%d')):<30} ║
-║   TIME: {current_time:<30} ║
-║   COLLECTED BY: {data.get('collected_by', 'Staff'):<23} ║
-║                                               ║
-║   ─── MEMBER DETAILS ───                      ║
-║   Name: {data.get('member_name', 'N/A'):<32} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Phone: {data.get('phone', 'N/A'):<30}      ║
-║                                               ║
-║   ─── PAYMENT DETAILS ───                     ║
-║   Amount: PKR {data.get('amount', 0):>14,.2f} ║
-║   Method: {data.get('method', 'Cash'):<30}    ║
-║   Status: ✅ PAID                             ║
-║                                               ║
-║   ─── MEMBERSHIP ───                         ║
-║   Valid From: {data.get('period_start', 'N/A'):<24} ║
-║   Valid Till: {data.get('period_end', 'N/A'):<26} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║          🏢 GYM OFFICE COPY                   ║
-║          Keep for record keeping              ║
-║                                               ║
-║      ════════════════════════════════          ║
-║         Payment recorded in system            ║
-╚═══════════════════════════════════════════════╝
-"""
-
-        success1 = self._send_to_printer(member_receipt)
-        success2 = self._send_to_printer(gym_receipt)
-        return success1 and success2
-    
-    def print_single_copy(self, data):
-        """Print single copy (Member copy only)"""
-        receipt_no = data.get('receipt_no', f"RCP-{uuid.uuid4().hex[:6].upper()}")
-        data['receipt_no'] = receipt_no
-        current_time = datetime.now().strftime('%I:%M %p')
-        
-        member_receipt = f"""
-╔═══════════════════════════════════════════════╗
-║                  {data.get('gym_name', 'FITNESS PRO'):^40} ║
-║              🏋️ GYM & FITNESS CENTER          ║
-║                                               ║
-║           📍 {data.get('gym_address', 'Your Gym Address'):^33} ║
-║           📞 {data.get('gym_phone', '+92-XXX-XXXXXXX'):^33} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║   📋 MEMBER COPY                              ║
-║   RECEIPT #: {receipt_no:<27} ║
-║   DATE: {data.get('date', date.today().strftime('%Y-%m-%d')):<30} ║
-║   TIME: {current_time:<30} ║
-║   COLLECTED BY: {data.get('collected_by', 'Staff'):<23} ║
-║                                               ║
-║   ─── MEMBER DETAILS ───                      ║
-║   Name: {data.get('member_name', 'N/A'):<32} ║
-║   Serial: {data.get('serial', 'N/A'):<30}    ║
-║   Phone: {data.get('phone', 'N/A'):<30}      ║
-║                                               ║
-║   ─── PAYMENT DETAILS ───                     ║
-║   Amount: PKR {data.get('amount', 0):>14,.2f} ║
-║   Method: {data.get('method', 'Cash'):<30}    ║
-║   Status: ✅ PAID                             ║
-║                                               ║
-║   ─── MEMBERSHIP ───                         ║
-║   Valid From: {data.get('period_start', 'N/A'):<24} ║
-║   Valid Till: {data.get('period_end', 'N/A'):<26} ║
-║                                               ║
-╠═══════════════════════════════════════════════╣
-║                                               ║
-║          💪 Thank you for your payment!       ║
-║          🏷️ KEEP THIS COPY WITH YOU          ║
-║                                               ║
-║      ════════════════════════════════          ║
-║         Have a great workout! 🏋️             ║
-╚═══════════════════════════════════════════════╝
-"""
-        return self._send_to_printer(member_receipt)
-    
-    def _send_to_printer(self, content):
-        try:
-            if os.name == 'nt':
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                    f.write(content)
-                    temp_file = f.name
-                result = subprocess.run(['notepad', '/p', temp_file], capture_output=True, timeout=10)
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
-                return result.returncode == 0
-            else:
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                    f.write(content)
-                    temp_file = f.name
-                result = subprocess.run(['lp', '-d', self.printer_name, temp_file], capture_output=True, timeout=10)
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
-                return result.returncode == 0
-        except Exception as e:
-            print(f"Print error: {e}")
-            return False
-
-_printer = None
-
-def get_printer():
-    global _printer
-    if _printer is None:
-        _printer = ReceiptPrinter()
-    return _printer
+from printer_utils import (
+    format_receipt, print_single, print_dual,
+    render_print_preview, check_printer
+)
 
 # ============================================
 # IMAGE HELPERS (OPTIMIZED + ORIENTATION FIX)
@@ -412,10 +225,11 @@ def render_collect_fee(gym_id, current_user):
 
         st.markdown("**Filter by Status:**")
         status_filter = st.radio(
-            "",
+            "Filter by Status",
             ["All Members", "✅ Paid", "⏳ Unpaid", "🟡 Upcoming"],
             horizontal=True,
-            key="status_filter"
+            key="status_filter",
+            label_visibility="collapsed",
         )
         
         if status_filter == "✅ Paid":
@@ -565,42 +379,60 @@ def render_collect_fee(gym_id, current_user):
                 if ok:
                     db.update_member(member_id, expiry_date=str(period_end), status="Active")
 
-                    generated_rcp = f"RCP-{uuid.uuid4().hex[:6].upper()}"
-                    
+                    # Extract receipt number saved in DB
+                    receipt_no = msg.split("Receipt: ")[-1].strip() if "Receipt: " in msg else f"RCP-{uuid.uuid4().hex[:8].upper()}"
+
+                    receipt_data = {
+                        'gym_name':     gym_sel,
+                        'gym_address':  "",
+                        'gym_phone':    "",
+                        'receipt_no':   receipt_no,
+                        'date':         payment_date.strftime('%Y-%m-%d'),
+                        'time':         datetime.now().strftime('%I:%M %p'),
+                        'collected_by': current_user,
+                        'member_name':  sel_mem.full_name,
+                        'serial':       sel_mem.serial_number,
+                        'phone':        sel_mem.phone or "N/A",
+                        'amount':       amount,
+                        'method':       payment_method,
+                        'period_start': period_start.strftime('%Y-%m-%d'),
+                        'period_end':   period_end.strftime('%Y-%m-%d'),
+                    }
+
+                    # Log to receipt_logs table
+                    try:
+                        db.log_receipt(
+                            fee_record_id=None,
+                            gym_id=sel_gym_id,
+                            member_name=sel_mem.full_name,
+                            receipt_number=receipt_no,
+                            amount=amount,
+                            collected_by=current_user,
+                            print_issued=False,
+                        )
+                    except Exception:
+                        pass
+
                     if print_receipt:
                         try:
-                            printer = get_printer()
-                            receipt_data = {
-                                'gym_name': gym_sel,
-                                'gym_address': "Your Gym Address",
-                                'gym_phone': "+92-XXX-XXXXXXX",
-                                'receipt_no': generated_rcp,
-                                'date': payment_date.strftime('%Y-%m-%d'),
-                                'collected_by': current_user,
-                                'member_name': sel_mem.full_name,
-                                'serial': sel_mem.serial_number,
-                                'phone': sel_mem.phone or "N/A",
-                                'amount': amount,
-                                'method': payment_method,
-                                'period_start': period_start.strftime('%Y-%m-%d'),
-                                'period_end': period_end.strftime('%Y-%m-%d'),
-                            }
-                            
                             if print_copies == "2 (Member + Gym)":
-                                print_success = printer.print_dual_copies(receipt_data)
+                                ok_p, pm = print_dual(receipt_data)
                                 copy_msg = "2 copies"
                             else:
-                                print_success = printer.print_single_copy(receipt_data)
-                                copy_msg = "1 copy (Member only)"
-                            
-                            if print_success:
-                                st.success(f"✅ {copy_msg} printed successfully!")
-                                st.toast("🖨️ Receipt printed!", icon="🖨️")
+                                ok_p, pm = print_single(receipt_data)
+                                copy_msg = "1 copy"
+
+                            if ok_p:
+                                db.update_print_issued(receipt_no, True)
+                                st.success(f"Printed {copy_msg} successfully.")
                             else:
-                                st.warning("⚠️ Payment recorded, but couldn't print. Check printer.")
-                                
+                                st.warning(f"Payment saved. Printer: {pm}")
                         except Exception as e:
-                            st.warning(f"⚠️ Payment recorded, but print failed: {e}")
+                            st.warning(f"Payment saved. Print error: {e}")
+
+                    # On-screen preview
+                    with st.expander("Print Preview (80mm)", expanded=False):
+                        render_print_preview(receipt_data, copies=2 if print_receipt and "2" in print_copies else 1)
 
                     receipt_html = _generate_fee_receipt_html(
                         receipt_number=generated_rcp,
@@ -881,123 +713,66 @@ def render_history_admin(gym_id, role):
                         st.markdown("### Unknown Member")
                 
                 st.markdown("---")
-                st.subheader("🖨️ Reprint Receipt")
-                
-                col_reprint1, col_reprint2, col_reprint3 = st.columns(3)
-                
-                with col_reprint1:
-                    if st.button("🖨️ Reprint (2 Copies)", use_container_width=True, type="primary"):
-                        try:
-                            printer = get_printer()
-                            mem = selected_record['Member']
-                            
-                            date_val = selected_record['Date']
-                            if hasattr(date_val, 'strftime'):
-                                date_str = date_val.strftime('%Y-%m-%d')
-                            else:
-                                date_str = str(date_val)
-                            
-                            period_end_val = selected_record['Period End']
-                            if hasattr(period_end_val, 'strftime'):
-                                period_end_str = period_end_val.strftime('%Y-%m-%d')
-                            else:
-                                period_end_str = str(period_end_val) if period_end_val else "N/A"
-                            
-                            receipt_data = {
-                                'gym_name': "Your Gym Name",
-                                'gym_address': "Your Gym Address",
-                                'gym_phone': "+92-XXX-XXXXXXX",
-                                'receipt_no': selected_record['Receipt'],
-                                'date': date_str,
-                                'collected_by': "Admin (Reprint)",
-                                'member_name': mem.full_name if mem else "Unknown",
-                                'serial': mem.serial_number if mem else "N/A",
-                                'phone': mem.phone if mem else "N/A",
-                                'amount': selected_record['Amount'],
-                                'method': selected_record['Method'],
-                                'period_start': "N/A",
-                                'period_end': period_end_str,
-                            }
-                            
-                            if printer.print_dual_copies(receipt_data):
-                                st.success("✅ 2 copies reprinted successfully!")
-                                st.toast("🖨️ Reprint done!", icon="🖨️")
-                            else:
-                                st.error("❌ Reprint failed! Check printer.")
-                                
-                        except Exception as e:
-                            st.error(f"❌ Reprint error: {e}")
-                
-                with col_reprint2:
-                    if st.button("🖨️ Reprint (1 Copy)", use_container_width=True):
-                        try:
-                            printer = get_printer()
-                            mem = selected_record['Member']
-                            
-                            date_val = selected_record['Date']
-                            if hasattr(date_val, 'strftime'):
-                                date_str = date_val.strftime('%Y-%m-%d')
-                            else:
-                                date_str = str(date_val)
-                            
-                            period_end_val = selected_record['Period End']
-                            if hasattr(period_end_val, 'strftime'):
-                                period_end_str = period_end_val.strftime('%Y-%m-%d')
-                            else:
-                                period_end_str = str(period_end_val) if period_end_val else "N/A"
-                            
-                            receipt_data = {
-                                'gym_name': "Your Gym Name",
-                                'gym_address': "Your Gym Address",
-                                'gym_phone': "+92-XXX-XXXXXXX",
-                                'receipt_no': selected_record['Receipt'],
-                                'date': date_str,
-                                'collected_by': "Admin (Reprint)",
-                                'member_name': mem.full_name if mem else "Unknown",
-                                'serial': mem.serial_number if mem else "N/A",
-                                'phone': mem.phone if mem else "N/A",
-                                'amount': selected_record['Amount'],
-                                'method': selected_record['Method'],
-                                'period_start': "N/A",
-                                'period_end': period_end_str,
-                            }
-                            
-                            if printer.print_single_copy(receipt_data):
-                                st.success("✅ 1 copy reprinted successfully!")
-                                st.toast("🖨️ Reprint done!", icon="🖨️")
-                            else:
-                                st.error("❌ Reprint failed! Check printer.")
-                                
-                        except Exception as e:
-                            st.error(f"❌ Reprint error: {e}")
-                
-                with col_reprint3:
-                    if st.button("📄 View HTML Receipt", use_container_width=True):
-                        mem = selected_record['Member']
-                        
-                        period_end_val = selected_record['Period End']
-                        if hasattr(period_end_val, 'strftime'):
-                            period_end_str = period_end_val.strftime('%Y-%m-%d')
-                        else:
-                            period_end_str = str(period_end_val) if period_end_val else "N/A"
-                        
-                        receipt_html = _generate_fee_receipt_html(
-                            receipt_number=selected_record['Receipt'],
-                            member_name=mem.full_name if mem else "Unknown",
-                            serial=mem.serial_number if mem else "N/A",
-                            gym_name="Your Gym Name",
-                            amount=selected_record['Amount'],
-                            payment_method=selected_record['Method'],
-                            period_end=period_end_str
-                        )
-                        
-                        st.components.v1.html(f"""
-                            <script>
-                                var w = window.open('', '_blank');
-                                w.document.write({repr(receipt_html)});
-                                w.document.close();
-                            </script>
-                        """, height=0)
+                st.subheader("Reprint Receipt")
+
+                if role == 'admin':
+                    mem = selected_record['Member']
+                    date_val = selected_record['Date']
+                    date_str = date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)
+                    period_end_val = selected_record['Period End']
+                    period_end_str = period_end_val.strftime('%Y-%m-%d') if hasattr(period_end_val, 'strftime') else (str(period_end_val) if period_end_val else "N/A")
+
+                    reprint_data = {
+                        'gym_name':     selected_record.get('Gym', 'Gym'),
+                        'gym_address':  "",
+                        'gym_phone':    "",
+                        'receipt_no':   selected_record['Receipt'],
+                        'date':         date_str,
+                        'time':         datetime.now().strftime('%I:%M %p'),
+                        'collected_by': "Admin (Reprint)",
+                        'member_name':  mem.full_name if mem else "Unknown",
+                        'serial':       mem.serial_number if mem else "N/A",
+                        'phone':        mem.phone if mem else "N/A",
+                        'amount':       selected_record['Amount'],
+                        'method':       selected_record['Method'],
+                        'period_start': "N/A",
+                        'period_end':   period_end_str,
+                    }
+
+                    col_r1, col_r2, col_r3 = st.columns(3)
+
+                    with col_r1:
+                        if st.button("Reprint 2 Copies", use_container_width=True, type="primary"):
+                            try:
+                                ok_p, pm = print_dual(reprint_data)
+                                if ok_p:
+                                    db.update_print_issued(selected_record['Receipt'], True)
+                                    st.success("2 copies reprinted.")
+                                else:
+                                    st.error(f"Reprint failed: {pm}")
+                            except Exception as e:
+                                st.error(f"Reprint error: {e}")
+
+                    with col_r2:
+                        if st.button("Reprint 1 Copy", use_container_width=True):
+                            try:
+                                ok_p, pm = print_single(reprint_data)
+                                if ok_p:
+                                    db.update_print_issued(selected_record['Receipt'], True)
+                                    st.success("1 copy reprinted.")
+                                else:
+                                    st.error(f"Reprint failed: {pm}")
+                            except Exception as e:
+                                st.error(f"Reprint error: {e}")
+
+                    with col_r3:
+                        if st.button("Print Preview", use_container_width=True):
+                            st.session_state['show_reprint_preview'] = not st.session_state.get('show_reprint_preview', False)
+
+                    if st.session_state.get('show_reprint_preview', False):
+                        render_print_preview(reprint_data, copies=2)
+                else:
+                    st.info("Reprint is restricted to Admin users only.")
                 
                 st.divider()
                 
@@ -1073,6 +848,67 @@ def render_history_admin(gym_id, role):
         st.warning("🔒 Only Admin can access this section.")
 
 # ============================================
+# RECEIPT AUDIT LOG (Admin only)
+# ============================================
+
+def render_receipt_audit(gym_id):
+    st.subheader("Receipt Audit Log")
+    st.caption("Every fee payment is logged here. PrintIssued = Yes means receipt was physically printed.")
+
+    try:
+        logs = db.get_receipt_logs(gym_id=gym_id)
+    except Exception as e:
+        st.error(f"Could not load receipt logs: {e}")
+        return
+
+    if not logs:
+        st.info("No receipt logs yet. Logs appear after fee payments are recorded.")
+        return
+
+    import pandas as pd
+    df = pd.DataFrame(logs)
+    df = df.rename(columns={
+        "receipt_number": "Receipt No",
+        "member_name":    "Member",
+        "amount":         "Amount (PKR)",
+        "collected_by":   "Collected By",
+        "pay_date":       "Date",
+        "pay_time":       "Time",
+        "print_issued":   "Print Issued",
+    })
+    df["Print Issued"] = df["Print Issued"].map({True: "YES", False: "NO"})
+
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        filter_print = st.selectbox("Filter by Print Issued", ["All", "YES", "NO"], key="al_filter")
+    with col_f2:
+        search_name = st.text_input("Search member", key="al_search")
+
+    if filter_print != "All":
+        df = df[df["Print Issued"] == filter_print]
+    if search_name:
+        df = df[df["Member"].str.contains(search_name, case=False, na=False)]
+
+    total = len(df)
+    printed = (df["Print Issued"] == "YES").sum()
+    not_printed = total - printed
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Receipts", total)
+    m2.metric("Printed", printed)
+    m3.metric("Not Printed", not_printed)
+
+    st.dataframe(
+        df[["Receipt No", "Member", "Amount (PKR)", "Date", "Time", "Collected By", "Print Issued"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("Download CSV", data=csv, file_name="receipt_audit_log.csv", mime="text/csv")
+
+
+# ============================================
 # MAIN RENDER FUNCTION
 # ============================================
 
@@ -1083,18 +919,25 @@ def render(gym_id, role, current_user):
     st.caption("Collect membership fees and manage payment records")
     
     try:
-        printer = get_printer()
-        if printer._check_printer():
-            st.success(f"🖨️ Printer ready: {printer.printer_name}")
+        ok_p, pm = check_printer()
+        if ok_p:
+            st.success(f"Printer: {pm}")
         else:
-            st.warning("⚠️ Printer not detected. Receipts will be saved without printing.")
-    except:
+            st.info(f"No thermal printer detected — receipts can be previewed on screen.")
+    except Exception:
         pass
     
-    tab1, tab2 = st.tabs(["📝 Collect Fee", "📋 History & Admin"])
-    
-    with tab1:
+    tabs = ["📝 Collect Fee", "📋 History & Admin"]
+    if role == 'admin':
+        tabs.append("📊 Receipt Audit Log")
+    tab_objs = st.tabs(tabs)
+
+    with tab_objs[0]:
         render_collect_fee(gym_id, current_user)
-    
-    with tab2:
-        render_history_admin(gym_id, role)  # 👈 EXTRA ")" HATAYA)
+
+    with tab_objs[1]:
+        render_history_admin(gym_id, role)
+
+    if role == 'admin' and len(tab_objs) > 2:
+        with tab_objs[2]:
+            render_receipt_audit(gym_id)
