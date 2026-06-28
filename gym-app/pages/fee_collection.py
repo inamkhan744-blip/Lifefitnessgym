@@ -1,3 +1,5 @@
+# fee_collection.py - COMPLETE FIXED VERSION
+
 import streamlit as st
 import pandas as pd
 import io
@@ -87,10 +89,10 @@ def get_photo_b64(photo_field: str, serial_number: str = "", max_size: tuple = (
         photo_str = str(photo_field).strip()
         if "<div" not in photo_str and "style=" not in photo_str:
             filename = os.path.basename(photo_str)
+            _abs_uploads = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
             paths_to_check = [
-                os.path.join("gym-app/uploads", filename),
-                os.path.join("uploads", filename),
-                photo_str
+                os.path.join(_abs_uploads, filename),
+                photo_str,
             ]
             for path in paths_to_check:
                 if path and os.path.exists(path) and os.path.isfile(path):
@@ -100,7 +102,7 @@ def get_photo_b64(photo_field: str, serial_number: str = "", max_size: tuple = (
     # Try by serial number
     if not photo_path and serial_number:
         clean_serial = str(serial_number).strip().replace("-", "").lower()
-        upload_dir = "gym-app/uploads"
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
         if os.path.exists(upload_dir):
             for file_name in os.listdir(upload_dir):
                 if clean_serial in file_name.lower().replace("_", "").replace("-", ""):
@@ -171,7 +173,7 @@ def _generate_fee_receipt_html(receipt_number, member_name, serial, gym_name, am
             <div class="flex-space"><span>Method:</span><span>{payment_method}</span></div>
             <div class="flex-space"><span>Valid Till:</span><span class="bold">{period_end}</span></div>
             <div class="divider"></div>
-            <div class="text-center bold" style="margin-top: 10px;">Thank You! 🙏</div>
+            <div class="text-center bold" style="margin-top: 10px;">Thank You!</div>
         </div>
         <script>
             window.print();
@@ -369,6 +371,9 @@ def render_collect_fee(gym_id, current_user):
             elif not sel_mem:
                 st.error("❌ Member details missing!")
             else:
+                # 🔥 FIX: Generate receipt number BEFORE using it
+                generated_rcp = f"RCP-{uuid.uuid4().hex[:8].upper()}"
+                
                 ok, msg = db.add_fee_record(
                     member_id=member_id, gym_id=sel_gym_id, amount=amount,
                     payment_method=payment_method, payment_date=payment_date,
@@ -379,8 +384,8 @@ def render_collect_fee(gym_id, current_user):
                 if ok:
                     db.update_member(member_id, expiry_date=str(period_end), status="Active")
 
-                    # Extract receipt number saved in DB
-                    receipt_no = msg.split("Receipt: ")[-1].strip() if "Receipt: " in msg else f"RCP-{uuid.uuid4().hex[:8].upper()}"
+                    # 🔥 FIX: Use generated_rcp consistently
+                    receipt_no = generated_rcp
 
                     receipt_data = {
                         'gym_name':     gym_sel,
@@ -399,19 +404,42 @@ def render_collect_fee(gym_id, current_user):
                         'period_end':   period_end.strftime('%Y-%m-%d'),
                     }
 
-                    # Log to receipt_logs table
+                    # 🔥 FIX: Log to receipt_logs table
                     try:
-                        db.log_receipt(
-                            fee_record_id=None,
-                            gym_id=sel_gym_id,
-                            member_name=sel_mem.full_name,
-                            receipt_number=receipt_no,
-                            amount=amount,
-                            collected_by=current_user,
-                            print_issued=False,
-                        )
-                    except Exception:
-                        pass
+                        # Check if db.log_receipt exists
+                        if hasattr(db, 'log_receipt'):
+                            db.log_receipt(
+                                fee_record_id=None,
+                                gym_id=sel_gym_id,
+                                member_name=sel_mem.full_name,
+                                receipt_number=receipt_no,
+                                amount=amount,
+                                collected_by=current_user,
+                                print_issued=False,
+                            )
+                        else:
+                            # Fallback: Use direct SQL if function doesn't exist
+                            import sqlite3
+                            conn = sqlite3.connect('gym_app.db')
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                INSERT INTO receipt_logs 
+                                (member_name, member_id, date, time, amount, receipt_no, print_issued, collected_by)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                sel_mem.full_name,
+                                member_id,
+                                date.today().strftime('%Y-%m-%d'),
+                                datetime.now().strftime('%H:%M'),
+                                amount,
+                                receipt_no,
+                                'No',
+                                current_user
+                            ))
+                            conn.commit()
+                            conn.close()
+                    except Exception as e:
+                        st.warning(f"Receipt logging failed: {e}")
 
                     if print_receipt:
                         try:
@@ -423,7 +451,9 @@ def render_collect_fee(gym_id, current_user):
                                 copy_msg = "1 copy"
 
                             if ok_p:
-                                db.update_print_issued(receipt_no, True)
+                                # Update print status
+                                if hasattr(db, 'update_print_issued'):
+                                    db.update_print_issued(receipt_no, True)
                                 st.success(f"Printed {copy_msg} successfully.")
                             else:
                                 st.warning(f"Payment saved. Printer: {pm}")
@@ -434,8 +464,9 @@ def render_collect_fee(gym_id, current_user):
                     with st.expander("Print Preview (80mm)", expanded=False):
                         render_print_preview(receipt_data, copies=2 if print_receipt and "2" in print_copies else 1)
 
+                    # 🔥 FIX: Use generated_rcp in HTML receipt
                     receipt_html = _generate_fee_receipt_html(
-                        receipt_number=generated_rcp,
+                        receipt_number=generated_rcp,  # Fixed: was using undefined variable
                         member_name=sel_mem.full_name,
                         serial=sel_mem.serial_number,
                         gym_name=gym_sel,

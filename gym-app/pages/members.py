@@ -10,7 +10,8 @@ import styles
 from qr_utils import member_qr_png
 
 # Purani pictures ka seedha path set kar diya gaya hai
-UPLOAD_DIR = "uploads"
+# Absolute path — CWD se koi farq nahi padta
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
@@ -27,29 +28,22 @@ def save_photo(f):
 
 
 def show_photo(photo_field, w=100):
-    """Show member photo with consistent dimensions."""
+    """Show member photo — UPLOAD_DIR is absolute so always works."""
     filename = os.path.basename(photo_field) if photo_field else ""
-    possible_paths = [
-        os.path.join(UPLOAD_DIR, filename),
-        os.path.join("gym-app/uploads", filename),
-        photo_field or "",
-        os.path.join(os.getcwd(), UPLOAD_DIR, filename),
-    ]
 
     img_b64 = None
     if filename:
-        for path in possible_paths:
-            if path and os.path.exists(path):
-                try:
-                    import base64
-                    with open(path, "rb") as f:
-                        raw = f.read()
-                    img_b64 = base64.b64encode(raw).decode()
-                    ext = os.path.splitext(path)[-1].lower().lstrip(".")
-                    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
-                    break
-                except Exception:
-                    pass
+        abs_path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(abs_path):
+            try:
+                import base64
+                with open(abs_path, "rb") as f:
+                    raw = f.read()
+                img_b64 = base64.b64encode(raw).decode()
+                ext = os.path.splitext(abs_path)[-1].lower().lstrip(".")
+                mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
+            except Exception:
+                img_b64 = None
 
     size = f"{w}px"
     if img_b64:
