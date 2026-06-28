@@ -338,7 +338,7 @@ def _member_detail(m, gyms, role):
     with st.expander("🪪 ID Card & QR Code"):
         # ── ID Card preview ──────────────────────────────
         gyms = db.get_all_gyms()
-        gym_name = next((g.name for g in gyms if g.id == gym_id), "GymPro")
+        gym_name = next((g.name for g in gyms if g.id == m.gym_id), "GymPro")
 
         try:
             card_png = id_card.generate_id_card_png(m, gym_name)
