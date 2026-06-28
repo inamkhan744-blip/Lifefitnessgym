@@ -2,3 +2,4 @@
 - [Receipt audit log](receipt-audit-log.md) — receipt_logs table logs every fee payment; PrintIssued updated only if thermal print succeeds; admin-only reprint + audit tab.
 - [Streamlit radio empty label](streamlit-quirks.md) — st.radio with label="" raises accessibility warning; always provide real label + label_visibility="collapsed".
 - [Object Storage for photos](object-storage-photos.md) — member photos stored in Replit Object Storage (permanent); object_store.py is the helper module; photos survive restarts.
+- [Python path in production](python-prod-path.md) — `python`/`python3` not in PATH on Cloud Run autoscale; use absolute path `/home/runner/workspace/.pythonlibs/bin/python3` in artifact.toml production run commands.
