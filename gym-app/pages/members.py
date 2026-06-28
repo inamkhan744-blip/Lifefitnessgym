@@ -8,6 +8,7 @@ import database as db
 import styles
 from qr_utils import member_qr_png
 import object_store
+import id_card
 
 GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
 STATUSES = ["Active", "Inactive", "Suspended", "Frozen"]
@@ -334,20 +335,59 @@ def _member_detail(m, gyms, role):
     # QR CODE
     # ============================================
     
-    with st.expander("📱 Member QR Code"):
-        qc1, qc2 = st.columns([1, 2])
-        with qc1:
-            png = member_qr_png(m.serial_number, box_size=8, border=2)
-            st.image(png, width=200, caption=m.serial_number)
-        with qc2:
-            st.markdown("Print this on the membership card for quick check-in.")
-            st.download_button(
-                "⬇️ Download QR PNG",
-                data=png,
-                file_name=f"{m.serial_number}_qr.png",
-                mime="image/png",
-                key=f"qr_dl_{m.id}",
-            )
+    with st.expander("🪪 ID Card & QR Code"):
+        # ── ID Card preview ──────────────────────────────
+        gyms = db.get_all_gyms()
+        gym_name = next((g.name for g in gyms if g.id == gym_id), "GymPro")
+
+        try:
+            card_png = id_card.generate_id_card_png(m, gym_name)
+            st.image(card_png, caption="Member ID Card Preview", use_container_width=True)
+
+            dl1, dl2, dl3 = st.columns(3)
+
+            with dl1:
+                st.download_button(
+                    "⬇️ Download PNG",
+                    data=card_png,
+                    file_name=f"{m.serial_number}_id_card.png",
+                    mime="image/png",
+                    key=f"card_png_{m.id}",
+                    use_container_width=True,
+                )
+
+            with dl2:
+                try:
+                    card_pdf = id_card.generate_id_card_pdf(m, gym_name)
+                    st.download_button(
+                        "⬇️ Download PDF",
+                        data=card_pdf,
+                        file_name=f"{m.serial_number}_id_card.pdf",
+                        mime="application/pdf",
+                        key=f"card_pdf_{m.id}",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.warning(f"PDF error: {e}")
+
+            with dl3:
+                qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
+                st.download_button(
+                    "⬇️ QR Code Only",
+                    data=qr_png,
+                    file_name=f"{m.serial_number}_qr.png",
+                    mime="image/png",
+                    key=f"qr_dl_{m.id}",
+                    use_container_width=True,
+                )
+
+        except Exception as e:
+            st.error(f"ID card generation error: {e}")
+            qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
+            st.image(qr_png, width=200, caption=m.serial_number)
+            st.download_button("⬇️ QR PNG", data=qr_png,
+                               file_name=f"{m.serial_number}_qr.png",
+                               mime="image/png", key=f"qr_fb_{m.id}")
 
     # ============================================
     # FACE RECOGNITION

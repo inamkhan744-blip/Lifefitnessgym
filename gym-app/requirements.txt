@@ -52,3 +52,4 @@ yt-dlp>=2023.0.0
 python-multipart>=0.0.28
 idna>=3.8
 replit-object-storage
+reportlab

@@ -24,17 +24,61 @@ _LOCAL_UPLOADS = os.path.join(
 os.makedirs(_LOCAL_UPLOADS, exist_ok=True)
 
 
+def _compress_image(file_bytes: bytes, max_px: int = 800, quality: int = 72) -> bytes:
+    """
+    Photo compress karo upload se pehle.
+    - Max dimension: 800px (width ya height, jo bhi zyada ho)
+    - JPEG quality: 72 (original size ka ~15-25%)
+    - EXIF orientation fix included
+    """
+    try:
+        from PIL import Image, ExifTags
+        import io
+
+        img = Image.open(io.BytesIO(file_bytes))
+
+        # EXIF orientation fix (phone camera photos seedhe ho jayein)
+        try:
+            for tag, name in ExifTags.TAGS.items():
+                if name == "Orientation":
+                    exif = img._getexif()
+                    if exif and tag in exif:
+                        orientation = exif[tag]
+                        rotations = {3: 180, 6: 270, 8: 90}
+                        if orientation in rotations:
+                            img = img.rotate(rotations[orientation], expand=True)
+                    break
+        except Exception:
+            pass
+
+        # Resize: max_px ki limit mein raho, aspect ratio same rakho
+        img.thumbnail((max_px, max_px), Image.LANCZOS)
+
+        # RGBA → RGB (JPEG mein alpha channel nahi hoti)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return file_bytes  # Agar kuch fail ho to original return karo
+
+
 def upload_photo(file_bytes: bytes, original_name: str) -> str:
     """
-    Photo upload karo — Object Storage mein.
+    Photo compress karke Object Storage mein upload karo.
     Returns: object key like 'member_photos/abc123.jpg'
     """
-    ext = os.path.splitext(original_name)[-1].lower() or ".jpg"
-    key = f"{PHOTO_PREFIX}{uuid.uuid4().hex}{ext}"
+    # Pehle compress karo — size dramatically kam ho jayega
+    compressed = _compress_image(file_bytes)
+
+    # Hamesha .jpg save karo (compressed JPEG hai)
+    key = f"{PHOTO_PREFIX}{uuid.uuid4().hex}.jpg"
 
     if STORAGE_AVAILABLE:
         try:
-            _client.upload_from_bytes(key, file_bytes)
+            _client.upload_from_bytes(key, compressed)
             return key
         except Exception:
             pass
@@ -42,7 +86,7 @@ def upload_photo(file_bytes: bytes, original_name: str) -> str:
     # Fallback: local disk
     local_path = os.path.join(_LOCAL_UPLOADS, os.path.basename(key))
     with open(local_path, "wb") as f:
-        f.write(file_bytes)
+        f.write(compressed)
     return key
 
 
