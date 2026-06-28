@@ -10,7 +10,7 @@ import styles
 from qr_utils import member_qr_png
 
 # Purani pictures ka seedha path set kar diya gaya hai
-UPLOAD_DIR = "gym-app/uploads"
+UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
