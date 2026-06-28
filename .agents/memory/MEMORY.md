@@ -1,6 +1,2 @@
-- [Thermal printer refactor](thermal-printer-refactor.md) — ReceiptPrinter class moved to printer_utils.py; fee_collection.py uses import-based functions, not class instances.
-- [Receipt audit log](receipt-audit-log.md) — receipt_logs table logs every fee payment; PrintIssued updated only if thermal print succeeds; admin-only reprint + audit tab.
-- [Streamlit radio empty label](streamlit-quirks.md) — st.radio with label="" raises accessibility warning; always provide real label + label_visibility="collapsed".
-- [Object Storage for photos](object-storage-photos.md) — member photos stored in Replit Object Storage (permanent); object_store.py is the helper module; photos survive restarts.
-- [Python path in production](python-prod-path.md) — `python`/`python3` not in PATH on Cloud Run autoscale; use absolute path `/home/runner/workspace/.pythonlibs/bin/python3` in artifact.toml production run commands.
-- [Face recognition system](face-recognition.md) — OpenCV Haar Cascade + cosine similarity (threshold 0.90); face_engine.py is the core; face_encoding TEXT column added to Member ORM + _ensure_column migration; libGL system dep required for cv2 headless; opencv-python-headless already installed.
+- [Face recognition system](face-recognition.md) — profile-photo-based auto-enrollment, unknown/expired capture saving with 3-day auto-delete, admin panel
+- [Streamlit PIL fix](streamlit-pil-fix.md) — camera_input must be opened with Image.open(io.BytesIO(cam_img.getvalue())), not Image.open(cam_img) directly

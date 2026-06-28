@@ -184,3 +184,35 @@ def delete_photo(key: str):
             os.remove(local)
         except Exception:
             pass
+
+
+CAPTURE_PREFIX = "unknown_captures/"
+
+def upload_capture(key: str, image_bytes: bytes) -> bool:
+    """
+    Unknown/expired capture ko Object Storage mein save karo.
+    key = 'unknown_captures/{gym_id}/{timestamp}_{type}.jpg'
+    Returns True on success.
+    """
+    if not key or not image_bytes:
+        return False
+    try:
+        if STORAGE_AVAILABLE:
+            _client.upload_from_bytes(key, image_bytes)
+            return True
+        local = os.path.join(_LOCAL_UPLOADS, os.path.basename(key))
+        with open(local, "wb") as f:
+            f.write(image_bytes)
+        return True
+    except Exception:
+        return False
+
+
+def get_capture_bytes(key: str) -> bytes | None:
+    """Capture image download karo for display."""
+    return _download_raw(key)
+
+
+def delete_capture(key: str):
+    """Capture delete karo — same as delete_photo."""
+    delete_photo(key)

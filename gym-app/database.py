@@ -328,6 +328,19 @@ class ReceiptLog(Base):
     gym = relationship("Gym", back_populates="receipt_logs")
 
 
+class UnknownCapture(Base):
+    """Temporary store for unknown / expired member face captures."""
+    __tablename__ = "unknown_captures"
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id       = Column(Integer, nullable=False)
+    capture_key  = Column(String(300), nullable=False)   # Object Storage key
+    capture_type = Column(String(20), default="unknown") # unknown | expired
+    member_id    = Column(Integer, nullable=True)        # only for expired
+    member_name  = Column(String(120), nullable=True)
+    captured_at  = Column(DateTime, default=datetime.utcnow)
+    notes        = Column(Text, nullable=True)
+
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 PAYMENT_METHODS   = ["Cash", "Bank Transfer", "Card", "Online", "Cheque", "Other"]
@@ -402,6 +415,10 @@ def init_db():
     _ensure_column("fee_records", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
     _ensure_column("members", "face_encoding", "face_encoding TEXT")
+    try:
+        UnknownCapture.__table__.create(engine, checkfirst=True)
+    except Exception:
+        pass
 
 # 🔥 Create StaffAttendance table
     try:
@@ -793,6 +810,78 @@ def get_face_encodings(gym_id=None) -> list[dict]:
             }
             for m in q.all()
         ]
+    finally:
+        db.close()
+
+
+# ── Unknown / Expired Capture CRUD ────────────────────────────────────────────
+
+def add_unknown_capture(gym_id: int, capture_key: str,
+                        capture_type: str = "unknown",
+                        member_id: int | None = None,
+                        member_name: str | None = None,
+                        notes: str | None = None) -> int | None:
+    db = get_db()
+    try:
+        cap = UnknownCapture(
+            gym_id=gym_id,
+            capture_key=capture_key,
+            capture_type=capture_type,
+            member_id=member_id,
+            member_name=member_name,
+            notes=notes,
+        )
+        db.add(cap)
+        db.commit()
+        db.refresh(cap)
+        return cap.id
+    except Exception:
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def get_unknown_captures(gym_id: int | None = None, limit: int = 100) -> list:
+    db = get_db()
+    try:
+        q = db.query(UnknownCapture).order_by(UnknownCapture.captured_at.desc())
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return q.limit(limit).all()
+    finally:
+        db.close()
+
+
+def delete_unknown_capture_record(capture_id: int) -> bool:
+    db = get_db()
+    try:
+        cap = db.query(UnknownCapture).filter_by(id=capture_id).first()
+        if cap:
+            db.delete(cap)
+            db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def cleanup_old_captures(days: int = 3) -> list[str]:
+    """Delete captures older than `days` days. Returns list of Object Storage keys to delete."""
+    db = get_db()
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    try:
+        old = db.query(UnknownCapture).filter(UnknownCapture.captured_at < cutoff).all()
+        keys = [c.capture_key for c in old]
+        for c in old:
+            db.delete(c)
+        db.commit()
+        return keys
+    except Exception:
+        db.rollback()
+        return []
     finally:
         db.close()
 
