@@ -102,6 +102,20 @@ gyms = db.get_all_gyms()
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # Online / Offline status badge
+    _mode = db.DB_MODE
+    _badge_color = "#22c55e" if _mode == "online" else "#f59e0b"
+    _badge_icon  = "🟢" if _mode == "online" else "🟡"
+    _badge_label = "Online (Cloud DB)" if _mode == "online" else "Offline (Local DB)"
+    st.markdown(
+        f'<div style="text-align:center;padding:0.4rem 0.5rem 0;">'
+        f'<span style="background:{_badge_color}22;color:{_badge_color};'
+        f'border:1px solid {_badge_color}55;border-radius:20px;'
+        f'font-size:0.72rem;padding:2px 10px;">{_badge_icon} {_badge_label}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown("""
     <div style="padding:1rem 0.5rem 0.5rem;text-align:center;">
         <div style="font-size:2rem;">🏋️</div>

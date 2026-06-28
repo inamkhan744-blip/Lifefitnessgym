@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, date, timedelta
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Date,
-    DateTime, Boolean, Text, ForeignKey, func
+    DateTime, Boolean, Text, ForeignKey, func, text as sa_text
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 from sqlalchemy import event
@@ -64,25 +64,45 @@ if not IS_POSTGRES:
         conn.close()
 
 
-if IS_POSTGRES:
-    url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    engine = create_engine(
-        url,
-        pool_pre_ping=True,   
-        pool_recycle=300,
-    )
-else:
-    DB_PATH = os.path.join(BASE_DIR, "gym_pro_v3.db")
-    engine = create_engine(
+DB_PATH = os.path.join(BASE_DIR, "gym_pro_v3.db")
+DB_MODE = "offline"   # updated below after connection test
+
+
+def _make_sqlite_engine():
+    eng = create_engine(
         f"sqlite:///{DB_PATH}",
         connect_args={"check_same_thread": False},
     )
+    @event.listens_for(eng, "connect")
+    def _set_pragma(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+    return eng
 
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+
+if IS_POSTGRES:
+    _pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    engine = create_engine(
+        _pg_url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_timeout=10,
+        connect_args={"connect_timeout": 5},   # 5 sec TCP timeout — no more hang
+    )
+    # Test actual connection — if unreachable, fall back to SQLite silently
+    try:
+        with engine.connect() as _c:
+            _c.execute(sa_text("SELECT 1"))
+        DB_MODE = "online"
+    except Exception:
+        engine.dispose()
+        engine = _make_sqlite_engine()
+        IS_POSTGRES = False
+        DB_MODE = "offline"
+else:
+    engine = _make_sqlite_engine()
+    DB_MODE = "offline"
 
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
