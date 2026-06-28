@@ -15,5 +15,8 @@ run = "cd /home/runner/workspace/gym-app && python run.py"
 [services.production]
 run = "cd /home/runner/workspace/gym-app && python run.py"
 
+[services.production.health.startup]
+path = "/_stcore/health"
+
 [services.env]
 PORT = "5000"
