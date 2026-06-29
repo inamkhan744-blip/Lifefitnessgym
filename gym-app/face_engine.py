@@ -7,7 +7,7 @@ import numpy as np
 import json
 from PIL import Image
 
-SIMILARITY_THRESHOLD = 0.90   # Raise this if false matches occur, lower if misses
+SIMILARITY_THRESHOLD = 0.40   # Haar cascade cosine sim — 0.40 is realistic threshold
 _cascade = None
 
 
