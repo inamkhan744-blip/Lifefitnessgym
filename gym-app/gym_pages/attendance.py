@@ -483,64 +483,46 @@ def render_ai_dashboard_intel(sel_gid):
     st.divider()
 
 
-_AUTO_CLICK_JS = """
-<script>
-(function(){
-  if(window._gymFaceTick) return;
-  window._gymFaceTick = true;
-  function clickCamBtn() {
-    var doc = window.parent ? window.parent.document : document;
-    var btns = doc.querySelectorAll('button');
-    for(var i=0;i<btns.length;i++){
-      var t = btns[i].innerText.trim().toLowerCase();
-      if(t==='take photo'||t.includes('take photo')){btns[i].click();return;}
-    }
-  }
-  setTimeout(clickCamBtn, 2200);
-  setInterval(clickCamBtn, 5000);
-})();
-</script>
-"""
-
-# ── Face recognition session-state keys ──────────────────────────────────────
-_FACE_SS = {
-    "face_last_result": None,
-    "face_enc_cache": None,
-    "face_enc_cache_ts": 0.0,   # unix timestamp of last cache fill
-    "face_enc_cache_gym": None,
-}
-_ENC_CACHE_TTL = 300  # seconds — refresh encodings every 5 min
+_CAM_TICK_SECS   = 5     # fragment rerun interval + JS click interval
+_ENC_CACHE_TTL   = 300   # seconds — refresh DB encodings every 5 min
+_MEMBER_COOLDOWN = 60    # seconds — prevent double-marking same member
+_CAP_RATE_LIMIT  = 10    # max unknown/expired captures saved per hour
 
 
+# ── Session state bootstrap ───────────────────────────────────────────────────
 def _face_ss_init():
-    for k, v in _FACE_SS.items():
+    defaults = {
+        "face_last_result":   None,
+        "face_enc_cache":     None,
+        "face_enc_cache_ts":  0.0,
+        "face_enc_cache_gym": None,
+    }
+    for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 
-# ── Encoding cache (auto-refreshes every 5 min) ───────────────────────────────
+# ── Encoding cache — DB re-queried only when stale ───────────────────────────
 def _load_encodings(gym_id):
     now = time.time()
     stale = (
         st.session_state.face_enc_cache is None
         or st.session_state.face_enc_cache_gym != gym_id
-        or (now - st.session_state.face_enc_cache_ts) > _ENC_CACHE_TTL
+        or now - st.session_state.face_enc_cache_ts > _ENC_CACHE_TTL
     )
     if stale:
-        st.session_state.face_enc_cache = db.get_face_encodings(gym_id)
+        st.session_state.face_enc_cache     = db.get_face_encodings(gym_id)
         st.session_state.face_enc_cache_gym = gym_id
-        st.session_state.face_enc_cache_ts = now
+        st.session_state.face_enc_cache_ts  = now
     return st.session_state.face_enc_cache
 
 
-# ── Auto-generate encodings from existing member profile photos ───────────────
-def _auto_generate_encodings(gym_id) -> int:
-    """
-    For every member who has a profile photo but no face_encoding yet,
-    download the photo and generate the encoding automatically.
-    Returns count of newly generated encodings.
-    """
-    members = db.get_members(gym_id=gym_id)
+# ── Auto-generate encodings from profile photos — ONCE per session per gym ───
+def _auto_generate_encodings(gym_id: int) -> int:
+    flag = f"face_autogen_{gym_id}"
+    if st.session_state.get(flag):
+        return 0
+    members   = db.get_members(gym_id=gym_id)
     generated = 0
     for m in members:
         if m.face_encoding:
@@ -563,49 +545,53 @@ def _auto_generate_encodings(gym_id) -> int:
                 generated += 1
         except Exception:
             pass
+    st.session_state[flag] = True
     if generated:
-        st.session_state.face_enc_cache = None   # invalidate cache
+        st.session_state.face_enc_cache = None
     return generated
 
 
-# ── 3-day auto-cleanup ────────────────────────────────────────────────────────
+# ── 3-day cleanup — ONCE per session ─────────────────────────────────────────
 def _run_cleanup():
-    """Delete captures older than 3 days from both Object Storage and DB."""
+    if st.session_state.get("face_cleanup_done"):
+        return
     try:
         keys = db.cleanup_old_captures(days=3)
         for key in keys:
             object_store.delete_capture(key)
     except Exception:
         pass
+    st.session_state.face_cleanup_done = True
 
 
-# ── Save an unknown / expired snapshot ───────────────────────────────────────
+# ── Save capture — rate-limited (max 10/hr), compressed to 240x180 ───────────
 def _save_capture(pil_img, gym_id, capture_type="unknown",
                   member_id=None, member_name=None):
-    """
-    Compress the snapshot to 240×180, save to Object Storage and DB.
-    Does NOT raise — silently fails if storage unavailable.
-    """
     try:
+        rate_key = f"face_cap_n_{gym_id}"
+        rate_ts  = f"face_cap_t_{gym_id}"
+        now = time.time()
+        if now - st.session_state.get(rate_ts, 0) > 3600:
+            st.session_state[rate_key] = 0
+            st.session_state[rate_ts]  = now
+        if st.session_state.get(rate_key, 0) >= _CAP_RATE_LIMIT:
+            return
         small = pil_img.resize((240, 180))
-        buf = io.BytesIO()
+        buf   = io.BytesIO()
         small.save(buf, format="JPEG", quality=55, optimize=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
+        ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
         key = f"unknown_captures/{gym_id}/{ts}_{capture_type}.jpg"
-        ok = object_store.upload_capture(key, buf.getvalue())
-        if ok:
+        if object_store.upload_capture(key, buf.getvalue()):
             db.add_unknown_capture(
-                gym_id=gym_id,
-                capture_key=key,
-                capture_type=capture_type,
-                member_id=member_id,
-                member_name=member_name,
+                gym_id=gym_id, capture_key=key, capture_type=capture_type,
+                member_id=member_id, member_name=member_name,
             )
+            st.session_state[rate_key] = st.session_state.get(rate_key, 0) + 1
     except Exception:
         pass
 
 
-# ── Best-match from encodings ─────────────────────────────────────────────────
+# ── Best match ────────────────────────────────────────────────────────────────
 def _match_face(encoding, encodings_list):
     best_score, best = 0.0, None
     for m in encodings_list:
@@ -620,63 +606,67 @@ def _match_face(encoding, encodings_list):
     return None
 
 
-# ── Result banner HTML ────────────────────────────────────────────────────────
+# ── Result banner ─────────────────────────────────────────────────────────────
 def _result_banner(kind: str, name: str = "", detail: str = ""):
     cfg = {
         "success": ("#064E3B", "#10B981", "✅"),
         "expired":  ("#78350F", "#F59E0B", "⚠️"),
         "unknown":  ("#1E1B4B", "#6366F1", "❓"),
+        "noface":   ("#0F172A", "#1E293B", "🎥"),
         "error":    ("#1E293B", "#EF4444", "🚫"),
     }
     bg, border, icon = cfg.get(kind, ("#1E293B", "#475569", "ℹ️"))
     st.markdown(
         f"""<div style="background:{bg};border:3px solid {border};border-radius:16px;
-                        padding:1.1rem 1rem;text-align:center;margin:.5rem 0;">
-              <div style="font-size:2.4rem;line-height:1">{icon}</div>
-              <div style="font-size:1.5rem;font-weight:900;color:#fff;margin-top:.25rem">{name}</div>
-              <div style="font-size:.85rem;color:#CBD5E1;margin-top:.25rem">{detail}</div>
+                        padding:1rem;text-align:center;margin:.4rem 0;">
+              <div style="font-size:2.2rem;line-height:1">{icon}</div>
+              <div style="font-size:1.4rem;font-weight:900;color:#fff;margin-top:.2rem">{name}</div>
+              <div style="font-size:.82rem;color:#CBD5E1;margin-top:.2rem">{detail}</div>
             </div>""",
         unsafe_allow_html=True,
     )
 
 
-# ── Core: detect face → match → decide ───────────────────────────────────────
+# ── Core: two-phase detect → encode → match → mark ───────────────────────────
 def _process_face_image(pil_img, gym_id, current_user):
-    # Resize for faster processing — max 320px wide
+    # Resize to max 320px wide for speed
     w, h = pil_img.size
     if w > 320:
-        pil_img = pil_img.resize((320, int(h * 320 / w)))
+        pil_img = pil_img.resize((320, int(h * 320 / w)), Image.BILINEAR)
 
     img_bgr = face_engine.pil_to_bgr(pil_img)
-    encoding = face_engine.get_encoding(img_bgr)
 
+    # Phase 1 — fast face presence check (Haar cascade, < 15 ms, idle CPU ≈ 0)
+    faces = face_engine.detect_faces(img_bgr)
+    if not faces:
+        return {"kind": "noface", "name": "Camera ke saamne aayein",
+                "detail": "Seedha · Clear light · Thoda qareeb"}
+
+    # Phase 2 — full encoding + DB match (< 300 ms)
+    encoding = face_engine.get_encoding(img_bgr)
     if encoding is None:
-        return {"kind": "error", "name": "NO FACE DETECTED",
-                "detail": "Camera ke saamne seedha aayein — clear light mein"}
+        return {"kind": "noface", "name": "Face mila — process nahi hua",
+                "detail": "Thoda aur qareeb aayein, achhi light mein"}
 
     encodings = _load_encodings(gym_id)
     if not encodings:
-        return {"kind": "error", "name": "KISI KA PHOTO UPLOAD NAHI",
-                "detail": "Members page par pehle member ka photo upload karein"}
+        return {"kind": "error", "name": "KOI PHOTO NAHI",
+                "detail": "Members page par member ka photo upload karein"}
 
     match = _match_face(encoding, encodings)
-
     if match is None:
-        # Unknown — save snapshot for admin
         _save_capture(pil_img, gym_id, "unknown")
         return {"kind": "unknown", "name": "UNKNOWN PERSON",
-                "detail": "Face match nahi hua — admin ko alert gaya"}
+                "detail": "Face registered nahi — admin ko alert gaya"}
 
     # Expired check
     if match["expiry_date"]:
         try:
             if date.fromisoformat(match["expiry_date"]) < date.today():
-                # Save expired capture for admin
                 _save_capture(pil_img, gym_id, "expired",
                               member_id=match["id"], member_name=match["full_name"])
                 return {
-                    "kind": "expired",
-                    "name": match["full_name"],
+                    "kind": "expired", "name": match["full_name"],
                     "detail": f"Membership expired {match['expiry_date']} — counter par aayein",
                     "member": match,
                 }
@@ -684,56 +674,73 @@ def _process_face_image(pil_img, gym_id, current_user):
             pass
 
     # Inactive check
-    if (match["status"] or "active").lower() != "active":
+    if (match.get("status") or "active").lower() not in ("active",):
         return {"kind": "error", "name": match["full_name"],
-                "detail": f"Account {match['status']} — counter par aayein",
+                "detail": f"Account {match.get('status','Inactive')} — counter par aayein",
                 "member": match}
+
+    # Per-member cooldown — no double-mark within 60 s
+    cd_key   = f"face_cd_{match['id']}"
+    now      = time.time()
+    last_hit = st.session_state.get(cd_key, 0)
+    if now - last_hit < _MEMBER_COOLDOWN:
+        return {
+            "kind": "success", "name": f"WELCOME  {match['full_name']}",
+            "detail": f"Already marked today · {match['serial_number']}",
+            "member": match, "_skip_beep": True,
+        }
 
     # ✅ Mark attendance
     db.mark_attendance(match["id"], match["gym_id"],
                        date.today(), "Present", current_user)
-    st.session_state.face_enc_cache = None   # invalidate
+    st.session_state[cd_key]        = now
+    st.session_state.face_enc_cache = None   # invalidate so stats refresh
 
-    score_pct = f"{match['score']*100:.0f}%"
     return {
         "kind": "success",
         "name": f"WELCOME  {match['full_name']}",
-        "detail": f"✅ Attendance mark · Match {score_pct} · {match['serial_number']}",
+        "detail": f"✅ Attendance mark · {match['score']*100:.0f}% match · {match['serial_number']}",
         "member": match,
     }
 
 
-# ── Main Face Recognition Tab ─────────────────────────────────────────────────
-def render_face_recognition_tab(gym_id, role, current_user, gyms):
-    _face_ss_init()
-    _run_cleanup()  # silently delete 3-day-old captures on every page load
+def _safe_date(d_str):
+    try:
+        return date.fromisoformat(d_str)
+    except Exception:
+        return None
 
-    gym_opts = {g.name: g.id for g in gyms}
-    face_gym_id = gym_id if gym_id else gym_opts[next(iter(gym_opts))]
-    if not gym_id:
-        chosen = st.selectbox("Gym select karein",
-                              list(gym_opts.keys()), key="face_gym_sel")
-        face_gym_id = gym_opts[chosen]
-    else:
-        st.caption(f"📍 **{next((g.name for g in gyms if g.id==gym_id), '')}**")
 
-    # Auto-generate encodings from profile photos (runs silently if new photos added)
-    newly = _auto_generate_encodings(face_gym_id)
-    if newly:
-        st.toast(f"✅ {newly} member(s) ke face auto-register ho gaye!", icon="🎉")
+# ── Fragment — ONLY this section reruns every 5 s; rest of page stays frozen ──
+@st.fragment(run_every=_CAM_TICK_SECS)
+def _face_camera_fragment(face_gym_id, current_user, role, gyms):
+    # Auto-click JS — fires once per fragment render, advances camera every tick
+    st.components.v1.html(
+        "<script>(function(){"
+        "if(window._gymFaceTick)return;"
+        "window._gymFaceTick=true;"
+        "function _c(){"
+        "var d=window.parent?window.parent.document:document;"
+        "var b=d.querySelectorAll('button');"
+        "for(var i=0;i<b.length;i++){"
+        "var t=b[i].innerText.trim().toLowerCase();"
+        "if(t==='take photo'||t.includes('take photo')){b[i].click();return;}"
+        "}}"
+        "setTimeout(_c,1800);"
+        "setInterval(_c," + str(_CAM_TICK_SECS * 1000) + ");"
+        "})();</script>",
+        height=0,
+    )
 
-    # Always-on auto mode — inject JS auto-click
-    st.components.v1.html(_AUTO_CLICK_JS, height=0)
-
-    # ── 2-column layout ───────────────────────────────────────────────────────
     cam_col, stat_col = st.columns([6, 4], gap="medium")
 
+    # ── Camera section ────────────────────────────────────────────────────────
     with cam_col:
         st.markdown("##### 📷 Live Camera — Auto Attendance")
-        # Key changes every 8 seconds to force fresh capture cycle
+        # Key rotates every tick → resets camera widget so JS can fire a fresh shot
         cam_img = st.camera_input(
             "Camera",
-            key=f"fac_{int(time.time()//8)}",
+            key=f"fac_{int(time.time() // _CAM_TICK_SECS)}",
             label_visibility="collapsed",
         )
 
@@ -744,190 +751,212 @@ def render_face_recognition_tab(gym_id, role, current_user, gyms):
                 pil = None
 
             if pil:
-                with st.spinner("🔍 Recognizing..."):
-                    result = _process_face_image(pil, face_gym_id, current_user)
+                result = _process_face_image(pil, face_gym_id, current_user)
                 st.session_state.face_last_result = result
 
-                # Annotate and display the frame
+                # Annotate frame with colour-coded bounding box
                 try:
-                    import cv2 as _cv2
                     img_bgr = face_engine.pil_to_bgr(pil)
-                    color_map = {
-                        "success": (0, 220, 100),
-                        "expired": (0, 180, 255),
-                        "unknown": (200, 60, 220),
-                        "error":   (60, 60, 255),
+                    _cmap = {
+                        "success": (0, 220, 100), "expired": (0, 180, 255),
+                        "unknown": (200, 60, 220), "error":  (60,  60, 255),
+                        "noface":  (80,  80,  80),
                     }
-                    color = color_map.get(result["kind"], (200, 200, 200))
-                    ann = face_engine.annotate(img_bgr, result["name"][:18], color)
-                    ann_pil = Image.fromarray(_cv2.cvtColor(ann, _cv2.COLOR_BGR2RGB))
+                    ann     = face_engine.annotate(
+                        img_bgr, result["name"][:20],
+                        _cmap.get(result["kind"], (200, 200, 200))
+                    )
+                    ann_pil = Image.fromarray(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB))
                     st.image(ann_pil, use_container_width=True)
                 except Exception:
                     st.image(pil, use_container_width=True)
 
                 _result_banner(result["kind"], result["name"], result["detail"])
 
-                if result["kind"] == "success":
+                if result["kind"] == "success" and not result.get("_skip_beep"):
                     st.components.v1.html(_BEEP_JS, height=0)
                 elif result["kind"] in ("expired", "unknown"):
                     st.components.v1.html(_BUZZ_JS, height=0)
         else:
             lr = st.session_state.face_last_result
-            if lr:
+            if lr and lr["kind"] != "noface":
                 _result_banner(lr["kind"], lr["name"], lr["detail"])
             else:
                 st.markdown(
-                    """<div style="background:#0F172A;border:2px dashed #334155;
-                                  border-radius:12px;padding:2rem;text-align:center;
-                                  color:#64748B;">
-                    🎥 Camera shuru ho rahi hai — kuch seconds wait karein
-                    </div>""",
+                    '<div style="background:#0F172A;border:2px dashed #1E293B;'
+                    'border-radius:12px;padding:2rem;text-align:center;'
+                    'color:#475569;font-size:1rem;">'
+                    "🎥 Camera shuru ho rahi hai<br>"
+                    '<span style="font-size:.85rem">Kuch seconds wait karein...</span>'
+                    "</div>",
                     unsafe_allow_html=True,
                 )
 
+    # ── Live stats sidebar ────────────────────────────────────────────────────
     with stat_col:
-        st.markdown("##### 📊 Today's Summary")
-        enrolled     = db.get_face_encodings(face_gym_id)
-        all_today    = db.get_attendance(gym_id=face_gym_id, check_date=date.today())
-        present_today = [r for r in all_today if r.status == "Present"]
-        captures_db  = db.get_unknown_captures(gym_id=face_gym_id, limit=200)
-        unknown_caps = [c for c in captures_db if c.capture_type == "unknown"]
-        expired_caps = [c for c in captures_db if c.capture_type == "expired"]
-        all_members  = db.get_members(gym_id=face_gym_id)
-        expired_members = [
+        st.markdown("##### 📊 Live Summary")
+        enrolled      = _load_encodings(face_gym_id)
+        all_today_att = db.get_attendance(gym_id=face_gym_id, check_date=date.today())
+        present_today = [r for r in all_today_att if r.status == "Present"]
+        all_members   = db.get_members(gym_id=face_gym_id)
+        expired_mems  = [
             m for m in all_members
             if m.expiry_date
             and _safe_date(m.expiry_date) is not None
             and _safe_date(m.expiry_date) < date.today()
         ]
+        captures_db = db.get_unknown_captures(gym_id=face_gym_id, limit=200)
+        unk_count   = sum(1 for c in captures_db if c.capture_type == "unknown")
 
         m1, m2 = st.columns(2)
-        m1.metric("✅ Present", len(present_today))
-        m2.metric("❓ Unknown", len(unknown_caps))
+        m1.metric("✅ Present Today", len(present_today))
+        m2.metric("❓ Unknown Alerts", unk_count)
         m3, m4 = st.columns(2)
-        m3.metric("⚠️ Expired Alerts", len(expired_caps))
-        m4.metric("👤 Auto-Enrolled", len(enrolled))
+        m3.metric("⚠️ Expired Members", len(expired_mems))
+        m4.metric("👤 Enrolled Faces", len(enrolled))
 
         st.divider()
-        st.caption(f"🔁 Face encodings: **{len(enrolled)}** members  \n"
-                   f"🖼️ Unknown captures (3-day auto-delete): **{len(captures_db)}**")
+        if enrolled:
+            st.caption(
+                f"✅ **{len(enrolled)}** members auto-enrolled from profile photos  \n"
+                f"🖼️ Unknown captures (3-day auto-delete): **{len(captures_db)}**"
+            )
+        else:
+            st.warning("⚠️ Koi member enrolled nahi  \n"
+                       "Members page par photos upload karein")
+
+        if present_today:
+            st.markdown("**⚡ Recent check-ins:**")
+            mmap = {m.id: m for m in all_members}
+            for rec in reversed(present_today[-6:]):
+                mm = mmap.get(rec.member_id)
+                if not mm:
+                    continue
+                t = rec.created_at.strftime("%H:%M") if rec.created_at else "—"
+                st.markdown(
+                    f"<div style='padding:.2rem 0;border-bottom:1px solid #1E293B;'>"
+                    f"✅ <b>{mm.full_name}</b> "
+                    f"<span style='color:#94A3B8;font-size:.78rem;'>· {t}</span></div>",
+                    unsafe_allow_html=True,
+                )
 
     # ── Bottom tabs ───────────────────────────────────────────────────────────
     st.divider()
-    members_map = {m.id: m for m in all_members}
-
-    tabs_labels = ["✅ Attendance Today", "⚠️ Expired List"]
+    mmap_full  = {m.id: m for m in all_members}
+    tab_labels = ["✅ Present Today", "⚠️ Expired Members"]
     if role in ("admin", "auditor"):
-        tabs_labels.append("❓ Unknown/Expired Captures")
-    tabs_list = st.tabs(tabs_labels)
+        tab_labels.append("📸 Captures (Admin)")
+    btabs = st.tabs(tab_labels)
 
-    # Tab 1: Attendance today
-    with tabs_list[0]:
+    with btabs[0]:
         if not present_today:
             st.info("Abhi koi face attendance nahi hua aaj.")
         else:
             for rec in reversed(present_today[-60:]):
-                m = members_map.get(rec.member_id)
-                if not m:
+                mm = mmap_full.get(rec.member_id)
+                if not mm:
                     continue
-                rc1, rc2, rc3 = st.columns([1, 3, 1])
-                with rc1:
-                    show_member_photo(m.photo_path, width=65)
-                with rc2:
+                c1, c2 = st.columns([1, 4])
+                with c1:
+                    show_member_photo(mm.photo_path, width=60)
+                with c2:
                     t = rec.created_at.strftime("%H:%M") if rec.created_at else "—"
                     st.markdown(
-                        f"**{m.full_name}**  \n"
+                        f"**{mm.full_name}** ✅  \n"
                         f"<span style='color:#94A3B8;font-size:.82rem;'>"
-                        f"{m.serial_number} · {t}</span>",
+                        f"{mm.serial_number} · {t}</span>",
                         unsafe_allow_html=True,
                     )
-                with rc3:
-                    st.markdown("✅", unsafe_allow_html=True)
                 st.divider()
 
-    # Tab 2: Expired member list
-    with tabs_list[1]:
-        if not expired_members:
+    with btabs[1]:
+        if not expired_mems:
             st.success("✅ Koi expired member nahi hai.")
         else:
-            st.error(f"⚠️ {len(expired_members)} members ki membership expire ho chuki hai!")
-            for m in expired_members:
-                ec1, ec2 = st.columns([1, 4])
-                with ec1:
-                    show_member_photo(m.photo_path, width=65)
-                with ec2:
+            st.error(f"⚠️ {len(expired_mems)} members ki membership expire ho gayi!")
+            for mm in expired_mems:
+                e1, e2 = st.columns([1, 4])
+                with e1:
+                    show_member_photo(mm.photo_path, width=60)
+                with e2:
                     try:
-                        days_ago = (date.today() - date.fromisoformat(m.expiry_date)).days
+                        days_ago = (date.today() - date.fromisoformat(mm.expiry_date)).days
                     except Exception:
                         days_ago = "?"
                     st.markdown(
-                        f"**{m.full_name}**  \n"
+                        f"**{mm.full_name}**  \n"
                         f"<span style='color:#FCA5A5;font-size:.85rem;'>"
-                        f"Expired: {m.expiry_date} ({days_ago}d ago) · "
-                        f"{m.serial_number} · 📞 {m.phone or '—'}</span>",
+                        f"Expired: {mm.expiry_date} ({days_ago}d ago) · "
+                        f"{mm.serial_number} · 📞 {mm.phone or chr(8212)}</span>",
                         unsafe_allow_html=True,
                     )
                 st.divider()
 
-    # Tab 3: Admin — Unknown / Expired captures (with delete + auto-delete note)
-    if role in ("admin", "auditor") and len(tabs_list) > 2:
-        with tabs_list[2]:
-            st.caption(
-                "🗑️ Yeh captures **3 din baad automatically delete** ho jayenge "
-                "(Replit storage aur cloud dono se). Admin manually bhi delete kar sakta hai."
-            )
+    if role in ("admin", "auditor") and len(btabs) > 2:
+        with btabs[2]:
             all_caps = db.get_unknown_captures(gym_id=face_gym_id, limit=100)
+            st.caption(
+                "🗑️ Captures **3 din baad auto-delete** ho jayenge "
+                "(Object Storage + DB dono se). Admin manually bhi delete kar sakta hai."
+            )
             if not all_caps:
                 st.success("✅ Koi unknown/expired capture nahi hai.")
             else:
                 for cap in all_caps:
-                    with st.container():
-                        cc1, cc2, cc3 = st.columns([1, 3, 1])
-                        with cc1:
-                            img_bytes = object_store.get_capture_bytes(cap.capture_key)
-                            if img_bytes:
-                                st.image(
-                                    io.BytesIO(img_bytes),
-                                    width=80,
-                                )
-                            else:
-                                st.markdown("🖼️", unsafe_allow_html=True)
-                        with cc2:
-                            badge = "❓ UNKNOWN" if cap.capture_type == "unknown" else "⚠️ EXPIRED"
-                            name  = cap.member_name or "Unknown"
-                            t_str = cap.captured_at.strftime("%d %b %H:%M") if cap.captured_at else "—"
-                            st.markdown(
-                                f"**{badge}** — {name}  \n"
-                                f"<span style='color:#94A3B8;font-size:.8rem;'>{t_str}</span>",
-                                unsafe_allow_html=True,
-                            )
-                        with cc3:
-                            if st.button("🗑️", key=f"del_cap_{cap.id}",
-                                         help="Delete this capture"):
-                                object_store.delete_capture(cap.capture_key)
-                                db.delete_unknown_capture_record(cap.id)
-                                st.toast("Capture deleted", icon="🗑️")
-                                st.rerun()
-                        st.divider()
+                    c1, c2, c3 = st.columns([1, 3, 1])
+                    with c1:
+                        img_b = object_store.get_capture_bytes(cap.capture_key)
+                        if img_b:
+                            st.image(io.BytesIO(img_b), width=75)
+                        else:
+                            st.markdown("🖼️")
+                    with c2:
+                        badge = "❓ UNKNOWN" if cap.capture_type == "unknown" else "⚠️ EXPIRED"
+                        nm    = cap.member_name or "Unknown"
+                        ts    = (cap.captured_at.strftime("%d %b %H:%M")
+                                 if cap.captured_at else "—")
+                        st.markdown(
+                            f"**{badge}** — {nm}  \n"
+                            f"<span style='color:#94A3B8;font-size:.8rem;'>{ts}</span>",
+                            unsafe_allow_html=True,
+                        )
+                    with c3:
+                        if st.button("🗑️", key=f"dc_{cap.id}", help="Delete"):
+                            object_store.delete_capture(cap.capture_key)
+                            db.delete_unknown_capture_record(cap.id)
+                            st.toast("Deleted", icon="🗑️")
+                    st.divider()
 
-                if st.button("🗑️ Delete All Captures", key="del_all_caps",
+                if st.button("🗑️ Delete All", key="del_all_caps",
                              type="secondary", use_container_width=True):
                     for cap in all_caps:
                         object_store.delete_capture(cap.capture_key)
                         db.delete_unknown_capture_record(cap.id)
                     st.success("✅ Sab captures delete ho gaye.")
-                    st.rerun()
-
-    # ── Always-on auto-rerun (5 seconds for CPU efficiency) ──────────────────
-    time.sleep(4.8)
-    st.rerun()
 
 
-def _safe_date(d_str):
-    try:
-        return date.fromisoformat(d_str)
-    except Exception:
-        return None
+# ── Main tab entry point ──────────────────────────────────────────────────────
+def render_face_recognition_tab(gym_id, role, current_user, gyms):
+    _face_ss_init()
+    _run_cleanup()   # once per session — delete captures older than 3 days
+
+    gym_opts    = {g.name: g.id for g in gyms}
+    face_gym_id = gym_id
+    if not gym_id:
+        chosen      = st.selectbox("Gym select karein",
+                                   list(gym_opts.keys()), key="face_gym_sel")
+        face_gym_id = gym_opts[chosen]
+    else:
+        st.caption(f"📍 **{next((g.name for g in gyms if g.id == gym_id), '')}**")
+
+    # Auto-generate encodings from profile photos — once per session per gym
+    newly = _auto_generate_encodings(face_gym_id)
+    if newly:
+        st.toast(f"✅ {newly} member(s) ke face auto-register ho gaye!", icon="🎉")
+
+    # Launch isolated fragment — auto-reruns every 5 s on its own
+    # The rest of the page (manual tab, records, etc.) is completely unaffected
+    _face_camera_fragment(face_gym_id, current_user, role, gyms)
 
 # ── Page ─────────────────────────────────────────────────────────────────────
 def render(gym_id, role, current_user):
