@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "q73MjOvytKL81XGaAn_e9"
+uri = "file://gym-app/gym_data_complete.zip"
+type = "unspecified"
+title = "GymPro Complete Backup — SQL Data + 54 Member Photos"
