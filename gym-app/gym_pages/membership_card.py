@@ -38,8 +38,14 @@ STATUS_COLORS = {
     "Frozen":    ("#0C1A3A", "#60A5FA"),
 }
 
+# ============================================
+# 🔥 FIXED: Image Orientation Fix - Strong
+# ============================================
+
 def fix_image_orientation(img):
+    """Fix image orientation using EXIF data - STRONG FIX"""
     try:
+        # Method 1: EXIF orientation
         if hasattr(img, '_getexif'):
             exif = img._getexif()
             if exif:
@@ -53,17 +59,32 @@ def fix_image_orientation(img):
                         img = img.rotate(90, expand=True)
     except:
         pass
+    
+    # Method 2: ImageOps exif_transpose - automatically fixes orientation
+    try:
+        img = ImageOps.exif_transpose(img)
+    except:
+        pass
+    
     return img
+
+# ============================================
+# 🔥 FIXED: Compress Image with Orientation Fix
+# ============================================
 
 def compress_image(image_path, max_size_kb=50, quality=70):
     try:
         img = Image.open(image_path)
+        
+        # Fix orientation
         img = fix_image_orientation(img)
         
         if img.mode in ('RGBA', 'LA', 'P'):
             rgb_img = Image.new('RGB', img.size, (255, 255, 255))
             rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
             img = rgb_img
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
         
         max_width = 400
         if img.width > max_width:
@@ -84,6 +105,10 @@ def compress_image(image_path, max_size_kb=50, quality=70):
         print(f"Image compression error: {e}")
         return None
 
+# ============================================
+# 🔥 FIXED: Get Compressed Photo with Orientation Fix
+# ============================================
+
 def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str | None:
     cache_key = f"compressed_{serial_number}_{photo_field}"
     if cache_key in st.session_state.photo_cache:
@@ -94,7 +119,21 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
         try:
             b64, _ = object_store.get_photo_b64(key)
             if b64:
-                result = f"data:image/jpeg;base64,{b64}"
+                # 🔥 Apply orientation fix on base64 image
+                try:
+                    img_bytes = base64.b64decode(b64)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img = fix_image_orientation(img)
+                    
+                    output = io.BytesIO()
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(output, format='JPEG', quality=85, optimize=True)
+                    fixed_b64 = base64.b64encode(output.getvalue()).decode()
+                    result = f"data:image/jpeg;base64,{fixed_b64}"
+                except:
+                    result = f"data:image/jpeg;base64,{b64}"
+                
                 st.session_state.photo_cache[cache_key] = result
                 return result
         except Exception:
@@ -147,17 +186,19 @@ def get_member_with_photo(member, gym_name=""):
         'photo_b64': photo_b64,
     }
 
+# ============================================
+# 🔥 FIXED: Card HTML with image-orientation:from-image
+# ============================================
+
 def render_card_html(member_data, gym_name: str, is_cached: bool = False, is_selected: bool = False) -> str:
     bg_clr, badge_clr = STATUS_COLORS.get(member_data.get('status'), ("#1E293B", "#94A3B8"))
     
-    # 🔥 SAME SIZE AS AUDITOR PAGE: 120x180 (rectangle)
-    # is_selected = True means bigger card (preview), False means gallery card
     if is_selected:
         photo_width = 160
-        photo_height = 220  # Rectangle like auditor
+        photo_height = 220
     else:
         photo_width = 120
-        photo_height = 180  # Rectangle like auditor (same as show_audit_photo)
+        photo_height = 180
     
     photo_b64 = member_data.get('photo_b64')
     
@@ -169,7 +210,8 @@ def render_card_html(member_data, gym_name: str, is_cached: bool = False, is_sel
                     box-shadow:0 4px 15px rgba(124,58,237,0.3);
                     flex-shrink:0;">
             <img src="{photo_b64}" style="width:100%; height:100%;
-                                          object-fit:cover; display:block;" />
+                                          object-fit:cover; display:block;
+                                          image-orientation:from-image;" />
         </div>
         '''
     else:
@@ -557,6 +599,8 @@ def render(gym_id, role):
                 rgb_img = Image.new('RGB', img.size, (255, 255, 255))
                 rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
                 img = rgb_img
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
             
             max_width = 400
             if img.width > max_width:

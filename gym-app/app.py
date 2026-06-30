@@ -3,7 +3,10 @@ import sys
 import os
 import base64
 from datetime import datetime, timedelta
-
+import os
+os.environ['TZ'] = 'Asia/Karachi'
+import time
+time.tzset()
 sys.path.insert(0, os.path.dirname(__file__))
 
 import database as db

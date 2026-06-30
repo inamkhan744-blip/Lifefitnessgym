@@ -8,13 +8,14 @@ import uuid
 from datetime import date, timedelta, datetime
 import database as db
 import base64
+import object_store
 
 # ============================================
 # PIL IMPORT (Image Optimization)
 # ============================================
 
 try:
-    from PIL import Image, ExifTags
+    from PIL import Image, ImageOps, ExifTags
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
@@ -33,6 +34,30 @@ from printer_utils import (
 # IMAGE HELPERS (OPTIMIZED + ORIENTATION FIX)
 # ============================================
 
+def fix_image_orientation(img):
+    """Fix image orientation using EXIF data"""
+    try:
+        if hasattr(img, '_getexif'):
+            exif = img._getexif()
+            if exif:
+                orientation = exif.get(274)
+                if orientation:
+                    if orientation == 3:
+                        img = img.rotate(180, expand=True)
+                    elif orientation == 6:
+                        img = img.rotate(270, expand=True)
+                    elif orientation == 8:
+                        img = img.rotate(90, expand=True)
+    except:
+        pass
+    
+    try:
+        img = ImageOps.exif_transpose(img)
+    except:
+        pass
+    
+    return img
+
 @st.cache_data(ttl=3600)
 def _get_cached_image(photo_path: str, max_size: tuple = (200, 200), quality: int = 60) -> str | None:
     """Cached image with compression AND orientation fix"""
@@ -41,33 +66,12 @@ def _get_cached_image(photo_path: str, max_size: tuple = (200, 200), quality: in
     
     try:
         img = Image.open(photo_path)
-        
-        # 👇 FIX ORIENTATION (Phone photos ko straight karein)
-        try:
-            for orientation_tag in ExifTags.TAGS.keys():
-                if ExifTags.TAGS[orientation_tag] == 'Orientation':
-                    break
-            
-            exif = img._getexif()
-            if exif is not None:
-                orientation_value = exif.get(orientation_tag)
-                if orientation_value == 3:
-                    img = img.rotate(180, expand=True)
-                elif orientation_value == 6:
-                    img = img.rotate(270, expand=True)
-                elif orientation_value == 8:
-                    img = img.rotate(90, expand=True)
-        except:
-            pass
-        
-        # Resize maintaining aspect ratio
+        img = fix_image_orientation(img)
         img.thumbnail(max_size, Image.Resampling.LANCZOS)
         
-        # Convert to RGB if needed
         if img.mode in ('RGBA', 'LA', 'P'):
             img = img.convert('RGB')
         
-        # Compress and save
         buffer = io.BytesIO()
         img.save(buffer, format='JPEG', quality=quality, optimize=True)
         buffer.seek(0)
@@ -78,17 +82,80 @@ def _get_cached_image(photo_path: str, max_size: tuple = (200, 200), quality: in
         return None
 
 def get_photo_b64(photo_field: str, serial_number: str = "", max_size: tuple = (200, 200)) -> str | None:
-    """Get member photo from Object Storage (permanent) or local fallback."""
-    import object_store as _os
+    """Get member photo from Object Storage with orientation fix"""
     if not photo_field:
         return None
+    
     photo_str = str(photo_field).strip()
     if "<div" in photo_str or "style=" in photo_str:
         return None
-    b64, mime = _os.get_photo_b64(photo_str)
-    if b64:
-        return f"data:image/{mime};base64,{b64}"
+    
+    try:
+        b64, mime = object_store.get_photo_b64(photo_str)
+        if b64:
+            try:
+                img_bytes = base64.b64decode(b64)
+                img = Image.open(io.BytesIO(img_bytes))
+                img = fix_image_orientation(img)
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                if img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
+                
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=60, optimize=True)
+                fixed_b64 = base64.b64encode(output.getvalue()).decode()
+                return f"data:image/jpeg;base64,{fixed_b64}"
+            except:
+                return f"data:image/{mime};base64,{b64}"
+    except Exception as e:
+        print(f"Object storage error: {e}")
+    
+    if os.path.exists(photo_str):
+        cached = _get_cached_image(photo_str, max_size)
+        if cached:
+            return f"data:image/jpeg;base64,{cached}"
+    
+    if serial_number:
+        for ext in ['.jpg', '.jpeg', '.png']:
+            path = f"member_photos/{serial_number}{ext}"
+            if os.path.exists(path):
+                cached = _get_cached_image(path, max_size)
+                if cached:
+                    return f"data:image/jpeg;base64,{cached}"
+    
     return None
+
+# ============================================
+# SHOW MEMBER PHOTO
+# ============================================
+
+def show_member_photo(photo_path, serial_number="", width=140, height=140):
+    """Display member photo with orientation fix"""
+    photo_b64 = get_photo_b64(photo_path, serial_number, max_size=(width, height))
+    
+    if photo_b64:
+        st.markdown(f"""
+        <div style="width:{width}px; height:{height}px; border-radius:12px;
+                    border:3px solid #7C3AED; overflow:hidden;
+                    background:#1E293B; box-shadow:0 4px 15px rgba(124,58,237,0.3);
+                    flex-shrink:0;">
+            <img src="{photo_b64}" style="width:100%; height:100%;
+                                          object-fit:cover; display:block;
+                                          image-orientation:from-image;" />
+        </div>
+        """, unsafe_allow_html=True)
+        return True
+    else:
+        st.markdown(f"""
+        <div style="width:{width}px; height:{height}px; border-radius:12px;
+                    background:linear-gradient(135deg,#7C3AED,#6D28D9);
+                    display:flex; align-items:center; justify-content:center;
+                    font-size:{width//2}px; color:white; font-weight:700;
+                    border:3px solid #7C3AED33; flex-shrink:0;">
+            👤
+        </div>
+        """, unsafe_allow_html=True)
+        return False
 
 # ============================================
 # HELPERS
@@ -124,7 +191,6 @@ def render_collect_fee(gym_id, current_user):
         st.info("Add a gym first.")
         return
 
-    # ── Show pending print button after rerun ──────────────────────────────
     pending = st.session_state.pop('pending_print', None)
     if pending:
         st.success("✅ Payment recorded! Print dialog should open automatically — or press the PRINT button below:")
@@ -211,21 +277,7 @@ def render_collect_fee(gym_id, current_user):
         pic_col, info_col = st.columns([1, 3])
         
         with pic_col:
-            photo_b64 = get_photo_b64(sel_mem.photo_path, sel_mem.serial_number, max_size=(200, 200))
-            if photo_b64:
-                st.image(f"data:image/jpeg;base64,{photo_b64}", width=140)
-            else:
-                st.markdown(
-                    """
-                    <div style="width:140px;height:140px;border-radius:12px;
-                                background:linear-gradient(135deg,#7C3AED,#6D28D9);
-                                display:flex;align-items:center;justify-content:center;
-                                font-size:60px;color:white;">
-                        👤
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+            show_member_photo(sel_mem.photo_path, sel_mem.serial_number, width=140, height=140)
         
         with info_col:
             status_type, status_text, bg_color, text_color = get_member_payment_status(sel_mem)
@@ -253,7 +305,12 @@ def render_collect_fee(gym_id, current_user):
         f_c1, f_c2 = st.columns(2)
 
         with f_c1:
-            default_amount = float(sel_mem.fee_amount) if sel_mem and hasattr(sel_mem, 'fee_amount') else 0.01
+            # 🔥 FIXED: Ensure default_amount is never 0
+            if sel_mem and hasattr(sel_mem, 'fee_amount') and sel_mem.fee_amount and sel_mem.fee_amount > 0:
+                default_amount = float(sel_mem.fee_amount)
+            else:
+                default_amount = 0.01  # Minimum value
+            
             amount = st.number_input(
                 "💰 Amount (PKR) *",
                 min_value=0.01,
@@ -309,7 +366,6 @@ def render_collect_fee(gym_id, current_user):
             elif not sel_mem:
                 st.error("❌ Member details missing!")
             else:
-                # 🔥 FIX: Generate receipt number BEFORE using it
                 generated_rcp = f"RCP-{uuid.uuid4().hex[:8].upper()}"
                 
                 ok, msg = db.add_fee_record(
@@ -322,7 +378,6 @@ def render_collect_fee(gym_id, current_user):
                 if ok:
                     db.update_member(member_id, expiry_date=str(period_end), status="Active")
 
-                    # 🔥 FIX: Use generated_rcp consistently
                     receipt_no = generated_rcp
 
                     receipt_data = {
@@ -342,9 +397,7 @@ def render_collect_fee(gym_id, current_user):
                         'period_end':   period_end.strftime('%Y-%m-%d'),
                     }
 
-                    # 🔥 FIX: Log to receipt_logs table
                     try:
-                        # Check if db.log_receipt exists
                         if hasattr(db, 'log_receipt'):
                             db.log_receipt(
                                 fee_record_id=None,
@@ -356,7 +409,6 @@ def render_collect_fee(gym_id, current_user):
                                 print_issued=False,
                             )
                         else:
-                            # Fallback: Use direct SQL if function doesn't exist
                             import sqlite3
                             conn = sqlite3.connect('gym_app.db')
                             cursor = conn.cursor()
@@ -396,7 +448,7 @@ def render_collect_fee(gym_id, current_user):
                     st.error(f"❌ {msg}")
 
 # ============================================
-# TAB 2: HISTORY & ADMIN (WITH REPRINT)
+# TAB 2: HISTORY & ADMIN
 # ============================================
 
 def render_history_admin(gym_id, role):
@@ -611,25 +663,16 @@ def render_history_admin(gym_id, role):
                 
                 with col_pic:
                     if selected_record['Member']:
-                        photo_b64 = get_photo_b64(selected_record['Member'].photo_path, selected_record['Member'].serial_number, max_size=(100, 100))
-                        if photo_b64:
-                            st.image(f"data:image/jpeg;base64,{photo_b64}", width=100)
-                        else:
-                            st.markdown(
-                                f"""
-                                <div style="width:100px;height:100px;border-radius:50%;
-                                            background:linear-gradient(135deg,#7C3AED,#6D28D9);
-                                            display:flex;align-items:center;justify-content:center;
-                                            font-size:40px;color:white;font-weight:700;">
-                                    {selected_record['Member'].full_name[0].upper() if selected_record['Member'].full_name else '?'}
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
+                        show_member_photo(
+                            selected_record['Member'].photo_path,
+                            selected_record['Member'].serial_number,
+                            width=120,
+                            height=120
+                        )
                     else:
                         st.markdown(
                             """
-                            <div style="width:100px;height:100px;border-radius:50%;
+                            <div style="width:120px;height:120px;border-radius:50%;
                                         background:#334155;display:flex;align-items:center;
                                         justify-content:center;font-size:40px;color:white;">
                                 ?
@@ -700,7 +743,6 @@ def render_history_admin(gym_id, role):
                         if st.button("Print Preview", use_container_width=True):
                             st.session_state['show_reprint_preview'] = not st.session_state.get('show_reprint_preview', False)
 
-                    # Show print component after button click
                     rp_data = st.session_state.get('reprint_data')
                     rp_copies = st.session_state.get('reprint_copies', 2)
                     if rp_data and rp_data.get('receipt_no') == reprint_data.get('receipt_no'):

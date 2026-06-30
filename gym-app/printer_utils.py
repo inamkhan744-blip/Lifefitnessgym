@@ -9,10 +9,13 @@ from datetime import datetime
 
 W = 32  # 80mm thermal = 32 usable chars at standard font
 
+# WhatsApp Complaint Number
+WHATSAPP_NUMBER = "03458308886"
+
 
 # ── Text Formatting Helpers ────────────────────────────────────────────────────
 
-def _line(char="-"):
+def _line(char="="):
     return char * W
 
 def _center(text, width=W):
@@ -68,38 +71,48 @@ def format_receipt(data: dict, copy_label: str = "MEMBER COPY") -> str:
 
     lines = []
     a = lines.append
-    a(_line("="))
-    a(_center(gym_name))
-    a(_center("FITNESS CENTER"))
+    
+    # 🔥 NO EMOJIS - Clean text only
+    a("┌" + "─" * (W-2) + "┐")
+    a("│" + _center(gym_name) + "│")
+    a("│" + _center("FITNESS CENTER") + "│")
     if gym_addr:
         for wl in _wrap(gym_addr):
-            a(_center(wl))
+            a("│" + _center(wl) + "│")
     if gym_phone:
-        a(_center(gym_phone))
-    a(_line("="))
-    a(_center(copy_label))
-    a(_line("-"))
-    a(_left_right("RCPT:", receipt_no))
-    a(_left_right("DATE:", pay_date))
-    a(_left_right("TIME:", pay_time))
-    a(_left_right("BY:  ", collected))
-    a(_line("-"))
-    a("MEMBER:")
+        a("│" + _center(gym_phone) + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _center(copy_label) + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _left_right("RCPT:", receipt_no) + "│")
+    a("│" + _left_right("DATE:", pay_date) + "│")
+    a("│" + _left_right("TIME:", pay_time) + "│")
+    a("│" + _left_right("BY:", collected) + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _center("MEMBER DETAILS") + "│")
+    a("│" + _left_right("  ", "") + "│")
     for wl in _wrap(member_name):
-        a("  " + wl)
-    a(_left_right("ID:  ", serial))
-    a(_left_right("TEL: ", phone[:18]))
-    a(_line("-"))
-    a(_left_right("AMOUNT:", amount_str))
-    a(_left_right("METHOD:", method))
-    a(_left_right("STATUS:", "PAID"))
-    a(_line("-"))
-    a(_left_right("FROM:", p_start))
-    a(_left_right("TO:  ", p_end))
-    a(_line("="))
-    a(_center("Thank you for payment!"))
-    a(_center("Keep this receipt."))
-    a(_line("="))
+        a("│" + "  " + wl.ljust(W-4) + "│")
+    a("│" + _left_right("ID:", serial) + "│")
+    a("│" + _left_right("TEL:", phone[:18]) + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _center("PAYMENT DETAILS") + "│")
+    a("│" + _left_right("AMOUNT:", amount_str) + "│")
+    a("│" + _left_right("METHOD:", method) + "│")
+    a("│" + _left_right("STATUS:", "PAID") + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _left_right("FROM:", p_start) + "│")
+    a("│" + _left_right("TO:", p_end) + "│")
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _center("Thank you for payment!") + "│")
+    a("│" + _center("Keep this receipt") + "│")
+    
+    # Complaint / Support Number
+    a("├" + "─" * (W-2) + "┤")
+    a("│" + _center("Complaint / Support") + "│")
+    a("│" + _center("WhatsApp: " + WHATSAPP_NUMBER) + "│")
+    
+    a("└" + "─" * (W-2) + "┘")
     a("")
     return "\n".join(lines)
 
@@ -111,23 +124,49 @@ def format_dual_receipts(data: dict) -> tuple:
     )
 
 
-# ── On-screen Preview (uses st.code) ──────────────────────────────────────────
+# ── On-screen Preview ──────────────────────────────────────────────────────────
 
 def render_print_preview(data: dict, copies: int = 2):
     try:
         import streamlit as st
-        st.markdown("**Print Preview (80mm Thermal)**")
+        st.markdown("### Print Preview (80mm Thermal)")
+        
         if copies == 2:
             member_text, gym_text = format_dual_receipts(data)
             col1, col2 = st.columns(2)
             with col1:
                 st.caption("Member Copy")
-                st.code(member_text, language=None)
+                st.markdown(f"""
+                <div style="background:#1E1E2E;padding:15px;border-radius:10px;
+                            border:2px solid #7C3AED;font-family:monospace;
+                            font-size:13px;color:#E2E8F0;white-space:pre-wrap;
+                            max-height:500px;overflow-y:auto;">
+                    <pre style="color:#E2E8F0;font-family:monospace;font-size:13px;
+                               margin:0;white-space:pre;font-weight:600;">{member_text}</pre>
+                </div>
+                """, unsafe_allow_html=True)
             with col2:
                 st.caption("Gym Copy")
-                st.code(gym_text, language=None)
+                st.markdown(f"""
+                <div style="background:#1E1E2E;padding:15px;border-radius:10px;
+                            border:2px solid #7C3AED;font-family:monospace;
+                            font-size:13px;color:#E2E8F0;white-space:pre-wrap;
+                            max-height:500px;overflow-y:auto;">
+                    <pre style="color:#E2E8F0;font-family:monospace;font-size:13px;
+                               margin:0;white-space:pre;font-weight:600;">{gym_text}</pre>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.code(format_receipt(data, "MEMBER COPY"), language=None)
+            text = format_receipt(data, "MEMBER COPY")
+            st.markdown(f"""
+            <div style="background:#1E1E2E;padding:15px;border-radius:10px;
+                        border:2px solid #7C3AED;font-family:monospace;
+                        font-size:13px;color:#E2E8F0;white-space:pre-wrap;
+                        max-height:500px;overflow-y:auto;">
+                <pre style="color:#E2E8F0;font-family:monospace;font-size:13px;
+                           margin:0;white-space:pre;font-weight:600;">{text}</pre>
+            </div>
+            """, unsafe_allow_html=True)
     except Exception:
         pass
 
@@ -152,8 +191,6 @@ def render_print_component(data: dict, copies: int = 2):
     """
     Embed a printable receipt directly in the Streamlit page as an iframe.
     Contains a Print button + auto-triggers window.print() on load.
-    Works on mobile Chrome, desktop Chrome, Safari, Firefox.
-    No popups, no data-URIs, no CUPS.
     """
     try:
         import streamlit as st
@@ -173,62 +210,80 @@ def render_print_component(data: dict, copies: int = 2):
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12px;
-    background: #f5f5f5;
-    color: #000;
+    font-size: 13px;
+    background: #1A1A2E;
+    color: #E2E8F0;
     padding: 10px;
   }}
   .receipt {{
-    background: #fff;
+    background: #0F0F1A;
     width: 100%;
-    max-width: 320px;
-    margin: 0 auto 12px auto;
-    padding: 8px;
-    border: 1px dashed #999;
-    border-radius: 4px;
+    max-width: 340px;
+    margin: 0 auto 15px auto;
+    padding: 12px;
+    border: 2px solid #7C3AED;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(124,58,237,0.2);
   }}
   pre {{
     font-family: 'Courier New', Courier, monospace;
-    font-size: 11px;
+    font-size: 13px;
     white-space: pre;
-    line-height: 1.45;
-    color: #000;
+    line-height: 1.6;
+    color: #E2E8F0;
+    font-weight: 600;
   }}
-  .cut {{
-    text-align: center;
-    color: #999;
-    font-size: 10px;
-    margin: 4px 0;
-    letter-spacing: 4px;
-  }}
-  .cut::before {{ content: "- - - - - - - - - - - - - - - -"; }}
   .btn-bar {{
     text-align: center;
-    margin: 16px 0 8px 0;
+    margin: 20px 0 10px 0;
   }}
   .print-btn {{
-    padding: 14px 36px;
+    padding: 16px 40px;
     background: #7C3AED;
-    color: #fff;
+    color: #FFFFFF;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 18px;
     font-weight: bold;
     cursor: pointer;
     letter-spacing: 1px;
+    box-shadow: 0 4px 15px rgba(124,58,237,0.4);
   }}
-  .print-btn:active {{ background: #6D28D9; }}
+  .print-btn:hover {{
+    background: #6D28D9;
+    transform: scale(1.02);
+  }}
+  .print-btn:active {{ background: #5B21B6; }}
   .hint {{
     text-align: center;
-    font-size: 11px;
-    color: #666;
-    margin-top: 6px;
+    font-size: 12px;
+    color: #94A3B8;
+    margin-top: 8px;
+    font-weight: 500;
   }}
+  
   @page {{ size: 80mm auto; margin: 2mm; }}
+  
   @media print {{
-    body {{ background:#fff; padding:0; }}
+    body {{
+      background: #FFFFFF !important;
+      padding: 0 !important;
+    }}
     .btn-bar, .hint {{ display: none !important; }}
-    .receipt {{ border: none; max-width: 100%; }}
+    .receipt {{
+      background: #FFFFFF !important;
+      border: 1px solid #000000 !important;
+      max-width: 100% !important;
+      box-shadow: none !important;
+      padding: 8px !important;
+      margin: 0 auto 10px auto !important;
+    }}
+    pre {{
+      color: #000000 !important;
+      font-weight: 700 !important;
+      font-size: 11px !important;
+      background: #FFFFFF !important;
+    }}
     .page-cut {{
       page-break-after: always;
       break-after: page;
@@ -239,12 +294,12 @@ def render_print_component(data: dict, copies: int = 2):
 <body>
 {body_html}
 <div class="btn-bar">
-  <button class="print-btn" onclick="window.print()">🖨️ PRINT</button>
+  <button class="print-btn" onclick="window.print()">PRINT</button>
 </div>
 <p class="hint">Select your thermal printer in the print dialog</p>
 <script>
   window.addEventListener('load', function() {{
-    setTimeout(function() {{ window.print(); }}, 600);
+    setTimeout(function() {{ window.print(); }}, 800);
   }});
 </script>
 </body>

@@ -6,20 +6,27 @@ from datetime import date, datetime, timedelta
 import database as db
 import styles
 import object_store
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 
 # ============================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE INITIALIZATION - FIXED
 # ============================================
 
 def init_session_state():
-    if 'audit_photo_cache' not in st.session_state:
-        st.session_state.audit_photo_cache = {}
-    if 'audit_selected_id' not in st.session_state:
-        st.session_state.audit_selected_id = None
-    if 'audit_refresh' not in st.session_state:
-        st.session_state.audit_refresh = False
+    """Initialize all audit session state variables"""
+    defaults = {
+        'audit_photo_cache': {},
+        'audit_selected_id': None,
+        'audit_refresh': False,
+        'audit_gallery_loaded': False,
+        'audit_gallery_html': [],
+        'audit_member_count': 0,
+        'audit_members_data': [],
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 # Call initialization
 init_session_state()
@@ -101,7 +108,6 @@ st.markdown("""
         border-color: rgba(96,165,250,0.3);
     }
     
-    /* Status badge colors */
     .status-verified {
         background: #10B981;
         color: white;
@@ -141,10 +147,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
-# PHOTO HELPERS
+# PHOTO HELPERS - FIXED
 # ============================================
 
 def fix_image_orientation(img):
+    """Fix image orientation using EXIF data"""
     try:
         if hasattr(img, '_getexif'):
             exif = img._getexif()
@@ -159,9 +166,21 @@ def fix_image_orientation(img):
                         img = img.rotate(90, expand=True)
     except:
         pass
+    
+    try:
+        img = ImageOps.exif_transpose(img)
+    except:
+        pass
+    
     return img
 
 def get_audit_photo_b64(photo_path, serial_number: str = ""):
+    """Get compressed photo with orientation fix - SAFE with session state check"""
+    
+    # 🔥 FIX: Ensure session state is initialized
+    if 'audit_photo_cache' not in st.session_state:
+        st.session_state.audit_photo_cache = {}
+    
     if not photo_path and not serial_number:
         return None
 
@@ -174,8 +193,22 @@ def get_audit_photo_b64(photo_path, serial_number: str = ""):
         try:
             b64, _ = object_store.get_photo_b64(key)
             if b64:
-                st.session_state.audit_photo_cache[cache_key] = b64
-                return b64
+                # Apply orientation fix
+                try:
+                    img_bytes = base64.b64decode(b64)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img = fix_image_orientation(img)
+                    
+                    output = io.BytesIO()
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(output, format='JPEG', quality=85, optimize=True)
+                    fixed_b64 = base64.b64encode(output.getvalue()).decode()
+                except:
+                    fixed_b64 = b64
+                
+                st.session_state.audit_photo_cache[cache_key] = fixed_b64
+                return fixed_b64
         except Exception:
             pass
 
@@ -209,31 +242,42 @@ def get_audit_photo_b64(photo_path, serial_number: str = ""):
 
     return None
 
-def show_audit_photo(photo_path, width=120, height=180):
-    photo_b64 = get_audit_photo_b64(photo_path)
+def show_audit_photo(photo_path, width=120, height=180, serial_number=""):
+    """Display member photo with orientation fix - SAFE with error handling"""
     
-    if photo_b64:
-        st.markdown(f"""
-        <div style="width:{width}px; height:{height}px; border-radius:12px;
-                    border:3px solid #7C3AED; overflow:hidden;
-                    background:#1E293B; box-shadow:0 4px 15px rgba(124,58,237,0.3);
-                    flex-shrink:0;">
-            <img src="data:image/jpeg;base64,{photo_b64}" 
-                 style="width:100%; height:100%; object-fit:cover; display:block;" />
-        </div>
-        """, unsafe_allow_html=True)
-        return True
-    else:
-        st.markdown(f"""
-        <div style="width:{width}px; height:{height}px; border-radius:12px;
-                    background:linear-gradient(135deg,#7C3AED,#6D28D9);
-                    display:flex; align-items:center; justify-content:center;
-                    font-size:{width//2}px; color:white; font-weight:700;
-                    border:3px solid #7C3AED33; flex-shrink:0;">
-            👤
-        </div>
-        """, unsafe_allow_html=True)
-        return False
+    # 🔥 FIX: Ensure session state is initialized
+    if 'audit_photo_cache' not in st.session_state:
+        st.session_state.audit_photo_cache = {}
+    
+    try:
+        photo_b64 = get_audit_photo_b64(photo_path, serial_number)
+        
+        if photo_b64:
+            st.markdown(f"""
+            <div style="width:{width}px; height:{height}px; border-radius:12px;
+                        border:3px solid #7C3AED; overflow:hidden;
+                        background:#1E293B; box-shadow:0 4px 15px rgba(124,58,237,0.3);
+                        flex-shrink:0;">
+                <img src="data:image/jpeg;base64,{photo_b64}" 
+                     style="width:100%; height:100%; object-fit:cover; display:block;
+                            image-orientation:from-image;" />
+            </div>
+            """, unsafe_allow_html=True)
+            return True
+    except Exception as e:
+        print(f"Photo display error: {e}")
+    
+    # Default placeholder
+    st.markdown(f"""
+    <div style="width:{width}px; height:{height}px; border-radius:12px;
+                background:linear-gradient(135deg,#7C3AED,#6D28D9);
+                display:flex; align-items:center; justify-content:center;
+                font-size:{width//2}px; color:white; font-weight:700;
+                border:3px solid #7C3AED33; flex-shrink:0;">
+        👤
+    </div>
+    """, unsafe_allow_html=True)
+    return False
 
 def get_member_from_reference(reference_id, gym_id=None):
     if not reference_id:
@@ -259,12 +303,15 @@ def get_member_from_reference(reference_id, gym_id=None):
     return None
 
 # ============================================
-# MAIN RENDER FUNCTION
+# MAIN RENDER FUNCTION - FIXED
 # ============================================
 
 def render(gym_id, role, username):
     
-    # 🔥 Check if refresh needed
+    # 🔥 FIX: Ensure session state is initialized
+    init_session_state()
+    
+    # Check if refresh needed
     if st.session_state.get('audit_refresh', False):
         st.session_state.audit_refresh = False
         st.rerun()
@@ -339,7 +386,7 @@ def render(gym_id, role, username):
                                 box-shadow:0 4px 15px rgba(0,0,0,0.3);">
                     """, unsafe_allow_html=True)
                     
-                    show_audit_photo(member.photo_path, width=120, height=180)
+                    show_audit_photo(member.photo_path, width=120, height=180, serial_number=member.serial_number)
                     
                     st.markdown(f"""
                     <div style="font-weight:700;color:#F8FAFC;margin-top:0.5rem;">{member.full_name}</div>
@@ -402,7 +449,7 @@ def render(gym_id, role, username):
                     st.metric("💰 Staff Recorded Amount", f"PKR {expected:,.2f}")
                 with c2:
                     if member and hasattr(member, 'photo_path'):
-                        show_audit_photo(member.photo_path, width=120, height=180)
+                        show_audit_photo(member.photo_path, width=120, height=180, serial_number=member.serial_number if hasattr(member, 'serial_number') else "")
                         st.caption(member.full_name)
 
                 with st.form("cross_verification_form", clear_on_submit=True):
@@ -456,7 +503,6 @@ def render(gym_id, role, username):
             chosen2 = st.selectbox("🏋️ Gym", list(opts2.keys()), key="log_gym")
             log_gid = opts2[chosen2]
         with f2:
-            # 🔥 FIXED: Default show only "Discrepancy" and "Pending" - hide "Resolved"
             status_f = st.selectbox("📊 Audit Status", ["All", "Verified", "Discrepancy", "Pending", "Resolved"], key="log_status")
         with f3:
             df_from = st.date_input("📅 From", value=date.today().replace(day=1), key="log_from")
@@ -515,7 +561,6 @@ def render(gym_id, role, username):
         if status_f not in ["All", "Resolved"]:
             display_entries = [e for e in entries if e.status != "Resolved"]
         
-        # 🔥 Also filter if "All" selected - show only non-Resolved by default
         if status_f == "All":
             display_entries = [e for e in entries if e.status != "Resolved"]
 
@@ -545,19 +590,21 @@ def render(gym_id, role, username):
                     display_phone = member_info.phone or '—'
                     display_photo = member_info.photo_path
                     display_expiry = member_info.expiry_date or '—'
+                    display_serial_num = member_info.serial_number if hasattr(member_info, 'serial_number') else ''
                 else:
                     display_name = f"Ref: {e.reference_id}"
                     display_serial = '—'
                     display_phone = '—'
                     display_photo = None
                     display_expiry = '—'
+                    display_serial_num = ''
 
                 with st.expander(f"{status_color} {e.entry_date} | {display_name} | Diff: {diff:+.2f} PKR"):
                     
                     c_img, c_det = st.columns([1, 3])
 
                     with c_img:
-                        show_audit_photo(display_photo, width=120, height=180)
+                        show_audit_photo(display_photo, width=120, height=180, serial_number=display_serial_num)
 
                     with c_det:
                         if member_info:
@@ -577,7 +624,6 @@ def render(gym_id, role, username):
                         st.write(f"**Verified By:** {e.verified_by} | **Status:** {e.status}")
                         st.info(f"📝 Notes: {e.description or 'No notes provided'}")
 
-                        # 🔥 Only show button if status is Discrepancy
                         if e.status == "Discrepancy":
                             if st.button(f"✅ Mark as Resolved", key=f"res_{e.id}"):
                                 db.update_audit_status(e.id, "Resolved")
@@ -642,7 +688,7 @@ def render(gym_id, role, username):
                     
                     with col1:
                         if member_info:
-                            show_audit_photo(member_info.photo_path, width=120, height=180)
+                            show_audit_photo(member_info.photo_path, width=120, height=180, serial_number=member_info.serial_number if hasattr(member_info, 'serial_number') else '')
                             st.write(f"**Member:** {member_info.full_name}")
                             st.write(f"**Serial:** {member_info.serial_number}")
                         else:
@@ -740,7 +786,7 @@ def render(gym_id, role, username):
                                     box-shadow:0 4px 15px rgba(16,185,129,0.2);">
                         """, unsafe_allow_html=True)
                         
-                        show_audit_photo(member.photo_path, width=120, height=180)
+                        show_audit_photo(member.photo_path, width=120, height=180, serial_number=member.serial_number if hasattr(member, 'serial_number') else '')
                         
                         st.markdown(f"""
                         <div style="font-weight:700;color:#F8FAFC;margin-top:0.5rem;">{member.full_name}</div>
