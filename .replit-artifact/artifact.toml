@@ -1,0 +1,19 @@
+kind = "web"
+previewPath = "/"
+title = "GymPro"
+version = "1.0.0"
+id = "gymPro5000PythonStreamlit"
+
+[[services]]
+localPort = 5000
+name = "Start application"
+paths = ["/"]
+
+[services.development]
+run = "cd /home/runner/workspace/gym-app && python run.py"
+
+[services.production]
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python3 -m streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
+
+[services.production.health.startup]
+path = "/_stcore/health"
