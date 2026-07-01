@@ -586,30 +586,22 @@ def render(gym_id, role):
         st.markdown("Update Identity Image")
         new_photo = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"], key=f"upload_{selected_m.id}")
         
-        if new_photo:
+        # Signature prevents re-processing the same file on repeated reruns
+        _up_sig = f"{selected_m.id}_{new_photo.name}_{new_photo.size}" if new_photo else None
+        if new_photo and st.session_state.get("_card_last_upload") != _up_sig:
             ext = os.path.splitext(new_photo.name)[-1].lower()
             clean_s = str(selected_m.serial_number).strip().replace("-", "").lower()
             new_filename = f"{clean_s}{ext}"
             path = os.path.join(UPLOAD_DIR, new_filename)
-            
+
             img = Image.open(new_photo)
-            img = fix_image_orientation(img)
-            
-            if img.mode in ('RGBA', 'LA', 'P'):
-                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-                img = rgb_img
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            max_width = 400
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_size = (max_width, int(img.height * ratio))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-            
-            img.save(path, 'JPEG', quality=70, optimize=True)
-            
+            img = ImageOps.exif_transpose(img)   # correct orientation
+            if img.mode not in ("RGB",):
+                img = img.convert("RGB")
+            if img.width > 400:
+                img = img.resize((400, int(img.height * 400 / img.width)), Image.Resampling.LANCZOS)
+            img.save(path, "JPEG", quality=70, optimize=True)
+
             db.update_member(
                 selected_m.id,
                 photo_path=f"gym-app/uploads/{new_filename}",
@@ -629,9 +621,11 @@ def render(gym_id, role):
             st.session_state.gallery_loaded = False
             st.session_state.gallery_html = []
             st.session_state.all_members_data = []
+            st.session_state._card_last_upload = _up_sig
             if os.path.exists(GALLERY_CACHE_FILE):
-                os.remove(GALLERY_CACHE_FILE)
-            st.success("Photo updated!")
+                try: os.remove(GALLERY_CACHE_FILE)
+                except: pass
+            st.success("✅ Photo update ho gaya!")
             st.rerun()
     
     st.write("")

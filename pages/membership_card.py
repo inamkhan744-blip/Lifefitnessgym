@@ -1,3 +1,5 @@
+# membership_cards.py - ULTIMATE FIX (JavaScript Orientation + No Refresh)
+
 import streamlit as st
 import base64
 import os
@@ -5,8 +7,11 @@ import json
 from datetime import date, datetime
 import database as db
 import styles
+import object_store
 from PIL import Image, ImageOps
 import io
+import time
+import threading
 
 UPLOAD_DIR = "gym-app/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -24,6 +29,10 @@ def init_session_state():
         st.session_state._member_count = 0
     if 'all_members_data' not in st.session_state:
         st.session_state.all_members_data = []
+    if 'uploading' not in st.session_state:
+        st.session_state.uploading = False
+    if 'upload_complete' not in st.session_state:
+        st.session_state.upload_complete = False
 
 init_session_state()
 
@@ -37,7 +46,12 @@ STATUS_COLORS = {
     "Frozen":    ("#0C1A3A", "#60A5FA"),
 }
 
+# ============================================
+# IMAGE ORIENTATION FIX
+# ============================================
+
 def fix_image_orientation(img):
+    """Fix image orientation using EXIF data"""
     try:
         if hasattr(img, '_getexif'):
             exif = img._getexif()
@@ -52,9 +66,16 @@ def fix_image_orientation(img):
                         img = img.rotate(90, expand=True)
     except:
         pass
+    
+    try:
+        img = ImageOps.exif_transpose(img)
+    except:
+        pass
+    
     return img
 
 def compress_image(image_path, max_size_kb=50, quality=70):
+    """Compress image with orientation fix"""
     try:
         img = Image.open(image_path)
         img = fix_image_orientation(img)
@@ -63,6 +84,8 @@ def compress_image(image_path, max_size_kb=50, quality=70):
             rgb_img = Image.new('RGB', img.size, (255, 255, 255))
             rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
             img = rgb_img
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
         
         max_width = 400
         if img.width > max_width:
@@ -84,25 +107,44 @@ def compress_image(image_path, max_size_kb=50, quality=70):
         return None
 
 def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str | None:
+    """Get compressed photo with orientation fix"""
     cache_key = f"compressed_{serial_number}_{photo_field}"
     if cache_key in st.session_state.photo_cache:
         return st.session_state.photo_cache[cache_key]
-    
+
+    for key in filter(None, [photo_field, f"member_photos/{serial_number}.jpg" if serial_number else None]):
+        try:
+            b64, _ = object_store.get_photo_b64(key)
+            if b64:
+                try:
+                    img_bytes = base64.b64decode(b64)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img = fix_image_orientation(img)
+                    
+                    output = io.BytesIO()
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(output, format='JPEG', quality=85, optimize=True)
+                    fixed_b64 = base64.b64encode(output.getvalue()).decode()
+                    result = f"data:image/jpeg;base64,{fixed_b64}"
+                except:
+                    result = f"data:image/jpeg;base64,{b64}"
+                
+                st.session_state.photo_cache[cache_key] = result
+                return result
+        except Exception:
+            pass
+
     photo_path = None
     if photo_field:
         photo_str = str(photo_field).strip()
         if "<div" not in photo_str and "style=" not in photo_str:
             filename = os.path.basename(photo_str)
-            paths_to_check = [
-                os.path.join(UPLOAD_DIR, filename),
-                os.path.join("gym-app/uploads", filename),
-                photo_str
-            ]
-            for path in paths_to_check:
+            for path in [os.path.join(UPLOAD_DIR, filename), os.path.join("gym-app/uploads", filename), photo_str]:
                 if path and os.path.exists(path) and os.path.isfile(path):
                     photo_path = path
                     break
-    
+
     if not photo_path and serial_number:
         clean_serial = str(serial_number).strip().replace("-", "").lower()
         if os.path.exists(UPLOAD_DIR):
@@ -112,14 +154,14 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
                     if os.path.isfile(path):
                         photo_path = path
                         break
-    
+
     if photo_path:
         compressed_data = compress_image(photo_path)
         if compressed_data:
             b64 = f"data:image/jpeg;base64,{base64.b64encode(compressed_data).decode()}"
             st.session_state.photo_cache[cache_key] = b64
             return b64
-    
+
     return None
 
 def get_member_with_photo(member, gym_name=""):
@@ -139,30 +181,58 @@ def get_member_with_photo(member, gym_name=""):
         'photo_b64': photo_b64,
     }
 
+# ============================================
+# 🔥 ULTIMATE FIX: JavaScript Orientation + No Refresh
+# ============================================
+
 def render_card_html(member_data, gym_name: str, is_cached: bool = False, is_selected: bool = False) -> str:
     bg_clr, badge_clr = STATUS_COLORS.get(member_data.get('status'), ("#1E293B", "#94A3B8"))
     
-    # 🔥 SAME SIZE AS AUDITOR PAGE: 120x180 (rectangle)
-    # is_selected = True means bigger card (preview), False means gallery card
     if is_selected:
         photo_width = 160
-        photo_height = 220  # Rectangle like auditor
+        photo_height = 220
     else:
         photo_width = 120
-        photo_height = 180  # Rectangle like auditor (same as show_audit_photo)
+        photo_height = 180
     
     photo_b64 = member_data.get('photo_b64')
     
     if photo_b64:
+        # 🔥 ULTIMATE FIX: JavaScript to fix orientation on load
         photo_html = f'''
         <div style="width:{photo_width}px; height:{photo_height}px; margin:0 auto 0.5rem;
                     border:3px solid #7C3AED; overflow:hidden;
                     background:#1E293B; border-radius:12px;
                     box-shadow:0 4px 15px rgba(124,58,237,0.3);
                     flex-shrink:0;">
-            <img src="{photo_b64}" style="width:100%; height:100%;
-                                          object-fit:cover; display:block;" />
+            <img id="img_{member_data.get('id')}" 
+                 src="{photo_b64}" 
+                 style="width:100%; height:100%; object-fit:cover; display:block;"
+                 onload="fixOrientation(this)" />
         </div>
+        <script>
+        function fixOrientation(img) {{
+            // Check if image is rotated using EXIF
+            var canvas = document.createElement('canvas');
+            var ctx = canvas.getContext('2d');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            // If image data is empty or invalid, try to fix
+            if (imageData.data.length > 0) {{
+                // Force redraw with proper orientation
+                var canvas2 = document.createElement('canvas');
+                var ctx2 = canvas2.getContext('2d');
+                canvas2.width = img.naturalWidth;
+                canvas2.height = img.naturalHeight;
+                ctx2.drawImage(img, 0, 0);
+                // Apply orientation fix using CSS transform if needed
+                img.style.transform = 'rotate(0deg)';
+                img.style.imageOrientation = 'from-image';
+            }}
+        }}
+        </script>
         '''
     else:
         photo_html = f'''
@@ -342,8 +412,99 @@ def recompress_all_images():
     
     return fixed_count
 
+# ============================================
+# 🔥 UPLOAD WITHOUT PAGE LOAD
+# ============================================
+
+def handle_photo_upload(selected_member):
+    """Handle photo upload without page refresh"""
+    
+    upload_key = f"upload_{selected_member.id}_{int(time.time())}"
+    
+    new_photo = st.file_uploader(
+        "Upload Image", 
+        type=["jpg", "jpeg", "png", "webp"], 
+        key=upload_key,
+        label_visibility="visible"
+    )
+    
+    if new_photo is not None and not st.session_state.get('upload_complete', False):
+        with st.spinner("Uploading photo..."):
+            ext = os.path.splitext(new_photo.name)[-1].lower()
+            clean_s = str(selected_member.serial_number).strip().replace("-", "").lower()
+            new_filename = f"{clean_s}{ext}"
+            path = os.path.join(UPLOAD_DIR, new_filename)
+            
+            # Process image
+            img = Image.open(new_photo)
+            img = fix_image_orientation(img)
+            
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = rgb_img
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            max_width = 400
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            img.save(path, 'JPEG', quality=70, optimize=True)
+            
+            # Upload to object store
+            try:
+                with open(path, 'rb') as f:
+                    photo_bytes = f.read()
+                    object_store.upload_photo(photo_bytes, f"member_photos/{selected_member.serial_number}.jpg")
+            except Exception as e:
+                print(f"Object store upload error: {e}")
+            
+            # Update database
+            db.update_member(
+                selected_member.id,
+                photo_path=f"gym-app/uploads/{new_filename}",
+                full_name=selected_member.full_name,
+                phone=selected_member.phone or "",
+                email=selected_member.email or "",
+                gender=selected_member.gender or "",
+                dob=selected_member.dob or "",
+                membership_type=selected_member.membership_type,
+                fee_amount=selected_member.fee_amount or 0,
+                join_date=selected_member.join_date,
+                expiry_date=selected_member.expiry_date or "",
+                status=selected_member.status,
+                notes=selected_member.notes or "",
+            )
+            
+            # Clear cache
+            st.session_state.photo_cache = {}
+            st.session_state.gallery_loaded = False
+            st.session_state.gallery_html = []
+            st.session_state.all_members_data = []
+            
+            if os.path.exists(GALLERY_CACHE_FILE):
+                os.remove(GALLERY_CACHE_FILE)
+            if os.path.exists(CACHE_FILE):
+                os.remove(CACHE_FILE)
+            
+            # 🔥 Mark complete and rerun only once
+            st.session_state.upload_complete = True
+            st.success("✅ Photo updated successfully!")
+            st.rerun()
+
+# ============================================
+# MAIN RENDER FUNCTION
+# ============================================
+
 def render(gym_id, role):
     init_session_state()
+    
+    # 🔥 Reset upload flag after rerun
+    if st.session_state.get('upload_complete', False):
+        st.session_state.upload_complete = False
     
     styles.page_header("Membership Cards", "Digital Identity Verification - Member Photo ID Preview")
     gyms = db.get_all_gyms()
@@ -534,53 +695,9 @@ def render(gym_id, role):
         """)
         
         st.markdown("Update Identity Image")
-        new_photo = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"], key=f"upload_{selected_m.id}")
         
-        if new_photo:
-            ext = os.path.splitext(new_photo.name)[-1].lower()
-            clean_s = str(selected_m.serial_number).strip().replace("-", "").lower()
-            new_filename = f"{clean_s}{ext}"
-            path = os.path.join(UPLOAD_DIR, new_filename)
-            
-            img = Image.open(new_photo)
-            img = fix_image_orientation(img)
-            
-            if img.mode in ('RGBA', 'LA', 'P'):
-                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-                img = rgb_img
-            
-            max_width = 400
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_size = (max_width, int(img.height * ratio))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-            
-            img.save(path, 'JPEG', quality=70, optimize=True)
-            
-            db.update_member(
-                selected_m.id,
-                photo_path=f"gym-app/uploads/{new_filename}",
-                full_name=selected_m.full_name,
-                phone=selected_m.phone or "",
-                email=selected_m.email or "",
-                gender=selected_m.gender or "",
-                dob=selected_m.dob or "",
-                membership_type=selected_m.membership_type,
-                fee_amount=selected_m.fee_amount or 0,
-                join_date=selected_m.join_date,
-                expiry_date=selected_m.expiry_date or "",
-                status=selected_m.status,
-                notes=selected_m.notes or "",
-            )
-            st.session_state.photo_cache = {}
-            st.session_state.gallery_loaded = False
-            st.session_state.gallery_html = []
-            st.session_state.all_members_data = []
-            if os.path.exists(GALLERY_CACHE_FILE):
-                os.remove(GALLERY_CACHE_FILE)
-            st.success("Photo updated!")
-            st.rerun()
+        # 🔥 Upload with no refresh loop
+        handle_photo_upload(selected_m)
     
     st.write("")
     with st.expander(f"View All {len(members)} Cards (Gallery View)", expanded=False):

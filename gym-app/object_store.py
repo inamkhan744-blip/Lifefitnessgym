@@ -25,24 +25,14 @@ os.makedirs(_LOCAL_UPLOADS, exist_ok=True)
 
 
 def _compress_image(file_bytes: bytes, max_px: int = 800, quality: int = 72) -> bytes:
-    """Upload se pehle compress — EXIF fix, resize, JPEG."""
+    """Upload se pehle compress — EXIF orientation fix (ImageOps), resize, JPEG."""
     try:
-        from PIL import Image, ExifTags
+        from PIL import Image, ImageOps
         img = Image.open(io.BytesIO(file_bytes))
-        try:
-            for tag, name in ExifTags.TAGS.items():
-                if name == "Orientation":
-                    exif = img._getexif()
-                    if exif and tag in exif:
-                        orientation = exif[tag]
-                        rotations = {3: 180, 6: 270, 8: 90}
-                        if orientation in rotations:
-                            img = img.rotate(rotations[orientation], expand=True)
-                    break
-        except Exception:
-            pass
+        # Fix rotation using EXIF data — handles all 8 orientations correctly
+        img = ImageOps.exif_transpose(img)
         img.thumbnail((max_px, max_px), Image.LANCZOS)
-        if img.mode in ("RGBA", "P"):
+        if img.mode in ("RGBA", "P", "LA"):
             img = img.convert("RGB")
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)

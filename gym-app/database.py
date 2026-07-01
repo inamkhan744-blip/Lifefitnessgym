@@ -121,7 +121,7 @@ class Gym(Base):
     address = Column(String(255))
     phone = Column(String(30))
     email = Column(String(120))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     members = relationship("Member", back_populates="gym", cascade="all, delete-orphan")
     users = relationship("User", back_populates="gym")
@@ -144,7 +144,7 @@ class User(Base):
     role = Column(String(20), nullable=False)
     gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="users")
 
@@ -168,7 +168,7 @@ class Member(Base):
     notes = Column(Text)
     face_encoding = Column(Text, nullable=True)
     whatsapp_sent = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="members")
     attendances = relationship("Attendance", back_populates="member", cascade="all, delete-orphan")
@@ -185,7 +185,7 @@ class Attendance(Base):
     check_date = Column(String(15), nullable=False)
     status = Column(String(20), default="Present")
     marked_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="attendances")
 
@@ -204,7 +204,7 @@ class FeeRecord(Base):
     collected_by = Column(String(60))
     notes = Column(Text)
     whatsapp_sent = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="fee_records")
     gym = relationship("Gym", back_populates="fee_records")
@@ -219,7 +219,7 @@ class DailyExpense(Base):
     description = Column(Text)
     expense_date = Column(String(15), nullable=False)
     staff_name = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="expenses")
 
@@ -237,7 +237,7 @@ class AuditEntry(Base):
     verified_by = Column(String(60))
     status = Column(String(20), default="Pending")
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="audit_entries")
 
@@ -254,7 +254,7 @@ class BodyMeasurement(Base):
     bicep_cm = Column(Float)
     body_fat_pct = Column(Float)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="body_measurements")
 
@@ -269,7 +269,7 @@ class StockItem(Base):
     sale_price = Column(Float, default=0.0)
     quantity = Column(Integer, default=0)
     min_quantity = Column(Integer, default=5)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="stock_items")
     sales = relationship("StockSale", back_populates="stock_item", cascade="all, delete-orphan")
@@ -286,7 +286,7 @@ class StockSale(Base):
     total_amount = Column(Float, default=0.0)
     sold_by = Column(String(60))
     sale_date = Column(String(15), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     stock_item = relationship("StockItem", back_populates="sales")
     gym = relationship("Gym", back_populates="stock_sales")
@@ -304,7 +304,7 @@ class Complaint(Base):
     submitted_by = Column(String(60))
     resolved_by = Column(String(60))
     wa_sent = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     resolved_at = Column(DateTime)
 
     gym = relationship("Gym", back_populates="complaints")
@@ -323,7 +323,7 @@ class ReceiptLog(Base):
     pay_date       = Column(String(15),  nullable=False)
     pay_time       = Column(String(10),  nullable=False)
     print_issued   = Column(Boolean, default=False, nullable=False)
-    created_at     = Column(DateTime, default=datetime.utcnow)
+    created_at     = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="receipt_logs")
 
@@ -337,7 +337,7 @@ class UnknownCapture(Base):
     capture_type = Column(String(20), default="unknown") # unknown | expired
     member_id    = Column(Integer, nullable=True)        # only for expired
     member_name  = Column(String(120), nullable=True)
-    captured_at  = Column(DateTime, default=datetime.utcnow)
+    captured_at  = Column(DateTime, default=datetime.now)
     notes        = Column(Text, nullable=True)
 
 
@@ -871,7 +871,7 @@ def delete_unknown_capture_record(capture_id: int) -> bool:
 def cleanup_old_captures(days: int = 3) -> list[str]:
     """Delete captures older than `days` days. Returns list of Object Storage keys to delete."""
     db = get_db()
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now() - timedelta(days=days)
     try:
         old = db.query(UnknownCapture).filter(UnknownCapture.captured_at < cutoff).all()
         keys = [c.capture_key for c in old]
@@ -1129,7 +1129,7 @@ def log_receipt(fee_record_id, gym_id, member_name, receipt_number, amount,
     """Log a fee receipt into receipt_logs table."""
     db = get_db()
     try:
-        now = datetime.utcnow()
+        now = datetime.now()
         db.add(ReceiptLog(
             fee_record_id  = fee_record_id,
             gym_id         = gym_id,
@@ -1286,7 +1286,7 @@ def mark_fee_whatsapp_sent(fee_id: int) -> bool:
 def get_fee_records_created_today(gym_id=None):
     db = get_db()
     try:
-        utc_today = datetime.utcnow().date()
+        utc_today = datetime.now().date()
         start = datetime.combine(utc_today, datetime.min.time())
         end   = start + timedelta(days=1)
         q = db.query(FeeRecord).filter(
@@ -1590,7 +1590,7 @@ def update_complaint_status(complaint_id, status, resolved_by=None):
         c.status = status
         if status == "Resolved":
             c.resolved_by = resolved_by
-            c.resolved_at = datetime.utcnow()
+            c.resolved_at = datetime.now()
         db.commit()
         return True, f"Status updated to {status}."
     except Exception as e:
@@ -1876,8 +1876,8 @@ class StaffTarget(Base):
     target_month = Column(String(7), nullable=False)
     status = Column(String(20), default="Active")
     created_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     gym = relationship("Gym", back_populates="staff_targets")
 
@@ -2179,7 +2179,7 @@ class Announcement(Base):
     message = Column(Text, nullable=False)
     is_active = Column(Boolean, default=True)
     created_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     expires_at = Column(DateTime, nullable=True)
 
     gym = relationship("Gym", back_populates="announcements")
@@ -2229,7 +2229,7 @@ def get_active_announcement(gym_id=None):
             query = query.filter(Announcement.gym_id == None)
         
         # Check expiry
-        now = datetime.utcnow()
+        now = datetime.now()
         query = query.filter(
             (Announcement.expires_at == None) | (Announcement.expires_at > now)
         )
@@ -2279,7 +2279,7 @@ class StaffAttendance(Base):
     logout_time = Column(DateTime, nullable=True)
     session_duration = Column(Integer, default=0)  # Minutes
     ip_address = Column(String(45))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 def log_staff_login(staff_username, ip_address=None):
@@ -2298,7 +2298,7 @@ def log_staff_login(staff_username, ip_address=None):
         
         attendance = StaffAttendance(
             staff_username=staff_username,
-            login_time=datetime.utcnow(),
+            login_time=datetime.now(),
             ip_address=ip_address
         )
         db.add(attendance)
@@ -2325,7 +2325,7 @@ def log_staff_logout(staff_username):
         if not record:
             return False, "No active session found"
         
-        record.logout_time = datetime.utcnow()
+        record.logout_time = datetime.now()
         duration = (record.logout_time - record.login_time).seconds // 60
         record.session_duration = duration
         db.commit()
@@ -2485,7 +2485,7 @@ def check_and_update_staff_status():
     db = get_db()
     try:
         today = date.today()
-        now = datetime.utcnow()
+        now = datetime.now()
         timeout = timedelta(hours=2)  # 2 hours timeout
         
         # Get all active sessions
@@ -2576,7 +2576,7 @@ def get_my_attendance_summary(staff_username):
     db = get_db()
     try:
         today = date.today()
-        now = datetime.utcnow()
+        now = datetime.now()
         timeout = timedelta(hours=2)
         
         # Check if this staff has an active session
