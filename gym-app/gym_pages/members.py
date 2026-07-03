@@ -47,17 +47,34 @@ def render(gym_id, role):
         st.info("Add a gym in **Gym Setup** first.")
         return
 
+    # ── Staff gym restriction ─────────────────────────────────────────────────
+    # Staff sirf apne gym ka data dekhein — kabhi bhi None nahi hona chahiye
+    if role == "staff":
+        user_gym_id = st.session_state.get("user_gym_id")
+        if not gym_id and user_gym_id:
+            gym_id = user_gym_id
+        elif not gym_id:
+            # Staff ka gym assign nahi — pehla gym use karo
+            gym_id = gyms[0].id if gyms else None
+        if not gym_id:
+            st.warning("⚠️ Aapka account kisi gym se assign nahi hai. Admin se rabta karein.")
+            return
+
     # ============================================
-    # STATS OVERVIEW - 4 Cards (Simple)
+    # STATS OVERVIEW - 4 Cards (FIXED - Only Current Gym)
     # ============================================
     
-    all_members = db.get_members()
-    total_members = len(all_members)
-    active_members = sum(1 for m in all_members if m.status == "Active")
+    # Sirf current gym ke members
+    gym_members = db.get_members(gym_id=gym_id)
+    total_members = len(gym_members)
+    active_members = sum(1 for m in gym_members if m.status == "Active")
+    
+    # Sirf current gym ki expiring members
     expiring_soon = len(db.get_expiring_members(days=7, gym_id=gym_id))
     
-    all_fees = db.get_fee_records()
-    total_collected = sum(f.amount for f in all_fees) if all_fees else 0
+    # Sirf current gym ki fees
+    gym_fees = db.get_fee_records(gym_id=gym_id)
+    total_collected = sum(f.amount for f in gym_fees) if gym_fees else 0
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -82,11 +99,13 @@ def render(gym_id, role):
         gym_opts = {g.name: g.id for g in gyms}
 
         with f1:
-            if gym_id:
+            if gym_id or role == "staff":
+                # Staff ya fixed gym — sirf apna gym
                 chosen_gym_name = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
                 st.text_input("🏋️ Gym", value=chosen_gym_name, disabled=True, key="ml_gym_display")
                 selected_gid = gym_id
             else:
+                # Admin — All Gyms option
                 opts = {"All Gyms": None} | gym_opts
                 chosen = st.selectbox("🏋️ Gym", list(opts.keys()), key="ml_gym")
                 selected_gid = opts[chosen]
@@ -123,12 +142,11 @@ def render(gym_id, role):
             st.info("📭 No members match your filters.")
         else:
             # ============================================
-            # SIMPLE TABLE (Without Custom CSS)
+            # SIMPLE TABLE
             # ============================================
             
             rows = []
             for m in members:
-                # Status badge
                 status_badge = {
                     "Active": "🟢 Active",
                     "Inactive": "🔴 Inactive",
@@ -136,7 +154,6 @@ def render(gym_id, role):
                     "Frozen": "🔵 Frozen",
                 }.get(m.status, m.status)
                 
-                # Expiry display
                 expiry_display = m.expiry_date or "—"
                 if m.expiry_date:
                     try:
@@ -165,7 +182,6 @@ def render(gym_id, role):
             
             df = pd.DataFrame(rows)
             
-            # Display simple dataframe
             st.dataframe(
                 df,
                 use_container_width=True,
@@ -217,7 +233,6 @@ def _member_detail(m, gyms, role):
     with col_info:
         gym_name = next((g.name for g in gyms if g.id == m.gym_id), "—")
         
-        # Status badge
         status_emoji = {
             "Active": "🟢",
             "Inactive": "🔴",
@@ -331,7 +346,6 @@ def _member_detail(m, gyms, role):
     # ============================================
     
     with st.expander("🪪 ID Card & QR Code"):
-        # ── ID Card preview ──────────────────────────────
         gyms = db.get_all_gyms()
         gym_name = next((g.name for g in gyms if g.id == m.gym_id), "GymPro")
 
@@ -453,9 +467,14 @@ def _register_form(gyms, gym_id, role):
         
         c1, c2 = st.columns(2)
         with c1:
-            gym_sel = st.selectbox("🏋️ Gym *", list(gym_opts.keys()),
-                                   index=list(gym_opts.keys()).index(default_name),
-                                   key="reg_gym_sel")
+            if role == "staff":
+                # Staff sirf apne gym mein register kar sakta hai
+                gym_sel = default_name
+                st.text_input("🏋️ Gym", value=default_name, disabled=True, key="reg_gym_display")
+            else:
+                gym_sel = st.selectbox("🏋️ Gym *", list(gym_opts.keys()),
+                                       index=list(gym_opts.keys()).index(default_name),
+                                       key="reg_gym_sel")
             full_name = st.text_input("👤 Full Name *", key="reg_full_name", placeholder="e.g., Muhammad Ali")
             phone = st.text_input("📞 Phone", placeholder="+92 300-0000000", key="reg_phone")
             email = st.text_input("📧 Email", key="reg_email", placeholder="example@email.com")
@@ -492,7 +511,6 @@ def _register_form(gyms, gym_id, role):
                     photo_path=photo_path, status=status, notes=notes,
                 )
                 if ok:
-                    # Photo key ko serial number se rename karo
                     if photo_path and serial:
                         new_key = f"member_photos/{serial}.jpg"
                         if object_store.rename_photo(photo_path, new_key):

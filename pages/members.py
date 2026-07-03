@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import uuid
 import sqlite3
-from PIL import Image
+from PIL import Image, ImageOps
 from datetime import date, timedelta
 import database as db
 import styles
@@ -17,12 +17,56 @@ GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
 STATUSES = ["Active", "Inactive", "Suspended", "Frozen"]
 
 
+def fix_image_orientation(img):
+    """Fix image orientation using EXIF data"""
+    try:
+        if hasattr(img, '_getexif'):
+            exif = img._getexif()
+            if exif:
+                orientation = exif.get(274)
+                if orientation:
+                    if orientation == 3:
+                        img = img.rotate(180, expand=True)
+                    elif orientation == 6:
+                        img = img.rotate(270, expand=True)
+                    elif orientation == 8:
+                        img = img.rotate(90, expand=True)
+    except:
+        pass
+    
+    try:
+        img = ImageOps.exif_transpose(img)
+    except:
+        pass
+    
+    return img
+
+
 def save_photo(f):
+    """Save photo with orientation fix"""
     ext = os.path.splitext(f.name)[-1].lower()
     filename = f"{uuid.uuid4().hex}{ext}"
     path = os.path.join(UPLOAD_DIR, filename)
-    with open(path, "wb") as fp:
-        fp.write(f.getbuffer())
+    
+    # Fix orientation before saving
+    img = Image.open(f)
+    img = fix_image_orientation(img)
+    
+    if img.mode in ('RGBA', 'LA', 'P'):
+        rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+        rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+        img = rgb_img
+    elif img.mode != 'RGB':
+        img = img.convert('RGB')
+    
+    # Resize if too large
+    max_width = 400
+    if img.width > max_width:
+        ratio = max_width / img.width
+        new_size = (max_width, int(img.height * ratio))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+    
+    img.save(path, 'JPEG', quality=70, optimize=True)
     return path
 
 
@@ -37,6 +81,7 @@ def show_photo(photo_field, w=100):
     ]
 
     img_b64 = None
+    mime = "jpeg"
     if filename:
         for path in possible_paths:
             if path and os.path.exists(path):
@@ -57,7 +102,8 @@ def show_photo(photo_field, w=100):
             f'<div style="width:{size};height:{size};border-radius:10px;overflow:hidden;'
             f'border:1px solid #334155;flex-shrink:0;">'
             f'<img src="data:image/{mime};base64,{img_b64}" '
-            f'style="width:100%;height:100%;object-fit:cover;object-position:center;" /></div>',
+            f'style="width:100%;height:100%;object-fit:cover;object-position:center;'
+            f'image-orientation:from-image;" /></div>',
             unsafe_allow_html=True,
         )
     else:
@@ -79,29 +125,9 @@ def render(gym_id, role):
         return
 
     # ============================================
-    # STATS OVERVIEW - 4 Cards (Simple)
+    # ❌ STATS OVERVIEW REMOVED
     # ============================================
-    
-    all_members = db.get_members()
-    total_members = len(all_members)
-    active_members = sum(1 for m in all_members if m.status == "Active")
-    expiring_soon = len(db.get_expiring_members(days=7, gym_id=gym_id))
-    
-    all_fees = db.get_fee_records()
-    total_collected = sum(f.amount for f in all_fees) if all_fees else 0
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("👥 Total Members", total_members)
-    with col2:
-        st.metric("✅ Active Members", active_members)
-    with col3:
-        st.metric("⚠️ Expiring Soon", expiring_soon)
-    with col4:
-        st.metric("💰 Total Fees", f"PKR {total_collected:,.0f}")
-    
-    st.markdown("---")
+    # (4 cards hata diye gaye hain)
 
     tab_add, tab_list = st.tabs(["➕ Register Member", "📋 Member List"])
 
