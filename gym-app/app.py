@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import database as db
 import auth
 import styles
+import themes
 
 # ── Session timeout (24 h) ─────────────────────────────────────────────────────
 if "last_activity" not in st.session_state:
@@ -167,6 +168,41 @@ with st.sidebar:
                     unsafe_allow_html=True)
         st.session_state["selected_gym_id"] = user_gym_id
         gym_id = user_gym_id
+
+    # ── Theme selector (admin only) ────────────────────────────────────────────
+    if role == "admin":
+        st.divider()
+        st.markdown(
+            '<div style="font-size:0.6rem;color:#475569;text-transform:uppercase;'
+            'letter-spacing:0.1em;margin-bottom:0.4rem;">🎨 App Theme</div>',
+            unsafe_allow_html=True,
+        )
+        _auto_on   = db.get_setting("theme_auto", "0") == "1"
+        _cur_key   = themes.get_daily_theme() if _auto_on else db.get_setting("theme_key", "dark_slate")
+        _cur_label = themes.THEME_NAMES.get(_cur_key, "🪨 Dark Slate")
+
+        _auto_toggle = st.checkbox("Auto (daily)", value=_auto_on, key="theme_auto_chk")
+        if _auto_toggle != _auto_on:
+            db.set_setting("theme_auto", "1" if _auto_toggle else "0")
+            st.rerun()
+
+        if not _auto_toggle:
+            _all_labels = list(themes.THEME_NAMES.values())
+            _all_keys   = list(themes.THEME_NAMES.keys())
+            _sel_idx    = _all_keys.index(_cur_key) if _cur_key in _all_keys else 0
+            _picked     = st.selectbox(
+                "Select Theme",
+                _all_labels,
+                index=_sel_idx,
+                key="theme_picker",
+                label_visibility="collapsed",
+            )
+            _picked_key = _all_keys[_all_labels.index(_picked)]
+            if _picked_key != _cur_key:
+                db.set_setting("theme_key", _picked_key)
+                st.rerun()
+        else:
+            st.caption(f"Today: **{_cur_label}**")
 
     st.divider()
 

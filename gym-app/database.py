@@ -333,12 +333,19 @@ class UnknownCapture(Base):
     __tablename__ = "unknown_captures"
     id           = Column(Integer, primary_key=True, autoincrement=True)
     gym_id       = Column(Integer, nullable=False)
-    capture_key  = Column(String(300), nullable=False)   # Object Storage key
-    capture_type = Column(String(20), default="unknown") # unknown | expired
-    member_id    = Column(Integer, nullable=True)        # only for expired
+    capture_key  = Column(String(300), nullable=False)
+    capture_type = Column(String(20), default="unknown")
+    member_id    = Column(Integer, nullable=True)
     member_name  = Column(String(120), nullable=True)
     captured_at  = Column(DateTime, default=datetime.now)
     notes        = Column(Text, nullable=True)
+
+
+class AppSetting(Base):
+    """Global app settings — key/value store (theme, etc.)."""
+    __tablename__ = "app_settings"
+    key   = Column(String(120), primary_key=True)
+    value = Column(Text, nullable=True)
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -373,6 +380,30 @@ HEALTH_TIPS = [
 
 def get_health_tip(seed: int = 0) -> str:
     return HEALTH_TIPS[seed % len(HEALTH_TIPS)]
+
+
+# ── App Settings ────────────────────────────────────────────────────────────────
+
+def get_setting(key: str, default: str = "") -> str:
+    try:
+        with SessionLocal() as s:
+            row = s.get(AppSetting, key)
+            return row.value if row and row.value is not None else default
+    except Exception:
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    try:
+        with SessionLocal() as s:
+            row = s.get(AppSetting, key)
+            if row:
+                row.value = value
+            else:
+                s.add(AppSetting(key=key, value=value))
+            s.commit()
+    except Exception:
+        pass
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────

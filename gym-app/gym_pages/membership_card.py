@@ -39,13 +39,12 @@ STATUS_COLORS = {
 }
 
 # ============================================
-# 🔥 FIXED: Image Orientation Fix - Strong
+# IMAGE ORIENTATION FIX
 # ============================================
 
 def fix_image_orientation(img):
-    """Fix image orientation using EXIF data - STRONG FIX"""
+    """Fix image orientation using EXIF data"""
     try:
-        # Method 1: EXIF orientation
         if hasattr(img, '_getexif'):
             exif = img._getexif()
             if exif:
@@ -60,7 +59,6 @@ def fix_image_orientation(img):
     except:
         pass
     
-    # Method 2: ImageOps exif_transpose - automatically fixes orientation
     try:
         img = ImageOps.exif_transpose(img)
     except:
@@ -69,14 +67,12 @@ def fix_image_orientation(img):
     return img
 
 # ============================================
-# 🔥 FIXED: Compress Image with Orientation Fix
+# COMPRESS IMAGE
 # ============================================
 
 def compress_image(image_path, max_size_kb=50, quality=70):
     try:
         img = Image.open(image_path)
-        
-        # Fix orientation
         img = fix_image_orientation(img)
         
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -106,7 +102,7 @@ def compress_image(image_path, max_size_kb=50, quality=70):
         return None
 
 # ============================================
-# 🔥 FIXED: Get Compressed Photo with Orientation Fix
+# GET COMPRESSED PHOTO
 # ============================================
 
 def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str | None:
@@ -114,12 +110,10 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
     if cache_key in st.session_state.photo_cache:
         return st.session_state.photo_cache[cache_key]
 
-    # 1. Object Storage — primary source
     for key in filter(None, [photo_field, f"member_photos/{serial_number}.jpg" if serial_number else None]):
         try:
             b64, _ = object_store.get_photo_b64(key)
             if b64:
-                # 🔥 Apply orientation fix on base64 image
                 try:
                     img_bytes = base64.b64decode(b64)
                     img = Image.open(io.BytesIO(img_bytes))
@@ -139,7 +133,6 @@ def get_compressed_photo_b64(photo_field: str, serial_number: str = "") -> str |
         except Exception:
             pass
 
-    # 2. Local filesystem fallback
     photo_path = None
     if photo_field:
         photo_str = str(photo_field).strip()
@@ -187,7 +180,7 @@ def get_member_with_photo(member, gym_name=""):
     }
 
 # ============================================
-# 🔥 FIXED: Card HTML with image-orientation:from-image
+# CARD HTML
 # ============================================
 
 def render_card_html(member_data, gym_name: str, is_cached: bool = False, is_selected: bool = False) -> str:
@@ -231,7 +224,7 @@ def render_card_html(member_data, gym_name: str, is_cached: bool = False, is_sel
         if expiry_str and expiry_str != "—":
             exp_d = date.fromisoformat(str(expiry_str))
             days_left = (exp_d - date.today()).days
-            expiry_note = f"({days_left}d left)" if days_left >= 0 else "(EXPIRED)"
+            expiry_note = f"({days_left}d left)" if days_left > 7 else f"({days_left}d left)" if days_left >= 0 else "(EXPIRED)"
             exp_color = "#34D399" if days_left > 7 else "#FBBF24" if days_left >= 0 else "#F87171"
         else:
             expiry_note = ""
@@ -392,51 +385,64 @@ def recompress_all_images():
     
     return fixed_count
 
+# ============================================
+# MAIN RENDER FUNCTION - FIXED
+# ============================================
+
 def render(gym_id, role):
     init_session_state()
     
-    styles.page_header("Membership Cards", "Digital Identity Verification - Member Photo ID Preview")
+    styles.page_header("🪪", "Membership Cards", "Digital Identity Verification - Member Photo ID Preview")
+    
     gyms = db.get_all_gyms()
     if not gyms:
         st.info("Add a gym first.")
         return
 
-    fc1, fc2, fc3 = st.columns([2, 2, 1])
-    with fc1:
+    # ── Filters Row ──────────────────────────────────────────────────────────
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+    
+    with col_f1:
         if gym_id:
             sel_gid = gym_id
-            st.text_input("Gym", value=next((g.name for g in gyms if g.id == gym_id), ""), disabled=True)
+            gym_name = next((g.name for g in gyms if g.id == gym_id), "")
+            st.text_input("🏋️ Gym", value=gym_name, disabled=True)
         else:
             opts = {"All Gyms": None} | {g.name: g.id for g in gyms}
-            chosen = st.selectbox("Gym Location", list(opts.keys()))
+            chosen = st.selectbox("🏋️ Gym", list(opts.keys()))
             sel_gid = opts[chosen]
             
-    with fc2:
-        search = st.text_input("Search Member", placeholder="Name, serial, phone")
-    with fc3:
-        status_f = st.selectbox("Status", ["All", "Active", "Inactive", "Suspended", "Frozen"])
+    with col_f2:
+        search = st.text_input("🔍 Search Member", placeholder="Name, serial, phone")
+        
+    with col_f3:
+        status_f = st.selectbox("📊 Status", ["All", "Active", "Inactive", "Suspended", "Frozen"])
 
+    # ── Get Members ──────────────────────────────────────────────────────────
     members = db.get_members(gym_id=sel_gid, status=status_f, search=search)
+    
     if not members:
-        st.info("No members match your filters.")
+        st.info("📭 No members match your filters.")
         return
 
-    st.markdown(f"**{len(members)} member card(s)**")
+    # ── Member Count ──────────────────────────────────────────────────────────
+    st.markdown(f"**📇 {len(members)} member card(s)**")
     st.divider()
 
-    with st.expander("Photo Tools", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Fix All Image Orientations", use_container_width=True):
+    # ── Photo Tools ──────────────────────────────────────────────────────────
+    with st.expander("🛠️ Photo Tools", expanded=False):
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            if st.button("🔄 Fix All Image Orientations", use_container_width=True):
                 with st.spinner("Fixing all images..."):
                     count = recompress_all_images()
                     st.session_state.photo_cache = {}
                     st.session_state.gallery_loaded = False
                     st.session_state.gallery_html = []
-                    st.success(f"Fixed {count} images!")
+                    st.success(f"✅ Fixed {count} images!")
                     st.rerun()
-        with col2:
-            if st.button("Clear All Cache", use_container_width=True):
+        with col_t2:
+            if st.button("🗑️ Clear All Cache", use_container_width=True):
                 try:
                     if os.path.exists(CACHE_FILE):
                         os.remove(CACHE_FILE)
@@ -446,11 +452,12 @@ def render(gym_id, role):
                     st.session_state.gallery_loaded = False
                     st.session_state.gallery_html = []
                     st.session_state.all_members_data = []
-                    st.success("Cache cleared!")
+                    st.success("✅ Cache cleared!")
                     st.rerun()
                 except:
                     pass
 
+    # ── Build Gallery Cache ──────────────────────────────────────────────────
     need_rebuild = (
         not st.session_state.gallery_loaded or 
         st.session_state._member_count != len(members) or
@@ -494,6 +501,7 @@ def render(gym_id, role):
         except:
             pass
 
+    # ── Get Cached Selection ──────────────────────────────────────────────────
     cached_selected = None
     try:
         if os.path.exists(CACHE_FILE):
@@ -513,8 +521,9 @@ def render(gym_id, role):
     mem_opts = {f"{m.serial_number} - {m.full_name}": m.id for m in members}
     mem_labels = list(mem_opts.keys())
     
+    # ── Member Selector ──────────────────────────────────────────────────────
     selected_label = st.selectbox(
-        "Select member to preview card", 
+        "👤 Select member to preview card", 
         mem_labels,
         index=default_index if default_index < len(mem_labels) else 0
     )
@@ -525,6 +534,7 @@ def render(gym_id, role):
     if not selected_m:
         return
     
+    # ── Save to Cache ────────────────────────────────────────────────────────
     if not cached_selected or cached_selected.get('id') != selected_m.id:
         cache_data = {
             'id': selected_m.id,
@@ -544,6 +554,7 @@ def render(gym_id, role):
         except:
             pass
     
+    # ── Get Selected Member Data ────────────────────────────────────────────
     selected_data = None
     for md in st.session_state.all_members_data:
         if md.get('id') == selected_m.id:
@@ -556,37 +567,60 @@ def render(gym_id, role):
     
     is_cached = cached_selected and cached_selected.get('id') == selected_m.id
     
+    # ── Display Card & Info ──────────────────────────────────────────────────
     col_card, col_info = st.columns([1, 1])
     
     with col_card:
-        st.markdown("Membership Card Preview")
+        st.markdown("### 🪪 Membership Card Preview")
         if is_cached:
-            st.success("Loaded from cache")
+            st.success("📦 Loaded from cache")
         else:
-            st.info("Fresh from database")
+            st.info("🔄 Fresh from database")
         
         st.components.v1.html(
             render_card_html(selected_data, selected_data.get('gym_name', 'GymPro'), is_cached, is_selected=True),
-            height=600,
+            height=620,
             scrolling=False
         )
     
     with col_info:
-        st.markdown("Digital Identity Details")
-        st.markdown(f"""
-| Field | Value |
-|-------|-------|
-| **Full Name** | {selected_m.full_name} |
-| **Serial No.** | {selected_m.serial_number} |
-| **Membership** | {selected_m.membership_type} |
-| **Status** | {selected_m.status} |
-| **Cache** | {'Cached' if is_cached else 'Fresh'} |
-        """)
+        st.markdown("### 📋 Digital Identity Details")
         
-        st.markdown("Update Identity Image")
+        st.markdown(f"""
+        <div style="background:#1E293B;padding:15px;border-radius:10px;border:1px solid #334155;">
+            <table style="width:100%;color:#E2E8F0;">
+                <tr style="border-bottom:1px solid #334155;">
+                    <td style="padding:6px 0;color:#94A3B8;font-weight:600;">👤 Full Name</td>
+                    <td style="padding:6px 0;text-align:right;">{selected_m.full_name}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #334155;">
+                    <td style="padding:6px 0;color:#94A3B8;font-weight:600;">🆔 Serial No.</td>
+                    <td style="padding:6px 0;text-align:right;color:#A78BFA;">{selected_m.serial_number}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #334155;">
+                    <td style="padding:6px 0;color:#94A3B8;font-weight:600;">📋 Membership</td>
+                    <td style="padding:6px 0;text-align:right;">{selected_m.membership_type}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #334155;">
+                    <td style="padding:6px 0;color:#94A3B8;font-weight:600;">📊 Status</td>
+                    <td style="padding:6px 0;text-align:right;">
+                        <span style="background:{'#064E3B' if selected_m.status == 'Active' else '#450A0A' if selected_m.status == 'Inactive' else '#451A03'};color:{'#34D399' if selected_m.status == 'Active' else '#F87171' if selected_m.status == 'Inactive' else '#FBBF24'};padding:2px 12px;border-radius:20px;font-size:12px;">
+                            {selected_m.status}
+                        </span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:6px 0;color:#94A3B8;font-weight:600;">💾 Cache</td>
+                    <td style="padding:6px 0;text-align:right;">{'✅ Cached' if is_cached else '🔄 Fresh'}</td>
+                </tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("### 📸 Update Identity Image")
+        
         new_photo = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"], key=f"upload_{selected_m.id}")
         
-        # Signature prevents re-processing the same file on repeated reruns
         _up_sig = f"{selected_m.id}_{new_photo.name}_{new_photo.size}" if new_photo else None
         if new_photo and st.session_state.get("_card_last_upload") != _up_sig:
             ext = os.path.splitext(new_photo.name)[-1].lower()
@@ -595,7 +629,7 @@ def render(gym_id, role):
             path = os.path.join(UPLOAD_DIR, new_filename)
 
             img = Image.open(new_photo)
-            img = ImageOps.exif_transpose(img)   # correct orientation
+            img = ImageOps.exif_transpose(img)
             if img.mode not in ("RGB",):
                 img = img.convert("RGB")
             if img.width > 400:
@@ -625,12 +659,13 @@ def render(gym_id, role):
             if os.path.exists(GALLERY_CACHE_FILE):
                 try: os.remove(GALLERY_CACHE_FILE)
                 except: pass
-            st.success("✅ Photo update ho gaya!")
+            st.success("✅ Photo updated successfully!")
             st.rerun()
     
+    # ── Gallery View ──────────────────────────────────────────────────────────
     st.write("")
-    with st.expander(f"View All {len(members)} Cards (Gallery View)", expanded=False):
-        st.caption(f"All {len(members)} cards - Click Select to view details")
+    with st.expander(f"🖼️ View All {len(members)} Cards (Gallery View)", expanded=False):
+        st.caption(f"All {len(members)} cards - Click 'Select' to view details")
         
         gallery_html_parts = st.session_state.gallery_html
         
@@ -642,7 +677,7 @@ def render(gym_id, role):
                 with cols[idx % 3]:
                     member_id = members[idx].id
                     if st.button(
-                        "Select", 
+                        "✅ Select", 
                         key=f"select_card_{member_id}",
                         use_container_width=True,
                         help="Click to view this member's full card"

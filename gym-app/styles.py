@@ -121,12 +121,18 @@ hr { border-color: #1E293B !important; }
 
 def inject_css():
     import streamlit as st
+    import database as _db
+    import themes as _th
+
+    # Active theme
+    auto  = _db.get_setting("theme_auto", "0") == "1"
+    key   = _th.get_daily_theme() if auto else _db.get_setting("theme_key", "dark_slate")
+    if key not in _th.THEMES:
+        key = "dark_slate"
+
+    # Inject theme CSS first, then structural overrides
+    st.markdown(_th.build_css(key), unsafe_allow_html=True)
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
-    # Belt-and-braces hide of Streamlit's auto page nav (the list that
-    # showed "app / admin dashboard / attendance / …" derived from the
-    # `pages/` folder). The config option `client.showSidebarNavigation`
-    # already disables it, but this CSS ensures it stays hidden on older
-    # Streamlit versions and through any future renames of the testid.
     st.markdown(
         """
         <style>

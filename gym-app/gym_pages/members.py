@@ -48,31 +48,24 @@ def render(gym_id, role):
         return
 
     # ── Staff gym restriction ─────────────────────────────────────────────────
-    # Staff sirf apne gym ka data dekhein — kabhi bhi None nahi hona chahiye
     if role == "staff":
         user_gym_id = st.session_state.get("user_gym_id")
         if not gym_id and user_gym_id:
             gym_id = user_gym_id
         elif not gym_id:
-            # Staff ka gym assign nahi — pehla gym use karo
             gym_id = gyms[0].id if gyms else None
         if not gym_id:
             st.warning("⚠️ Aapka account kisi gym se assign nahi hai. Admin se rabta karein.")
             return
 
     # ============================================
-    # STATS OVERVIEW - 4 Cards (FIXED - Only Current Gym)
+    # STATS OVERVIEW - 4 Cards
     # ============================================
     
-    # Sirf current gym ke members
     gym_members = db.get_members(gym_id=gym_id)
     total_members = len(gym_members)
     active_members = sum(1 for m in gym_members if m.status == "Active")
-    
-    # Sirf current gym ki expiring members
     expiring_soon = len(db.get_expiring_members(days=7, gym_id=gym_id))
-    
-    # Sirf current gym ki fees
     gym_fees = db.get_fee_records(gym_id=gym_id)
     total_collected = sum(f.amount for f in gym_fees) if gym_fees else 0
     
@@ -100,12 +93,10 @@ def render(gym_id, role):
 
         with f1:
             if gym_id or role == "staff":
-                # Staff ya fixed gym — sirf apna gym
                 chosen_gym_name = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
                 st.text_input("🏋️ Gym", value=chosen_gym_name, disabled=True, key="ml_gym_display")
                 selected_gid = gym_id
             else:
-                # Admin — All Gyms option
                 opts = {"All Gyms": None} | gym_opts
                 chosen = st.selectbox("🏋️ Gym", list(opts.keys()), key="ml_gym")
                 selected_gid = opts[chosen]
@@ -142,63 +133,164 @@ def render(gym_id, role):
             st.info("📭 No members match your filters.")
         else:
             # ============================================
-            # SIMPLE TABLE
+            # SEPARATE TABLES: Active | Expired | Upcoming
             # ============================================
             
-            rows = []
+            today = date.today()
+            
+            # --- Split members into 3 categories ---
+            active_list = []
+            expired_list = []
+            upcoming_list = []
+            
             for m in members:
-                status_badge = {
-                    "Active": "🟢 Active",
-                    "Inactive": "🔴 Inactive",
-                    "Suspended": "🟡 Suspended",
-                    "Frozen": "🔵 Frozen",
-                }.get(m.status, m.status)
-                
                 expiry_display = m.expiry_date or "—"
+                is_expired = False
+                is_upcoming = False
+                days_left = None
+                
                 if m.expiry_date:
                     try:
                         exp = date.fromisoformat(m.expiry_date)
-                        days = (exp - date.today()).days
-                        if days < 0:
+                        days_left = (exp - today).days
+                        
+                        if days_left < 0:
+                            is_expired = True
                             expiry_display = f"🚨 {m.expiry_date} (EXPIRED)"
-                        elif days <= 3:
-                            expiry_display = f"⚠️ {m.expiry_date} ({days}d)"
-                        elif days <= 7:
-                            expiry_display = f"⏳ {m.expiry_date} ({days}d)"
+                        elif days_left <= 7:
+                            is_upcoming = True
+                            expiry_display = f"⏳ {m.expiry_date} ({days_left}d)"
                         else:
                             expiry_display = f"✅ {m.expiry_date}"
                     except:
                         pass
                 
-                rows.append({
-                    "Serial": m.serial_number,
-                    "Name": m.full_name,
-                    "Membership": m.membership_type,
-                    "Phone": m.phone or "—",
-                    "Fee": f"PKR {m.fee_amount:,.0f}",
-                    "Expiry": expiry_display,
-                    "Status": status_badge,
-                })
+                # Agar status "Active" hai to active_list mein daalo
+                if m.status == "Active" and not is_expired:
+                    active_list.append({
+                        "Serial": m.serial_number,
+                        "Name": m.full_name,
+                        "Membership": m.membership_type,
+                        "Phone": m.phone or "—",
+                        "Fee": f"PKR {m.fee_amount:,.0f}",
+                        "Expiry": expiry_display,
+                        "Status": "🟢 Active",
+                    })
+                
+                # Expired members
+                if is_expired:
+                    expired_list.append({
+                        "Serial": m.serial_number,
+                        "Name": m.full_name,
+                        "Membership": m.membership_type,
+                        "Phone": m.phone or "—",
+                        "Fee": f"PKR {m.fee_amount:,.0f}",
+                        "Expiry": expiry_display,
+                        "Status": "🚨 Expired",
+                    })
+                
+                # Upcoming expiry (7 days or less) - lekin expired nahi hona chahiye
+                if is_upcoming and not is_expired:
+                    upcoming_list.append({
+                        "Serial": m.serial_number,
+                        "Name": m.full_name,
+                        "Membership": m.membership_type,
+                        "Phone": m.phone or "—",
+                        "Fee": f"PKR {m.fee_amount:,.0f}",
+                        "Expiry": expiry_display,
+                        "Status": "⏳ Expiring Soon",
+                    })
             
-            df = pd.DataFrame(rows)
+            # ============================================
+            # DISPLAY 3 TABLES
+            # ============================================
             
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                height=400,
-                column_config={
-                    "Serial": st.column_config.TextColumn("Serial", width="small"),
-                    "Name": st.column_config.TextColumn("Name", width="medium"),
-                    "Membership": st.column_config.TextColumn("Membership", width="small"),
-                    "Phone": st.column_config.TextColumn("Phone", width="small"),
-                    "Fee": st.column_config.TextColumn("Fee", width="small"),
-                    "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
-                    "Status": st.column_config.TextColumn("Status", width="small"),
-                }
-            )
+            # Table 1: Active Members
+            st.markdown("### ✅ Active Members")
+            if active_list:
+                df_active = pd.DataFrame(active_list)
+                st.dataframe(
+                    df_active,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=300,
+                    column_config={
+                        "Serial": st.column_config.TextColumn("Serial", width="small"),
+                        "Name": st.column_config.TextColumn("Name", width="medium"),
+                        "Membership": st.column_config.TextColumn("Membership", width="small"),
+                        "Phone": st.column_config.TextColumn("Phone", width="small"),
+                        "Fee": st.column_config.TextColumn("Fee", width="small"),
+                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
+                        "Status": st.column_config.TextColumn("Status", width="small"),
+                    }
+                )
+                st.caption(f"📋 {len(active_list)} active members")
+            else:
+                st.info("No active members found.")
             
-            st.caption(f"📋 Showing {len(members)} members")
+            st.divider()
+            
+            # Table 2: Expired Members
+            st.markdown("### 🚨 Expired Members")
+            if expired_list:
+                df_expired = pd.DataFrame(expired_list)
+                st.dataframe(
+                    df_expired,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=300,
+                    column_config={
+                        "Serial": st.column_config.TextColumn("Serial", width="small"),
+                        "Name": st.column_config.TextColumn("Name", width="medium"),
+                        "Membership": st.column_config.TextColumn("Membership", width="small"),
+                        "Phone": st.column_config.TextColumn("Phone", width="small"),
+                        "Fee": st.column_config.TextColumn("Fee", width="small"),
+                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
+                        "Status": st.column_config.TextColumn("Status", width="small"),
+                    }
+                )
+                st.caption(f"📋 {len(expired_list)} expired members")
+            else:
+                st.info("✅ No expired members found.")
+            
+            st.divider()
+            
+            # Table 3: Upcoming Expiry
+            st.markdown("### ⏳ Upcoming Expiry (7 days)")
+            if upcoming_list:
+                df_upcoming = pd.DataFrame(upcoming_list)
+                st.dataframe(
+                    df_upcoming,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=300,
+                    column_config={
+                        "Serial": st.column_config.TextColumn("Serial", width="small"),
+                        "Name": st.column_config.TextColumn("Name", width="medium"),
+                        "Membership": st.column_config.TextColumn("Membership", width="small"),
+                        "Phone": st.column_config.TextColumn("Phone", width="small"),
+                        "Fee": st.column_config.TextColumn("Fee", width="small"),
+                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
+                        "Status": st.column_config.TextColumn("Status", width="small"),
+                    }
+                )
+                st.caption(f"📋 {len(upcoming_list)} members expiring within 7 days")
+            else:
+                st.info("✅ No members expiring within 7 days.")
+            
+            st.divider()
+            
+            # ============================================
+            # TOTAL SUMMARY
+            # ============================================
+            st.markdown(f"### 📊 Summary")
+            col_sum1, col_sum2, col_sum3 = st.columns(3)
+            with col_sum1:
+                st.metric("✅ Active", len(active_list))
+            with col_sum2:
+                st.metric("🚨 Expired", len(expired_list))
+            with col_sum3:
+                st.metric("⏳ Upcoming", len(upcoming_list))
 
             st.divider()
             st.markdown("### 👤 Member Details")
@@ -468,7 +560,6 @@ def _register_form(gyms, gym_id, role):
         c1, c2 = st.columns(2)
         with c1:
             if role == "staff":
-                # Staff sirf apne gym mein register kar sakta hai
                 gym_sel = default_name
                 st.text_input("🏋️ Gym", value=default_name, disabled=True, key="reg_gym_display")
             else:
