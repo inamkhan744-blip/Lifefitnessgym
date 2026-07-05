@@ -10,12 +10,6 @@ from PIL import Image
 import io
 import numpy as np
 
-try:
-    import cv2
-    _CV2_AVAILABLE = True
-except ImportError:
-    _CV2_AVAILABLE = False
-
 import database as db
 import styles
 
@@ -803,7 +797,7 @@ def _face_camera_fragment(face_gym_id, current_user, role, gyms):
                         result["name"][:22],
                         _cmap.get(result["kind"], (200, 200, 200)),
                     )
-                    ann_pil = Image.fromarray(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB))
+                    ann_pil = Image.fromarray(face_engine._get_cv2().cvtColor(ann, face_engine._get_cv2().COLOR_BGR2RGB))
                     st.image(ann_pil, use_container_width=True)
                 except Exception:
                     st.image(pil, use_container_width=True)

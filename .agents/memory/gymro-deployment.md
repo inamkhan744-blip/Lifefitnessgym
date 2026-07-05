@@ -47,3 +47,25 @@ The old proxy (Starlette + httpx forwarding to Streamlit) only handled HTTP, not
 **Why:** Direct Streamlit on port 5000 handles both HTTP and WebSocket natively. The old proxy caused the "loading spinner forever" bug.
 
 **How to apply:** If `run.py` is ever changed back to a proxy setup, the preview will show an infinite loading spinner.
+
+## Autoscale vs Reserved VM
+Streamlit apps MUST use Reserved VM deployment type, not Autoscale. Two reasons:
+1. Streamlit uses persistent WebSocket connections — Autoscale (Cloud Run) kills these
+2. Replit's managed PostgreSQL may not be reachable from Cloud Run's GCP network
+
+## Root causes of the 6x Autoscale failure
+Three compounding problems were found by reading all 6 build logs:
+1. **cv2 (OpenCV) top-level import** — attendance.py → face_engine.py → `import cv2` runs at startup. Cloud Run uses gVisor sandbox which can crash compiled C++ extensions (SIGKILL, zero logs). Fix: made cv2 lazy in face_engine.py (only loads on first function call).
+2. **`production.build = "pip install..."`** in artifact.toml — this ran pip install in the production container before starting the app, consuming 3-4 minutes of the startup probe window. Fix: removed it.
+3. **Deployment type** — Streamlit WebSocket incompatibility with Autoscale. User must switch to Reserved VM in the Deployments pane.
+
+## Correct artifact.toml production run command
+```toml
+[services.production]
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python3 -m streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
+
+[services.production.health.startup]
+path = "/_stcore/health"
+```
+
+Key: use `.pythonlibs/bin/python3` (the nix-wrapped Python that has all env vars set), NOT plain `python3`.
