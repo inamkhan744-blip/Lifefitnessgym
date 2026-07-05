@@ -49,3 +49,10 @@ Thumbs.db
 .local/
 .env
 env
+
+# GymPro — never commit member photos or local DBs
+gym-app/uploads/
+gym-app/*.db
+gym-app/*.db-journal
+gym_app_cache_*.json
+gym_pro_backup_local.db
