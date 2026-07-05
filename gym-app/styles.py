@@ -109,6 +109,52 @@ section[data-testid="stSidebar"] { background: #0F172A; border-right: 1px solid 
 /* ── Divider ─────────────────────────────────────────────────── */
 hr { border-color: #1E293B !important; }
 
+/* ── Fix: expander _arr/_arrow_right text on mobile ─────────── */
+/* Streamlit uses _arrow_right / _arrow_down as icon-name text
+   that should be replaced by SVG. When SVG loads slowly the raw
+   text leaks. Hide it via overflow trick. */
+[data-testid="stExpander"] details > summary,
+[data-testid="stExpanderDetails"] > summary {
+    list-style: none;
+    overflow: hidden;
+}
+[data-testid="stExpander"] details > summary::-webkit-details-marker,
+[data-testid="stExpanderDetails"] > summary::-webkit-details-marker {
+    display: none;
+}
+/* Icon wrapper — zero out text, let SVG show */
+[data-testid="stExpander"] details > summary > span > div:last-child,
+[data-testid="stExpanderDetails"] > summary > span > div:last-child {
+    font-size: 0 !important;
+    line-height: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+    flex-shrink: 0 !important;
+}
+[data-testid="stExpander"] details > summary > span > div:last-child svg,
+[data-testid="stExpanderDetails"] > summary > span > div:last-child svg {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
+    flex-shrink: 0 !important;
+}
+/* Fallback: hide any bare text node in expander summary icon area */
+[data-testid="stExpanderToggleIcon"] {
+    overflow: hidden !important;
+    font-size: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+}
+[data-testid="stExpanderToggleIcon"] svg {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
+    font-size: initial !important;
+}
+
 /* ── Responsive shrink ───────────────────────────────────────── */
 @media (max-width: 768px) {
     .main .block-container { padding: 0.75rem 0.5rem; }
