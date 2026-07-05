@@ -132,165 +132,238 @@ def render(gym_id, role):
         if not members:
             st.info("📭 No members match your filters.")
         else:
-            # ============================================
-            # SEPARATE TABLES: Active | Expired | Upcoming
-            # ============================================
-            
             today = date.today()
-            
-            # --- Split members into 3 categories ---
-            active_list = []
-            expired_list = []
+
+            active_list   = []
+            expired_list  = []
             upcoming_list = []
-            
+            unpaid_list   = []
+
             for m in members:
-                expiry_display = m.expiry_date or "—"
-                is_expired = False
+                expiry_str = str(m.expiry_date) if m.expiry_date else None
+                is_expired  = False
                 is_upcoming = False
-                days_left = None
-                
-                if m.expiry_date:
+                days_left   = None
+                days_over   = None
+
+                if expiry_str:
                     try:
-                        exp = date.fromisoformat(m.expiry_date)
+                        exp       = date.fromisoformat(expiry_str)
                         days_left = (exp - today).days
-                        
                         if days_left < 0:
                             is_expired = True
-                            expiry_display = f"🚨 {m.expiry_date} (EXPIRED)"
+                            days_over  = abs(days_left)
                         elif days_left <= 7:
                             is_upcoming = True
-                            expiry_display = f"⏳ {m.expiry_date} ({days_left}d)"
-                        else:
-                            expiry_display = f"✅ {m.expiry_date}"
-                    except:
+                    except Exception:
                         pass
-                
-                # Agar status "Active" hai to active_list mein daalo
+
+                fee_str = f"PKR {m.fee_amount:,.0f}" if m.fee_amount else "—"
+                phone   = m.phone or "—"
+
                 if m.status == "Active" and not is_expired:
                     active_list.append({
-                        "Serial": m.serial_number,
-                        "Name": m.full_name,
-                        "Membership": m.membership_type,
-                        "Phone": m.phone or "—",
-                        "Fee": f"PKR {m.fee_amount:,.0f}",
-                        "Expiry": expiry_display,
-                        "Status": "🟢 Active",
+                        "No": len(active_list) + 1,
+                        "Serial #": m.serial_number or "—",
+                        "Member Name": m.full_name,
+                        "Phone": phone,
+                        "Membership": m.membership_type or "—",
+                        "Monthly Fee": fee_str,
+                        "Expiry Date": expiry_str or "—",
+                        "Remaining": f"{days_left}d" if days_left is not None else "—",
+                        "_color": "#10B981",
                     })
-                
-                # Expired members
+
                 if is_expired:
                     expired_list.append({
-                        "Serial": m.serial_number,
-                        "Name": m.full_name,
-                        "Membership": m.membership_type,
-                        "Phone": m.phone or "—",
-                        "Fee": f"PKR {m.fee_amount:,.0f}",
-                        "Expiry": expiry_display,
-                        "Status": "🚨 Expired",
+                        "No": len(expired_list) + 1,
+                        "Serial #": m.serial_number or "—",
+                        "Member Name": m.full_name,
+                        "Phone": phone,
+                        "Membership": m.membership_type or "—",
+                        "Monthly Fee": fee_str,
+                        "Expired On": expiry_str or "—",
+                        "Overdue": f"{days_over}d",
+                        "_color": "#EF4444",
                     })
-                
-                # Upcoming expiry (7 days or less) - lekin expired nahi hona chahiye
+                    unpaid_list.append({
+                        "No": len(unpaid_list) + 1,
+                        "Serial #": m.serial_number or "—",
+                        "Member Name": m.full_name,
+                        "Phone": phone,
+                        "Membership": m.membership_type or "—",
+                        "Pending Fee": fee_str,
+                        "Fee Due Since": expiry_str or "—",
+                        "Days Overdue": f"{days_over} days",
+                        "_fee": m.fee_amount or 0,
+                    })
+
                 if is_upcoming and not is_expired:
                     upcoming_list.append({
-                        "Serial": m.serial_number,
-                        "Name": m.full_name,
-                        "Membership": m.membership_type,
-                        "Phone": m.phone or "—",
-                        "Fee": f"PKR {m.fee_amount:,.0f}",
-                        "Expiry": expiry_display,
-                        "Status": "⏳ Expiring Soon",
+                        "No": len(upcoming_list) + 1,
+                        "Serial #": m.serial_number or "—",
+                        "Member Name": m.full_name,
+                        "Phone": phone,
+                        "Membership": m.membership_type or "—",
+                        "Monthly Fee": fee_str,
+                        "Expiry Date": expiry_str or "—",
+                        "Days Left": f"{days_left}d",
+                        "_color": "#F59E0B",
                     })
-            
-            # ============================================
-            # DISPLAY 3 TABLES
-            # ============================================
-            
-            # Table 1: Active Members
-            st.markdown("### ✅ Active Members")
-            if active_list:
-                df_active = pd.DataFrame(active_list)
-                st.dataframe(
-                    df_active,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=300,
-                    column_config={
-                        "Serial": st.column_config.TextColumn("Serial", width="small"),
-                        "Name": st.column_config.TextColumn("Name", width="medium"),
-                        "Membership": st.column_config.TextColumn("Membership", width="small"),
-                        "Phone": st.column_config.TextColumn("Phone", width="small"),
-                        "Fee": st.column_config.TextColumn("Fee", width="small"),
-                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
-                        "Status": st.column_config.TextColumn("Status", width="small"),
-                    }
+
+                if not expiry_str and m.status == "Active":
+                    unpaid_list.append({
+                        "No": len(unpaid_list) + 1,
+                        "Serial #": m.serial_number or "—",
+                        "Member Name": m.full_name,
+                        "Phone": phone,
+                        "Membership": m.membership_type or "—",
+                        "Pending Fee": fee_str,
+                        "Fee Due Since": "Not Set",
+                        "Days Overdue": "—",
+                        "_fee": m.fee_amount or 0,
+                    })
+
+            def _html_table(rows, cols, border_color, last_col_badge=False):
+                if not rows:
+                    return ""
+                th_style = (
+                    "padding:8px 12px;text-align:left;font-size:0.78rem;"
+                    "font-weight:700;color:#94A3B8;text-transform:uppercase;"
+                    "letter-spacing:0.05em;border-bottom:1px solid #334155;"
+                    "white-space:nowrap;"
                 )
+                td_style = (
+                    "padding:8px 12px;font-size:0.84rem;color:#E2E8F0;"
+                    "border-bottom:1px solid #1E293B;white-space:nowrap;"
+                )
+                header = "".join(f'<th style="{th_style}">{c}</th>' for c in cols)
+                body   = ""
+                for i, row in enumerate(rows):
+                    bg      = "#0F172A" if i % 2 == 0 else "#0D1526"
+                    left_b  = f"border-left:3px solid {border_color};"
+                    cells   = ""
+                    for ci, col in enumerate(cols):
+                        val  = row.get(col, "—")
+                        extra = ""
+                        if col in ("Remaining", "Days Left"):
+                            extra = f"color:#34D399;font-weight:600;"
+                        elif col in ("Overdue", "Days Overdue"):
+                            extra = f"color:#F87171;font-weight:600;"
+                        elif col == "Pending Fee":
+                            extra = f"color:#FBBF24;font-weight:700;"
+                        elif col == "Member Name":
+                            extra = f"color:#F1F5F9;font-weight:600;"
+                        elif col == "Serial #":
+                            extra = f"color:#A78BFA;font-weight:600;"
+                        elif col == "No":
+                            extra = f"color:#64748B;"
+                        cells += f'<td style="{td_style}{extra}">{val}</td>'
+                    body += f'<tr style="background:{bg};{left_b}">{cells}</tr>'
+                return (
+                    '<div style="overflow-x:auto;overflow-y:auto;max-height:360px;'
+                    'border-radius:10px;border:1px solid #1E293B;">'
+                    f'<table style="width:100%;border-collapse:collapse;">'
+                    f'<thead><tr style="background:#1E293B;position:sticky;top:0;z-index:1;">'
+                    f'{header}</tr></thead>'
+                    f'<tbody>{body}</tbody>'
+                    '</table></div>'
+                )
+
+            def _section_header(icon, title, count, amount_str, border, bg):
+                return f"""
+                <div style="background:{bg};border:1.5px solid {border};border-radius:10px;
+                    padding:0.7rem 1rem;margin-bottom:0.6rem;display:flex;
+                    align-items:center;justify-content:space-between;">
+                  <span style="color:{border};font-weight:700;font-size:1rem;">
+                    {icon} {title}
+                  </span>
+                  <span>
+                    <span style="background:{border}22;color:{border};font-size:0.78rem;
+                        font-weight:700;padding:2px 10px;border-radius:20px;margin-right:8px;">
+                      {count} members
+                    </span>
+                    {f'<span style="color:#94A3B8;font-size:0.82rem;">{amount_str}</span>' if amount_str else ""}
+                  </span>
+                </div>"""
+
+            # ── 💰 FEES NOT COLLECTED (most important — shown first) ───────────
+            unpaid_total = sum(r["_fee"] for r in unpaid_list)
+            st.markdown(_section_header(
+                "💰", "Fees Not Collected",
+                len(unpaid_list),
+                f"Total Pending: PKR {unpaid_total:,.0f}" if unpaid_list else "",
+                "#EF4444", "#1A0505"
+            ), unsafe_allow_html=True)
+
+            if unpaid_list:
+                unpaid_cols = ["No","Serial #","Member Name","Phone","Membership","Pending Fee","Fee Due Since","Days Overdue"]
+                st.markdown(
+                    _html_table(unpaid_list, unpaid_cols, "#EF4444"),
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"⚠️ {len(unpaid_list)} members have unpaid or overdue fees")
+            else:
+                st.success("✅ All members' fees are up to date!")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── ✅ ACTIVE MEMBERS ─────────────────────────────────────────────
+            act_total = sum((m.fee_amount or 0) for m in members
+                            if m.status == "Active" and m.expiry_date and
+                            (date.fromisoformat(str(m.expiry_date)) - today).days >= 0)
+            st.markdown(_section_header(
+                "✅", "Active Members",
+                len(active_list),
+                f"Total Fees: PKR {act_total:,.0f}" if active_list else "",
+                "#10B981", "#021A0F"
+            ), unsafe_allow_html=True)
+
+            if active_list:
+                act_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expiry Date","Remaining"]
+                st.markdown(_html_table(active_list, act_cols, "#10B981"), unsafe_allow_html=True)
                 st.caption(f"📋 {len(active_list)} active members")
             else:
                 st.info("No active members found.")
-            
-            st.divider()
-            
-            # Table 2: Expired Members
-            st.markdown("### 🚨 Expired Members")
-            if expired_list:
-                df_expired = pd.DataFrame(expired_list)
-                st.dataframe(
-                    df_expired,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=300,
-                    column_config={
-                        "Serial": st.column_config.TextColumn("Serial", width="small"),
-                        "Name": st.column_config.TextColumn("Name", width="medium"),
-                        "Membership": st.column_config.TextColumn("Membership", width="small"),
-                        "Phone": st.column_config.TextColumn("Phone", width="small"),
-                        "Fee": st.column_config.TextColumn("Fee", width="small"),
-                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
-                        "Status": st.column_config.TextColumn("Status", width="small"),
-                    }
-                )
-                st.caption(f"📋 {len(expired_list)} expired members")
-            else:
-                st.info("✅ No expired members found.")
-            
-            st.divider()
-            
-            # Table 3: Upcoming Expiry
-            st.markdown("### ⏳ Upcoming Expiry (7 days)")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── ⏳ EXPIRING SOON ──────────────────────────────────────────────
+            st.markdown(_section_header(
+                "⏳", "Expiring Within 7 Days",
+                len(upcoming_list), "", "#F59E0B", "#1A1005"
+            ), unsafe_allow_html=True)
+
             if upcoming_list:
-                df_upcoming = pd.DataFrame(upcoming_list)
-                st.dataframe(
-                    df_upcoming,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=300,
-                    column_config={
-                        "Serial": st.column_config.TextColumn("Serial", width="small"),
-                        "Name": st.column_config.TextColumn("Name", width="medium"),
-                        "Membership": st.column_config.TextColumn("Membership", width="small"),
-                        "Phone": st.column_config.TextColumn("Phone", width="small"),
-                        "Fee": st.column_config.TextColumn("Fee", width="small"),
-                        "Expiry": st.column_config.TextColumn("Expiry", width="medium"),
-                        "Status": st.column_config.TextColumn("Status", width="small"),
-                    }
-                )
-                st.caption(f"📋 {len(upcoming_list)} members expiring within 7 days")
+                up_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expiry Date","Days Left"]
+                st.markdown(_html_table(upcoming_list, up_cols, "#F59E0B"), unsafe_allow_html=True)
+                st.caption(f"📋 {len(upcoming_list)} members expiring soon — contact them to renew")
             else:
                 st.info("✅ No members expiring within 7 days.")
-            
-            st.divider()
-            
-            # ============================================
-            # TOTAL SUMMARY
-            # ============================================
-            st.markdown(f"### 📊 Summary")
-            col_sum1, col_sum2, col_sum3 = st.columns(3)
-            with col_sum1:
-                st.metric("✅ Active", len(active_list))
-            with col_sum2:
-                st.metric("🚨 Expired", len(expired_list))
-            with col_sum3:
-                st.metric("⏳ Upcoming", len(upcoming_list))
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── 🚨 EXPIRED MEMBERS ────────────────────────────────────────────
+            st.markdown(_section_header(
+                "🚨", "Expired Members",
+                len(expired_list), "", "#EF4444", "#1A0505"
+            ), unsafe_allow_html=True)
+
+            if expired_list:
+                exp_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expired On","Overdue"]
+                st.markdown(_html_table(expired_list, exp_cols, "#EF4444"), unsafe_allow_html=True)
+                st.caption(f"📋 {len(expired_list)} expired members")
+            else:
+                st.success("✅ No expired members found.")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── 📊 QUICK SUMMARY ─────────────────────────────────────────────
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("✅ Active",        len(active_list))
+            s2.metric("💰 Unpaid",        len(unpaid_list),  delta=f"-PKR {unpaid_total:,.0f}" if unpaid_total else None, delta_color="inverse")
+            s3.metric("⏳ Expiring Soon", len(upcoming_list))
+            s4.metric("🚨 Expired",       len(expired_list))
 
             st.divider()
             st.markdown("### 👤 Member Details")

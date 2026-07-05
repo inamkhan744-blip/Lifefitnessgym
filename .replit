@@ -77,3 +77,6 @@ externalPort = 3002
 [userenv]
 
 [userenv.shared]
+
+[objectStorage]
+defaultBucketID = "replit-objstore-93b25a82-e645-4107-94ee-0f52ee98e9a7"
