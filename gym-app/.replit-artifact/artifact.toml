@@ -13,7 +13,8 @@ paths = ["/"]
 run = "cd /home/runner/workspace/gym-app && python run.py"
 
 [services.production]
-run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python3 -m streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
+build = "pip install -q -r /home/runner/workspace/gym-app/requirements.txt"
+run = "cd /home/runner/workspace/gym-app && PYTHONPATH=/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages python3 -m streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
 
 [services.production.health.startup]
 path = "/_stcore/health"
