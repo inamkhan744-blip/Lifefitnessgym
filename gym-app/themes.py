@@ -1,309 +1,490 @@
 """
-GymPro Theme System
--------------------
-6 sober 3D themes.  Admin manually select kar sakta hai ya daily auto-rotate.
-"""
-from datetime import date
+GymPro Theme System v5.2 - Premium Dark Edition
 
-THEMES: dict[str, dict] = {
-    "dark_slate": {
-        "name":        "Dark Slate",
-        "emoji":       "🪨",
-        "bg":          "#0F172A",
-        "sidebar_bg":  "#080E1C",
-        "card_bg":     "#1E293B",
-        "border":      "#2D3D53",
-        "primary":     "#7C3AED",
-        "primary_dim": "#3B1B8C22",
-        "text":        "#E2E8F0",
-        "text_muted":  "#94A3B8",
-        "text_dim":    "#475569",
-        "shadow":      "rgba(124,58,237,0.15)",
+8 premium dark themes with glass effects
+FIXED: Theme selector text visibility
+"""
+
+import streamlit as st
+from datetime import date
+import random
+
+# ─── THEMES - Premium Dark Dashboard ──────────
+THEMES = {
+    "energy_burst": {
+        "name": "Energy Burst",
+        "emoji": "⚡",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#FFC947",
+        "primary_gradient": "linear-gradient(135deg, #FFC947, #FF6B6B)",
+        "primary_dim": "rgba(255, 201, 71, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(255, 201, 71, 0.2)",
+        "glow": "0 0 60px rgba(255, 201, 71, 0.15)",
+        "vibe": "⚡ Premium Gold",
+        "motivation": "Dominate Your Gym! 💪",
     },
-    "carbon": {
-        "name":        "Carbon",
-        "emoji":       "⚫",
-        "bg":          "#0C0C0C",
-        "sidebar_bg":  "#060606",
-        "card_bg":     "#161616",
-        "border":      "#262626",
-        "primary":     "#22C55E",
-        "primary_dim": "#14532D22",
-        "text":        "#E5E5E5",
-        "text_muted":  "#A3A3A3",
-        "text_dim":    "#525252",
-        "shadow":      "rgba(34,197,94,0.12)",
+    "royal_purple": {
+        "name": "Royal Purple",
+        "emoji": "👑",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#A855F7",
+        "primary_gradient": "linear-gradient(135deg, #A855F7, #8B5CF6)",
+        "primary_dim": "rgba(168, 85, 247, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(168, 85, 247, 0.2)",
+        "glow": "0 0 60px rgba(168, 85, 247, 0.15)",
+        "vibe": "👑 Royal Purple",
+        "motivation": "Rule Like a King! 👑",
     },
-    "midnight": {
-        "name":        "Midnight",
-        "emoji":       "🌌",
-        "bg":          "#070D1A",
-        "sidebar_bg":  "#040810",
-        "card_bg":     "#0D1626",
-        "border":      "#1E2D45",
-        "primary":     "#38BDF8",
-        "primary_dim": "#0C4A6E22",
-        "text":        "#E0EEFF",
-        "text_muted":  "#7DA4CC",
-        "text_dim":    "#3D5A7A",
-        "shadow":      "rgba(56,189,248,0.12)",
+    "ocean_blue": {
+        "name": "Ocean Blue",
+        "emoji": "🌊",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#3B82F6",
+        "primary_gradient": "linear-gradient(135deg, #3B82F6, #06B6D4)",
+        "primary_dim": "rgba(59, 130, 246, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(59, 130, 246, 0.2)",
+        "glow": "0 0 60px rgba(59, 130, 246, 0.15)",
+        "vibe": "🌊 Deep Ocean",
+        "motivation": "Flow Like Water! 🌊",
     },
-    "graphite": {
-        "name":        "Graphite",
-        "emoji":       "🟤",
-        "bg":          "#111010",
-        "sidebar_bg":  "#0A0909",
-        "card_bg":     "#1C1A1A",
-        "border":      "#2E2B2B",
-        "primary":     "#F59E0B",
-        "primary_dim": "#78350F22",
-        "text":        "#F5F0E8",
-        "text_muted":  "#A89880",
-        "text_dim":    "#574F44",
-        "shadow":      "rgba(245,158,11,0.12)",
+    "emerald_green": {
+        "name": "Emerald Green",
+        "emoji": "💎",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#10B981",
+        "primary_gradient": "linear-gradient(135deg, #10B981, #34D399)",
+        "primary_dim": "rgba(16, 185, 129, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(16, 185, 129, 0.2)",
+        "glow": "0 0 60px rgba(16, 185, 129, 0.15)",
+        "vibe": "💎 Emerald Fresh",
+        "motivation": "Grow Stronger Daily! 💪",
     },
-    "forest": {
-        "name":        "Forest",
-        "emoji":       "🌲",
-        "bg":          "#071510",
-        "sidebar_bg":  "#040D09",
-        "card_bg":     "#0D2118",
-        "border":      "#1A3D2A",
-        "primary":     "#10B981",
-        "primary_dim": "#064E3B22",
-        "text":        "#E0F5EE",
-        "text_muted":  "#6EAD91",
-        "text_dim":    "#2D5C43",
-        "shadow":      "rgba(16,185,129,0.12)",
+    "crimson_red": {
+        "name": "Crimson Red",
+        "emoji": "🔥",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#EF4444",
+        "primary_gradient": "linear-gradient(135deg, #EF4444, #DC2626)",
+        "primary_dim": "rgba(239, 68, 68, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(239, 68, 68, 0.2)",
+        "glow": "0 0 60px rgba(239, 68, 68, 0.15)",
+        "vibe": "🔥 Intense Crimson",
+        "motivation": "Burn Calories, Not Goals! 🔥",
     },
-    "bordeaux": {
-        "name":        "Bordeaux",
-        "emoji":       "🍷",
-        "bg":          "#0E0710",
-        "sidebar_bg":  "#070409",
-        "card_bg":     "#18101C",
-        "border":      "#301840",
-        "primary":     "#C026D3",
-        "primary_dim": "#4A044E22",
-        "text":        "#F0E8F5",
-        "text_muted":  "#B07EC0",
-        "text_dim":    "#5C3870",
-        "shadow":      "rgba(192,38,211,0.12)",
+    "cyber_cyan": {
+        "name": "Cyber Cyan",
+        "emoji": "🚀",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#06B6D4",
+        "primary_gradient": "linear-gradient(135deg, #06B6D4, #3B82F6)",
+        "primary_dim": "rgba(6, 182, 212, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(6, 182, 212, 0.2)",
+        "glow": "0 0 60px rgba(6, 182, 212, 0.15)",
+        "vibe": "🚀 Cyber Future",
+        "motivation": "Upgrade Your Limits! 🚀",
+    },
+    "neon_pink": {
+        "name": "Neon Pink",
+        "emoji": "💖",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#EC4899",
+        "primary_gradient": "linear-gradient(135deg, #EC4899, #F472B6)",
+        "primary_dim": "rgba(236, 72, 153, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(236, 72, 153, 0.2)",
+        "glow": "0 0 60px rgba(236, 72, 153, 0.15)",
+        "vibe": "💖 Neon Glow",
+        "motivation": "Shine Like a Star! ✨",
+    },
+    "midnight_galaxy": {
+        "name": "Midnight Galaxy",
+        "emoji": "🌌",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#8B5CF6",
+        "primary_gradient": "linear-gradient(135deg, #8B5CF6, #EC4899)",
+        "primary_dim": "rgba(139, 92, 246, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(139, 92, 246, 0.2)",
+        "glow": "0 0 60px rgba(139, 92, 246, 0.15)",
+        "vibe": "🌌 Galaxy Dreams",
+        "motivation": "Reach for the Stars! 🌟",
     },
 }
 
-THEME_KEYS  = list(THEMES.keys())
+THEME_KEYS = list(THEMES.keys())
 THEME_NAMES = {k: f"{v['emoji']} {v['name']}" for k, v in THEMES.items()}
 
-
 def get_daily_theme() -> str:
-    """Day of year ke hisaab se theme rotate karo."""
     idx = date.today().toordinal() % len(THEME_KEYS)
     return THEME_KEYS[idx]
 
+def get_random_theme() -> str:
+    return random.choice(THEME_KEYS)
 
 def build_css(key: str) -> str:
-    """Ek theme ka complete CSS return karo — Streamlit elements override karta hai."""
-    t = THEMES.get(key, THEMES["dark_slate"])
-    p        = t["primary"]
-    p_dim    = t["primary_dim"]
-    bg       = t["bg"]
-    s_bg     = t["sidebar_bg"]
-    c_bg     = t["card_bg"]
-    border   = t["border"]
-    text     = t["text"]
-    t_muted  = t["text_muted"]
-    t_dim    = t["text_dim"]
-    shadow   = t["shadow"]
+    t = THEMES.get(key, THEMES["energy_burst"])
+
+    p = t["primary"]
+    p_grad = t["primary_gradient"]
+    p_dim = t["primary_dim"]
+    bg = t["bg"]
+    s_bg = t["sidebar_bg"]
+    c_bg = t["card_bg"]
+    border = t["border"]
+    text = t["text"]
+    t_muted = t["text_muted"]
+    success = t["success"]
+    danger = t["danger"]
+    shadow = t["shadow"]
+    glow = t["glow"]
 
     return f"""
 <style>
-/* ── Base layout ─────────────────────────────────────────────── */
-.stApp,
-.stApp > .main {{
-    background-color: {bg} !important;
-    color: {text} !important;
-}}
-.main .block-container {{
-    background-color: {bg} !important;
-    padding-top: 1.5rem;
-    padding-bottom: 2rem;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+* {{
+    font-family: 'Inter', sans-serif!important;
 }}
 
-/* ── Sidebar ─────────────────────────────────────────────────── */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] > div {{
-    background: {s_bg} !important;
-    border-right: 1px solid {border} !important;
+.stApp {{
+    background: {bg}!important;
+    color: {text}!important;
 }}
 
-/* ── Cards / metric ──────────────────────────────────────────── */
-.metric-card {{
-    background: linear-gradient(145deg, {c_bg} 0%, {bg} 100%) !important;
-    border: 1px solid {border} !important;
-    border-radius: 14px !important;
-    padding: 1.2rem 1.4rem !important;
-    margin-bottom: 0.75rem !important;
-    box-shadow:
-        0 1px 2px rgba(0,0,0,0.4),
-        0 4px 12px {shadow},
-        inset 0 1px 0 rgba(255,255,255,0.04),
-        inset 0 0 0 1px rgba(255,255,255,0.02) !important;
-    transform: perspective(600px) translateZ(0) !important;
-    transition: transform 0.18s ease, box-shadow 0.18s ease !important;
-}}
-.metric-card:hover {{
-    transform: perspective(600px) translateZ(6px) translateY(-2px) !important;
-    box-shadow:
-        0 2px 4px rgba(0,0,0,0.5),
-        0 8px 24px {shadow},
-        inset 0 1px 0 rgba(255,255,255,0.06) !important;
-}}
-.metric-card .label {{ color: {t_muted} !important; }}
-.metric-card .value {{ color: {text} !important; }}
-.metric-card .sub   {{ color: {t_dim} !important; }}
-
-/* ── Streamlit native metric boxes ───────────────────────────── */
-[data-testid="metric-container"] {{
-    background: linear-gradient(145deg, {c_bg}, {bg}) !important;
-    border: 1px solid {border} !important;
-    border-radius: 14px !important;
-    padding: 1rem 1.2rem !important;
-    box-shadow:
-        0 2px 8px rgba(0,0,0,0.35),
-        0 4px 16px {shadow},
-        inset 0 1px 0 rgba(255,255,255,0.04) !important;
-    transition: transform 0.18s ease, box-shadow 0.18s ease !important;
-}}
-[data-testid="metric-container"]:hover {{
-    transform: translateY(-2px) !important;
-    box-shadow:
-        0 4px 14px rgba(0,0,0,0.45),
-        0 6px 20px {shadow} !important;
-}}
-[data-testid="stMetricValue"]  {{ color: {text} !important; }}
-[data-testid="stMetricLabel"]  {{ color: {t_muted} !important; }}
-[data-testid="stMetricDelta"]  {{ color: {p} !important; }}
-
-/* ── Buttons ─────────────────────────────────────────────────── */
-.stButton > button[kind="primary"],
-.stButton > button[data-testid="baseButton-primary"] {{
-    background: linear-gradient(135deg, {p}, {p}cc) !important;
-    border: none !important;
-    color: #fff !important;
-    border-radius: 10px !important;
-    box-shadow: 0 2px 8px {shadow}, inset 0 1px 0 rgba(255,255,255,0.15) !important;
-    transition: all 0.18s ease !important;
-}}
-.stButton > button[kind="primary"]:hover {{
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 16px {shadow} !important;
-}}
-.stButton > button[kind="secondary"] {{
-    background: {c_bg} !important;
-    border: 1px solid {border} !important;
-    color: {t_muted} !important;
-    border-radius: 10px !important;
+/* ── Premium Glass Cards ───────────────────────────────────── */
+.metric-card, [data-testid="metric-container"],.pro-card {{
+    background: {c_bg}!important;
+    backdrop-filter: blur(16px) saturate(1.2)!important;
+    -webkit-backdrop-filter: blur(16px) saturate(1.2)!important;
+    border: 1px solid {border}!important;
+    border-radius: 12px!important;
+    padding: 20px!important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4)!important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1)!important;
 }}
 
-/* ── Tabs ────────────────────────────────────────────────────── */
-[data-testid="stTabs"] button[role="tab"] {{
-    color: {t_muted} !important;
-    border-radius: 8px 8px 0 0 !important;
-}}
-[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
-    color: {p} !important;
-    border-bottom: 2px solid {p} !important;
-    background: {p_dim} !important;
+.metric-card:hover, [data-testid="metric-container"]:hover,.pro-card:hover {{
+    border-color: {p}!important;
+    box-shadow: 0 8px 24px {shadow}, {glow}!important;
+    transform: translateY(-3px)!important;
 }}
 
-/* ── Inputs ──────────────────────────────────────────────────── */
-.stTextInput input,
-.stSelectbox > div > div,
-.stTextArea textarea,
-.stNumberInput input,
-.stDateInput input {{
-    background: {c_bg} !important;
-    border: 1px solid {border} !important;
-    color: {text} !important;
-    border-radius: 10px !important;
-    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2) !important;
-}}
-.stTextInput input:focus,
-.stTextArea textarea:focus {{
-    border-color: {p} !important;
-    box-shadow: 0 0 0 3px {p_dim}, inset 0 2px 4px rgba(0,0,0,0.2) !important;
+/* ── KPI Metrics ───────────────────────────────────────────── */
+[data-testid="stMetricLabel"] {{
+    color: {t_muted}!important;
+    font-size: 12px!important;
+    text-transform: uppercase!important;
+    letter-spacing: 1.2px!important;
+    font-weight: 600!important;
 }}
 
-/* ── Expanders ───────────────────────────────────────────────── */
-[data-testid="stExpander"] {{
-    background: {c_bg} !important;
-    border: 1px solid {border} !important;
-    border-radius: 12px !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+[data-testid="stMetricValue"] {{
+    color: {text}!important;
+    font-size: 32px!important;
+    font-weight: 800!important;
 }}
 
-/* ── Dividers / hr ───────────────────────────────────────────── */
-hr {{ border-color: {border} !important; }}
+/* ── Sidebar - Premium Buttons ─────────────────────────────── */
+section[data-testid="stSidebar"] {{
+    background: {s_bg}!important;
+    backdrop-filter: blur(24px)!important;
+    border-right: 1px solid {border}!important;
+}}
 
-/* ── Page header ─────────────────────────────────────────────── */
-.page-header {{ border-bottom: 1px solid {border} !important; }}
-.page-header h1 {{ color: {text} !important; }}
-.page-header .sub {{ color: {t_dim} !important; }}
+section[data-testid="stSidebar"].stButton > button {{
+    background: {p}!important;
+    color: #0A0A0A!important;
+    font-weight: 700!important;
+    border-radius: 10px!important;
+    border: none!important;
+    padding: 12px!important;
+    transition: all 0.3s ease!important;
+}}
 
-/* ── Table ───────────────────────────────────────────────────── */
+section[data-testid="stSidebar"].stButton > button:hover {{
+    transform: scale(1.03)!important;
+    box-shadow: 0 6px 20px {shadow}!important;
+}}
+
+/* ── Main Buttons ──────────────────────────────────────────── */
+.stButton > button {{
+    background: {p}!important;
+    color: #0A0A0A!important;
+    font-weight: 700!important;
+    border-radius: 10px!important;
+    border: none!important;
+    padding: 10px 24px!important;
+    transition: all 0.3s ease!important;
+}}
+
+.stButton > button:hover {{
+    background: {p}dd!important;
+    box-shadow: 0 6px 20px {shadow}!important;
+    transform: translateY(-2px)!important;
+}}
+
+/* ── Tables ────────────────────────────────────────────────── */
+.stDataFrame {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+    border-radius: 10px!important;
+}}
+
 .stDataFrame thead th {{
-    background: {c_bg} !important;
-    color: {p} !important;
-    font-weight: 700 !important;
+    background: {c_bg}!important;
+    color: {p}!important;
+    font-weight: 700!important;
+    border-bottom: 2px solid {p_dim}!important;
 }}
+
 .stDataFrame tbody tr:hover td {{
-    background: {p_dim} !important;
+    background: {p_dim}!important;
 }}
 
-/* ── Sidebar nav buttons ─────────────────────────────────────── */
-.nav-btn button {{
-    background: transparent !important;
-    border: none !important;
-    color: {t_muted} !important;
-    font-size: 0.9rem !important;
-    text-align: left !important;
-    padding: 0.5rem 0.75rem !important;
-    border-radius: 8px !important;
-    transition: all 0.15s !important;
-}}
-.nav-btn button:hover {{
-    background: {c_bg} !important;
-    color: {text} !important;
-}}
-.nav-btn-active button {{
-    background: {p_dim} !important;
-    color: {p} !important;
-    font-weight: 700 !important;
-    border-left: 3px solid {p} !important;
+/* ── Inputs ────────────────────────────────────────────────── */
+.stTextInput input,.stSelectbox > div > div,.stNumberInput input {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+    color: {text}!important;
+    border-radius: 10px!important;
 }}
 
-/* ── Alerts / info boxes ─────────────────────────────────────── */
-[data-testid="stAlert"] {{
-    background: {c_bg} !important;
-    border-radius: 10px !important;
+.stTextInput input:focus {{
+    border-color: {p}!important;
+    box-shadow: 0 0 0 3px {p_dim}!important;
 }}
 
-/* ── 3D depth accent line at top of page ─────────────────────── */
+/* ── Status Badges ─────────────────────────────────────────── */
+.badge-paid {{background: {success}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700;}}
+.badge-partial {{background: {p}; color: #0A0A0A; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700;}}
+.badge-unpaid {{background: {danger}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700;}}
+
+/* ── Section Header ────────────────────────────────────────── */
+.section-header {{
+    font-size: 18px;
+    font-weight: 700;
+    color: {text};
+    margin: 24px 0 16px 0;
+    padding-bottom: 10px;
+    border-bottom: 2px solid {border};
+}}
+
+/* ── Top Accent Line ───────────────────────────────────────── */
 .stApp::before {{
     content: "";
     display: block;
     height: 3px;
-    background: linear-gradient(90deg, transparent, {p}, {p}88, transparent);
+    background: linear-gradient(90deg, transparent, {p}, transparent)!important;
     position: fixed;
     top: 0; left: 0; right: 0;
     z-index: 9999;
+    box-shadow: 0 0 30px {shadow}!important;
 }}
 
-/* ── Scrollbar ───────────────────────────────────────────────── */
-::-webkit-scrollbar {{ width: 6px; height: 6px; }}
-::-webkit-scrollbar-track {{ background: {bg}; }}
-::-webkit-scrollbar-thumb {{ background: {border}; border-radius: 4px; }}
-::-webkit-scrollbar-thumb:hover {{ background: {p}88; }}
+/* ── SELECTBOX TEXT VISIBILITY FIX ────────────────────────── */
+/* Force white text in selectbox */
+div[data-testid="stSelectbox"] label {{
+    color: {text}!important !important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+    border-radius: 10px!important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {{
+    color: {text}!important !important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] span {{
+    color: {text}!important !important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"] {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+    border-radius: 10px!important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"] {{
+    background: {c_bg}!important;
+    color: {text}!important !important;
+    padding: 8px 12px!important;
+    border-radius: 6px!important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"]:hover {{
+    background: {p_dim}!important;
+    color: {p}!important !important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"][aria-selected="true"] {{
+    background: {p_grad}!important;
+    color: #0A0A0A!important !important;
+    font-weight: 700!important;
+}}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
+    fill: {text}!important !important;
+    opacity: 0.6!important;
+}}
+
+/* Sidebar selectbox */
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] span {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"] {{
+    background: {c_bg}!important;
+    border: 1px solid {border}!important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"] {{
+    background: {c_bg}!important;
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"]:hover {{
+    background: {p_dim}!important;
+    color: {p}!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"][aria-selected="true"] {{
+    background: {p_grad}!important;
+    color: #0A0A0A!important !important;
+}}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
+    fill: {text}!important !important;
+}}
+
+/* Force all sidebar text to white */
+section[data-testid="stSidebar"] * {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] label {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] .stCheckbox label {{
+    color: {text}!important !important;
+}}
+
+section[data-testid="stSidebar"] .stCheckbox label span {{
+    color: {text}!important !important;
+}}
 </style>
 """
+
+def apply_theme(key: str = None, auto_rotate: bool = False):
+    if key is None:
+        key = "energy_burst" if not auto_rotate else get_daily_theme()
+
+    if key not in THEMES:
+        key = "energy_burst"
+
+    st.session_state['current_theme'] = key
+    st.markdown(build_css(key), unsafe_allow_html=True)
+
+    t = THEMES[key]
+    st.sidebar.markdown(f"""
+        <div style="
+            background: {t['card_bg']};
+            border: 1px solid {t['border']};
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            text-align: center;
+            backdrop-filter: blur(12px);
+        ">
+            <div style="font-size: 2.5rem;">{t['emoji']}</div>
+            <div style="font-weight: 800; color: {t['text']}; font-size: 1rem;">
+                {t['name']}
+            </div>
+            <div style="font-size: 0.75rem; color: {t['primary']}; font-weight: 600;">
+                {t['vibe']}
+            </div>
+            <div style="font-size: 0.65rem; color: {t['text_muted']}; font-style: italic; margin-top: 6px;">
+                "{t['motivation']}"
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    return key
