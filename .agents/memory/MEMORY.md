@@ -1,3 +1,4 @@
 - [Face recognition system](face-recognition.md) — profile-photo-based auto-enrollment, unknown/expired capture saving with 3-day auto-delete, admin panel
 - [Streamlit PIL fix](streamlit-pil-fix.md) — camera_input must be opened with Image.open(io.BytesIO(cam_img.getvalue())), not Image.open(cam_img) directly
 - [GymPro deployment](gymro-deployment.md) — Streamlit MUST use Reserved VM (not Autoscale); cv2 must be lazily imported; no production.build in artifact.toml
+- [Anti-theft activity log](anti-theft-activity-log.md) — ActivityLog model + log_activity/get_activity_logs/get_daily_fee_summary in database.py; FEE_COLLECTED/EDITED/DELETED logged from fee_collection.py; Staff Monitor tab (6th) in auditor.py

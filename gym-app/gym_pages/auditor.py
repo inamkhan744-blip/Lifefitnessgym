@@ -328,12 +328,13 @@ def render(gym_id, role, username):
     # TABS
     # ============================================
     
-    tab_headcount, tab_verify, tab_log, tab_summary, tab_present = st.tabs([
+    tab_headcount, tab_verify, tab_log, tab_summary, tab_present, tab_staff = st.tabs([
         "👥 Headcount Verification",
         "✍️ Cross-Verification Log",
         "📋 Audit Log",
         "⚠️ Dispute / Discrepancy",
-        "✅ Present Members"
+        "✅ Present Members",
+        "🛡️ Staff Monitor",
     ])
 
     # ============================================
@@ -799,4 +800,178 @@ def render(gym_id, role, username):
                         
                         st.markdown("</div>", unsafe_allow_html=True)
         
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================
+    # TAB 6: STAFF MONITOR (Anti-Theft)
+    # ============================================
+
+    with tab_staff:
+        st.markdown("""
+        <div style="background:linear-gradient(145deg,#1E293B,#0F172A);
+                    border:1px solid #334155;border-radius:12px;
+                    padding:1.5rem;box-shadow:0 8px 25px rgba(0,0,0,0.3);">
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🛡️ Staff Monitor — Anti-Theft Dashboard")
+        st.caption("Har staff action yahan record hoti hai — fee collection, edit, aur delete. Koi chori chhupi nahi rahegi.")
+
+        # ── Gym + Date selectors ───────────────────────────────────────────
+        gym_opts_sm = {g.name: g.id for g in gyms}
+        sm_col1, sm_col2, sm_col3 = st.columns([2, 1, 1])
+        with sm_col1:
+            if gym_id:
+                sm_gid = gym_id
+                st.text_input("🏋️ Gym", value=next((g.name for g in gyms if g.id == gym_id), ""), disabled=True, key="sm_gym")
+            else:
+                sm_chosen = st.selectbox("🏋️ Select Gym", ["All Gyms"] + list(gym_opts_sm.keys()), key="sm_gym")
+                sm_gid = gym_opts_sm.get(sm_chosen)
+        with sm_col2:
+            sm_from = st.date_input("📅 From", value=date.today().replace(day=1), key="sm_from")
+        with sm_col3:
+            sm_to = st.date_input("📅 To", value=date.today(), key="sm_to")
+
+        # ── Cash Reconciliation (Today) ────────────────────────────────────
+        st.markdown("#### 💵 Today's Cash Reconciliation")
+        try:
+            today_total, today_count, today_records = db.get_daily_fee_summary(
+                gym_id=sm_gid, target_date=date.today()
+            )
+
+            # Group by collected_by
+            staff_totals = {}
+            for r in today_records:
+                who = getattr(r, 'collected_by', None) or "Unknown"
+                staff_totals[who] = staff_totals.get(who, {"count": 0, "amount": 0.0})
+                staff_totals[who]["count"] += 1
+                staff_totals[who]["amount"] += (r.amount or 0)
+
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("💰 Total Collected Today", f"PKR {today_total:,.0f}")
+            mc2.metric("🧾 Receipts Issued", str(today_count))
+            mc3.metric("👤 Staff Members Active", str(len(staff_totals)))
+
+            if staff_totals:
+                rows_html = ""
+                for who, info in sorted(staff_totals.items(), key=lambda x: -x[1]["amount"]):
+                    rows_html += f"""
+                    <tr>
+                        <td style="padding:0.5rem 0.75rem;color:#F8FAFC;font-weight:600;">{who}</td>
+                        <td style="padding:0.5rem 0.75rem;color:#34D399;font-weight:700;text-align:right;">PKR {info['amount']:,.0f}</td>
+                        <td style="padding:0.5rem 0.75rem;color:#94A3B8;text-align:center;">{info['count']}</td>
+                    </tr>"""
+                st.markdown(f"""
+                <table style="width:100%;border-collapse:collapse;background:#0F172A;border-radius:8px;overflow:hidden;margin-top:0.5rem;">
+                    <thead>
+                        <tr style="background:#1E3A5F;">
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Staff Member</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:right;">Amount Collected</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:center;">Receipts</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows_html}</tbody>
+                </table>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("Aaj koi fee collect nahi hui.")
+        except Exception as e:
+            st.warning(f"Reconciliation data load nahi ho saki: {e}")
+
+        st.divider()
+
+        # ── Activity Log ───────────────────────────────────────────────────
+        st.markdown("#### 📋 Staff Activity Log")
+
+        act_col1, act_col2 = st.columns([2, 1])
+        with act_col1:
+            act_filter_action = st.selectbox(
+                "Filter by Action",
+                ["All Actions", "FEE_COLLECTED", "FEE_EDITED", "FEE_DELETED"],
+                key="sm_action_filter"
+            )
+        with act_col2:
+            act_filter_user = st.text_input("Filter by Staff Name", placeholder="e.g. admin", key="sm_user_filter")
+
+        try:
+            logs = db.get_activity_logs(
+                gym_id=sm_gid,
+                limit=300,
+                date_from=sm_from,
+                date_to=sm_to,
+                user=act_filter_user.strip() if act_filter_user.strip() else None,
+                action=act_filter_action if act_filter_action != "All Actions" else None,
+            )
+
+            if logs:
+                # Colour codes per action
+                action_colors = {
+                    "FEE_COLLECTED": "#34D399",
+                    "FEE_EDITED":    "#FBBF24",
+                    "FEE_DELETED":   "#F87171",
+                }
+
+                rows_html = ""
+                for entry in logs:
+                    color = action_colors.get(entry.action, "#94A3B8")
+                    ts = entry.created_at.strftime("%d %b %Y  %H:%M") if entry.created_at else "—"
+                    amt = f"PKR {entry.amount:,.0f}" if entry.amount is not None else "—"
+                    badge_bg = {"FEE_COLLECTED": "#065F46", "FEE_EDITED": "#78350F", "FEE_DELETED": "#7F1D1D"}.get(entry.action, "#1E293B")
+                    rows_html += f"""
+                    <tr style="border-bottom:1px solid #1E293B;">
+                        <td style="padding:0.5rem 0.75rem;color:#94A3B8;font-size:0.8rem;white-space:nowrap;">{ts}</td>
+                        <td style="padding:0.5rem 0.75rem;font-weight:700;color:#F8FAFC;">{entry.user}</td>
+                        <td style="padding:0.4rem 0.75rem;">
+                            <span style="background:{badge_bg};color:{color};padding:0.2rem 0.5rem;border-radius:6px;font-size:0.75rem;font-weight:700;">{entry.action}</span>
+                        </td>
+                        <td style="padding:0.5rem 0.75rem;color:{color};font-weight:700;text-align:right;">{amt}</td>
+                        <td style="padding:0.5rem 0.75rem;color:#CBD5E1;font-size:0.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;">{entry.details or '—'}</td>
+                        <td style="padding:0.5rem 0.75rem;color:#60A5FA;font-size:0.75rem;">{entry.record_ref or '—'}</td>
+                    </tr>"""
+
+                st.markdown(f"""
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;background:#0F172A;border-radius:8px;overflow:hidden;font-family:monospace;">
+                    <thead>
+                        <tr style="background:#1E3A5F;">
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;white-space:nowrap;">Time</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Staff</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Action</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:right;">Amount</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Details</th>
+                            <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Receipt</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows_html}</tbody>
+                </table>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Download CSV
+                log_data = [{
+                    "Time":    e.created_at.strftime("%Y-%m-%d %H:%M") if e.created_at else "",
+                    "Staff":   e.user,
+                    "Role":    e.role,
+                    "Action":  e.action,
+                    "Amount":  e.amount,
+                    "Details": e.details,
+                    "Receipt": e.record_ref,
+                } for e in logs]
+                import io as _io
+                df_log = pd.DataFrame(log_data)
+                csv_buf = _io.StringIO()
+                df_log.to_csv(csv_buf, index=False)
+                st.download_button(
+                    "⬇️ Download Log CSV",
+                    data=csv_buf.getvalue(),
+                    file_name=f"staff_activity_{date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="sm_csv_download",
+                )
+            else:
+                st.info("Is period mein koi activity record nahi mili. (Fees collect karne ke baad yahan entries aayengi.)")
+
+        except Exception as e:
+            st.warning(f"Activity log load nahi ho saki: {e}")
+
         st.markdown("</div>", unsafe_allow_html=True)

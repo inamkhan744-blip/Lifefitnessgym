@@ -377,6 +377,15 @@ def render_collect_fee(gym_id, current_user):
 
                 if ok:
                     db.update_member(member_id, expiry_date=str(period_end), status="Active")
+                    try:
+                        db.log_activity(
+                            user=current_user, action="FEE_COLLECTED",
+                            details=f"Member: {sel_mem.full_name} ({sel_mem.serial_number}) | Method: {payment_method} | Period: {period_start} → {period_end}",
+                            gym_id=sel_gym_id, amount=amount,
+                            record_ref=generated_rcp,
+                        )
+                    except Exception:
+                        pass
 
                     receipt_no = generated_rcp
 
@@ -451,7 +460,7 @@ def render_collect_fee(gym_id, current_user):
 # TAB 2: HISTORY & ADMIN
 # ============================================
 
-def render_history_admin(gym_id, role):
+def render_history_admin(gym_id, role, current_user=""):
     gyms = db.get_all_gyms()
     if not gyms:
         st.info("Add a gym first.")
@@ -800,6 +809,17 @@ def render_history_admin(gym_id, role):
                                     )
                                     if ok:
                                         db.update_member(selected_record['Member ID'], expiry_date=str(new_end))
+                                        try:
+                                            mem = selected_record.get('Member')
+                                            mem_name = mem.full_name if mem else "Unknown"
+                                            db.log_activity(
+                                                user=current_user, action="FEE_EDITED",
+                                                details=f"Receipt: {selected_record['Receipt']} | Member: {mem_name} | New Amount: PKR {new_amount:,.2f} | New End: {new_end}",
+                                                gym_id=sel_gid, amount=new_amount,
+                                                record_ref=selected_record['Receipt'],
+                                            )
+                                        except Exception:
+                                            pass
                                         st.success("✅ Record updated!")
                                         st.rerun()
                                     else:
@@ -813,8 +833,19 @@ def render_history_admin(gym_id, role):
                         st.caption("This cannot be undone!")
                         if st.button("🚨 Confirm Delete", type="primary", use_container_width=True):
                             if hasattr(db, 'delete_fee_record'):
+                                mem = selected_record.get('Member')
+                                mem_name = mem.full_name if mem else "Unknown"
                                 ok, msg = db.delete_fee_record(selected_record['ID'])
                                 if ok:
+                                    try:
+                                        db.log_activity(
+                                            user=current_user, action="FEE_DELETED",
+                                            details=f"Receipt: {selected_record['Receipt']} | Member: {mem_name} | Amount: PKR {selected_record['Amount']:,.2f}",
+                                            gym_id=sel_gid, amount=selected_record['Amount'],
+                                            record_ref=selected_record['Receipt'],
+                                        )
+                                    except Exception:
+                                        pass
                                     st.success("✅ Record deleted!")
                                     st.rerun()
                                 else:
@@ -906,7 +937,7 @@ def render(gym_id, role, current_user):
         render_collect_fee(gym_id, current_user)
 
     with tab_objs[1]:
-        render_history_admin(gym_id, role)
+        render_history_admin(gym_id, role, current_user)
 
     if role == 'admin' and len(tab_objs) > 2:
         with tab_objs[2]:

@@ -134,6 +134,7 @@ class Gym(Base):
     receipt_logs = relationship("ReceiptLog", back_populates="gym", cascade="all, delete-orphan")
     staff_targets = relationship("StaffTarget", back_populates="gym", cascade="all, delete-orphan")
     announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
+    activity_logs = relationship("ActivityLog", back_populates="gym", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -346,6 +347,22 @@ class AppSetting(Base):
     __tablename__ = "app_settings"
     key   = Column(String(120), primary_key=True)
     value = Column(Text, nullable=True)
+
+
+class ActivityLog(Base):
+    """Every important staff action — anti-theft audit trail."""
+    __tablename__ = "activity_logs"
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id     = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=True)
+    user       = Column(String(80), nullable=False)
+    role       = Column(String(20))
+    action     = Column(String(60), nullable=False)
+    details    = Column(Text)
+    amount     = Column(Float, nullable=True)
+    record_ref = Column(String(120), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    gym = relationship("Gym", back_populates="activity_logs")
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -1425,6 +1442,69 @@ def get_audit_entries(gym_id=None, status=None, date_from=None, date_to=None):
         if date_to:
             q = q.filter(AuditEntry.entry_date <= str(date_to))
         return q.order_by(AuditEntry.entry_date.desc()).all()
+    finally:
+        db.close()
+
+
+# ── Activity Log (Anti-Theft) ───────────────────────────────────────────────────
+
+def log_activity(user, action, details="", gym_id=None, role="", amount=None, record_ref=""):
+    """Log every important staff action for anti-theft monitoring."""
+    db = get_db()
+    try:
+        db.add(ActivityLog(
+            gym_id=gym_id,
+            user=str(user),
+            role=str(role),
+            action=str(action),
+            details=str(details),
+            amount=amount,
+            record_ref=str(record_ref),
+        ))
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def get_activity_logs(gym_id=None, limit=500, date_from=None, date_to=None, user=None, action=None):
+    """Return activity log rows, newest first."""
+    db = get_db()
+    try:
+        q = db.query(ActivityLog)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        if user:
+            q = q.filter(ActivityLog.user == user)
+        if action:
+            q = q.filter(ActivityLog.action == action)
+        if date_from:
+            q = q.filter(ActivityLog.created_at >= datetime.combine(date_from, datetime.min.time())
+                         if hasattr(date_from, 'year') else ActivityLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(ActivityLog.created_at <= datetime.combine(date_to, datetime.max.time())
+                         if hasattr(date_to, 'year') else ActivityLog.created_at <= date_to)
+        return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+    finally:
+        db.close()
+
+
+def get_daily_fee_summary(gym_id=None, target_date=None):
+    """Return (total_collected, count, records) for a given day — for cash reconciliation."""
+    db = get_db()
+    try:
+        from sqlalchemy import func as sqlfunc
+        date_str = str(target_date or datetime.now().date())
+        q = db.query(FeeRecord).filter(FeeRecord.collection_date == date_str)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        records = q.all()
+        total = sum(r.amount or 0 for r in records)
+        return total, len(records), records
     finally:
         db.close()
 
