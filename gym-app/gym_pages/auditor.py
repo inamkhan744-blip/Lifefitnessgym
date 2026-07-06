@@ -1054,4 +1054,141 @@ def render(gym_id, role, username):
         except Exception as e:
             st.warning(f"Activity log load nahi ho saki: {e}")
 
+        st.divider()
+
+        # ── AI Fraud Risk Analyzer ─────────────────────────────────────────
+        st.markdown("#### 🤖 AI Fraud Risk Analyzer")
+        st.caption("AI 30 din ka pura data analyze karke har staff ka risk level aur chori ke patterns batayega.")
+
+        if st.button("🔍 AI Se Analyze Karwao", type="primary", use_container_width=True, key="ai_fraud_btn"):
+            with st.spinner("🤖 AI data analyze kar raha hai — please wait..."):
+                try:
+                    from datetime import timedelta
+                    import os, requests as _req
+
+                    thirty_days_ago = datetime.now().date() - timedelta(days=30)
+
+                    # Collect all activity logs for 30 days
+                    all_logs = db.get_activity_logs(
+                        gym_id=sm_gid, limit=1000,
+                        date_from=thirty_days_ago, date_to=datetime.now().date()
+                    )
+
+                    # Build per-staff stats
+                    from collections import defaultdict
+                    staff_stats = defaultdict(lambda: {
+                        "collected": 0, "collected_amount": 0.0,
+                        "deleted": 0, "deleted_amount": 0.0,
+                        "edited": 0,
+                        "shift_opened": 0, "shift_closed": 0,
+                        "off_hours": 0,
+                        "flagged_shifts": 0,
+                    })
+
+                    for lg in all_logs:
+                        s = staff_stats[lg.user]
+                        h = lg.created_at.hour if lg.created_at else 12
+                        if lg.action == "FEE_COLLECTED":
+                            s["collected"] += 1
+                            s["collected_amount"] += (lg.amount or 0)
+                            if h < 7 or h >= 22:
+                                s["off_hours"] += 1
+                        elif lg.action == "FEE_DELETED":
+                            s["deleted"] += 1
+                            s["deleted_amount"] += (lg.amount or 0)
+                        elif lg.action == "FEE_EDITED":
+                            s["edited"] += 1
+                        elif lg.action == "SHIFT_OPENED":
+                            s["shift_opened"] += 1
+                        elif lg.action == "SHIFT_CLOSED":
+                            s["shift_closed"] += 1
+                            if lg.record_ref == "FLAGGED":
+                                s["flagged_shifts"] += 1
+
+                    # Build prompt
+                    staff_lines = []
+                    for name, s in staff_stats.items():
+                        del_ratio = round(s["deleted"] / max(s["collected"], 1) * 100, 1)
+                        staff_lines.append(
+                            f"- {name}: collected {s['collected']} fees (PKR {s['collected_amount']:,.0f}), "
+                            f"deleted {s['deleted']} records (PKR {s['deleted_amount']:,.0f}, {del_ratio}% of collected), "
+                            f"edited {s['edited']} times, off-hours transactions: {s['off_hours']}, "
+                            f"shifts opened: {s['shift_opened']}, shifts closed: {s['shift_closed']}, "
+                            f"flagged shifts (cash short): {s['flagged_shifts']}"
+                        )
+
+                    if not staff_lines:
+                        st.warning("30 din ka koi activity data nahi mila. Pehle fees collect karein taake AI analyze kar sake.")
+                    else:
+                        prompt = f"""You are an expert financial fraud investigator analyzing gym staff activity data for the past 30 days.
+
+STAFF ACTIVITY DATA (last 30 days):
+{chr(10).join(staff_lines)}
+
+Analyze each staff member for theft/fraud risk. For each person provide:
+1. Risk Level: CRITICAL / HIGH / MEDIUM / LOW
+2. Risk Score: 0-100 (100 = most suspicious)
+3. Key red flags found (be specific with numbers)
+4. What action the gym owner should take
+
+Important red flags to look for:
+- High deletion ratio (>10% of collections deleted = suspicious, >20% = very suspicious)
+- Large deleted amounts relative to collected amounts
+- Off-hours transactions
+- Flagged shifts (cash short)
+- Many edits (could be changing amounts after collection)
+- Shift opened but not closed (running without accountability)
+
+Respond in Urdu/Roman Urdu. Be direct and specific. Format as:
+
+**[Staff Name]** — Risk Level: [LEVEL] (Score: X/100)
+🔴 Red Flags: [specific issues]
+✅ Action: [what to do]
+
+End with a 2-line overall summary for the gym owner."""
+
+                        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+                        if not groq_key:
+                            st.error("❌ GROQ_API_KEY set nahi hai. AI analysis ke liye key chahiye.")
+                        else:
+                            resp = _req.post(
+                                "https://api.groq.com/openai/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": "llama-3.3-70b-versatile",
+                                    "messages": [{"role": "user", "content": prompt}],
+                                    "max_tokens": 1200,
+                                    "temperature": 0.3,
+                                },
+                                timeout=30,
+                            )
+                            resp.raise_for_status()
+                            ai_text = resp.json()["choices"][0]["message"]["content"].strip()
+
+                            st.markdown(f"""
+                            <div style="background:#0F172A;border:2px solid #7C3AED;border-radius:12px;padding:1.25rem;margin-top:0.5rem;">
+                                <div style="color:#A78BFA;font-weight:800;font-size:1rem;margin-bottom:0.75rem;">
+                                    🤖 AI Analysis — Last 30 Days
+                                </div>
+                                <div style="color:#E2E8F0;font-size:0.9rem;line-height:1.7;white-space:pre-wrap;">{ai_text}</div>
+                                <div style="color:#64748B;font-size:0.72rem;margin-top:0.75rem;">
+                                    Powered by LLaMA 3.3 70B via Groq · {datetime.now().strftime('%d %b %Y %H:%M')}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # Save to session for re-read
+                            st.session_state["ai_fraud_last_result"] = ai_text
+
+                except Exception as e:
+                    st.error(f"❌ AI analysis fail ho gayi: {e}")
+
+        elif st.session_state.get("ai_fraud_last_result"):
+            st.markdown(f"""
+            <div style="background:#0F172A;border:1px solid #334155;border-radius:12px;padding:1.25rem;margin-top:0.5rem;">
+                <div style="color:#94A3B8;font-size:0.75rem;margin-bottom:0.5rem;">Last analysis result (re-run karne ke liye button dabayein):</div>
+                <div style="color:#E2E8F0;font-size:0.9rem;line-height:1.7;white-space:pre-wrap;">{st.session_state['ai_fraud_last_result']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
         st.markdown("</div>", unsafe_allow_html=True)
