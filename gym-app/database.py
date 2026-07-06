@@ -16,7 +16,8 @@ from sqlalchemy.orm import joinedload
 # Test script - separate file mein run karein
 
 # ── Engine Path Configurations ──────────────────────────────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# DATABASE_URL = Replit Postgres (dev), NEON_DATABASE_URL = Streamlit Cloud / fallback
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
 IS_POSTGRES = bool(DATABASE_URL)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
