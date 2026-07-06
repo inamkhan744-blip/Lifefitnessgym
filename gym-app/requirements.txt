@@ -50,3 +50,4 @@ plotly>=5.0.0
 python-multipart>=0.0.28
 idna>=3.8
 reportlab
+cloudinary>=1.36.0
