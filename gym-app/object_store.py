@@ -58,7 +58,7 @@ def _to_display_jpeg(raw: bytes, max_px: int = 400) -> bytes:
 
 
 def _download_raw(key: str) -> bytes | None:
-    """Object Storage ya local disk se raw bytes download karo."""
+    """Object Storage → local disk → DB fallback se raw bytes download karo."""
     if not key:
         return None
     filename = os.path.basename(key)
@@ -79,6 +79,14 @@ def _download_raw(key: str) -> bytes | None:
                     return f.read()
             except Exception:
                 pass
+
+    # DB fallback — Streamlit Cloud / platforms without Object Storage ke liye
+    try:
+        import database as _db
+        return _db.get_photo_blob_by_path(key)
+    except Exception:
+        pass
+
     return None
 
 
