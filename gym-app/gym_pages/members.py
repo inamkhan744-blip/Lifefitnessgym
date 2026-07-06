@@ -784,9 +784,14 @@ def register_face_for_member(member_id):
     import tempfile
     import os
     import pickle
-    from deepface import DeepFace
-    import cv2
     import psycopg2
+
+    try:
+        from deepface import DeepFace
+        import cv2
+    except ImportError:
+        st.warning("⚠️ Face registration feature is not available on this platform. Please use the Replit version for face recognition.")
+        return
     
     st.subheader("📸 Register Face")
     st.info("Make sure good lighting and face is clearly visible")
