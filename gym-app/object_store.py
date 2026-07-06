@@ -16,8 +16,8 @@ import base64
 import streamlit as st
 
 # ── Cloudinary setup ────────────────────────────────────────────────────────
-_CLOUDINARY_CLOUD = os.environ.get("CLOUDINARY_CLOUD_NAME", "")
-_CLOUDINARY_KEY   = os.environ.get("CLOUDINARY_API_KEY", "")
+_CLOUDINARY_CLOUD = os.environ.get("CLOUDINARY_CLOUD_NAME", "w7xq1ogn")
+_CLOUDINARY_KEY   = os.environ.get("CLOUDINARY_API_KEY", "864276279865347")
 _CLOUDINARY_SEC   = os.environ.get("CLOUDINARY_API_SECRET", "")
 CLOUDINARY_AVAILABLE = bool(_CLOUDINARY_CLOUD and _CLOUDINARY_KEY and _CLOUDINARY_SEC)
 
