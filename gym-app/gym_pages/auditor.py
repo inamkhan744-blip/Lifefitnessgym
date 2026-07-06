@@ -816,6 +816,86 @@ def render(gym_id, role, username):
         st.markdown("### 🛡️ Staff Monitor — Anti-Theft Dashboard")
         st.caption("Har staff action yahan record hoti hai — fee collection, edit, aur delete. Koi chori chhupi nahi rahegi.")
 
+        # ── Fraud Alerts (Today) ───────────────────────────────────────────
+        try:
+            sm_alerts = db.check_fraud_alerts(gym_id=gym_id)
+            if sm_alerts:
+                critical_sm = [a for a in sm_alerts if a["severity"] == "critical"]
+                hcolor = "#7F1D1D" if critical_sm else "#78350F"
+                bcolor = "#EF4444" if critical_sm else "#F59E0B"
+                tcolor = "#FCA5A5" if critical_sm else "#FCD34D"
+                alert_rows = ""
+                for a in sm_alerts:
+                    bg2 = "#450A0A" if a["severity"] == "critical" else "#422006"
+                    bc2 = "#EF4444" if a["severity"] == "critical" else "#F59E0B"
+                    alert_rows += f"""
+                    <div style="background:{bg2};border-left:4px solid {bc2};border-radius:8px;padding:0.65rem 1rem;margin-bottom:0.4rem;">
+                        <div style="font-weight:700;color:#F8FAFC;">{a['icon']} {a['title']}</div>
+                        <div style="color:#CBD5E1;font-size:0.82rem;">{a['detail']}</div>
+                    </div>"""
+                st.markdown(f"""
+                <div style="background:{hcolor};border:2px solid {bcolor};border-radius:12px;padding:1rem;margin-bottom:1rem;">
+                    <div style="font-size:1rem;font-weight:800;color:{tcolor};margin-bottom:0.6rem;">
+                        {'🚨 CRITICAL: Fori Jaanch Zaroor!' if critical_sm else '⚠️ Suspicious Activity Detected Today'}
+                    </div>
+                    {alert_rows}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background:#052e16;border:1px solid #16a34a;border-radius:10px;padding:0.75rem 1rem;margin-bottom:1rem;">
+                    <span style="color:#4ade80;font-weight:700;">✅ Aaj koi suspicious activity nahi mili — Sab theek hai!</span>
+                </div>
+                """, unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        # ── Today's Shifts Summary ─────────────────────────────────────────
+        st.markdown("#### 💼 Aaj Ki Shifts")
+        try:
+            today_shifts = db.get_today_shifts(gym_id=gym_id)
+            if today_shifts:
+                shift_rows = ""
+                for s in today_shifts:
+                    sm = {"open": ("#34D399","#065F46","🟢 Open"), "closed": ("#60A5FA","#1E3A5F","✅ Closed"), "flagged": ("#F87171","#7F1D1D","🚨 Flagged")}
+                    sc2, sbg2, slbl = sm.get(s.status, ("#94A3B8","#1E293B", s.status))
+                    diff_html = ""
+                    if s.discrepancy is not None and s.status != "open":
+                        dc = "#34D399" if s.discrepancy >= 0 else "#F87171"
+                        sign = "+" if s.discrepancy >= 0 else ""
+                        diff_html = f'<span style="color:{dc};font-weight:700;">{sign}PKR {s.discrepancy:,.0f}</span>'
+                    shift_rows += f"""
+                    <tr style="border-bottom:1px solid #1E293B;">
+                        <td style="padding:0.45rem 0.7rem;color:#F8FAFC;font-weight:600;">{s.staff_user}</td>
+                        <td style="padding:0.45rem 0.7rem;color:#94A3B8;">{s.opened_at.strftime('%H:%M') if s.opened_at else '—'}</td>
+                        <td style="padding:0.45rem 0.7rem;color:#34D399;">PKR {s.opening_cash:,.0f}</td>
+                        <td style="padding:0.45rem 0.7rem;color:#FBBF24;">{'PKR ' + f'{s.expected_cash:,.0f}' if s.expected_cash is not None else '—'}</td>
+                        <td style="padding:0.45rem 0.7rem;color:#F8FAFC;">{'PKR ' + f'{s.closing_cash:,.0f}' if s.closing_cash is not None else '—'}</td>
+                        <td style="padding:0.45rem 0.7rem;">{diff_html}</td>
+                        <td style="padding:0.45rem 0.7rem;"><span style="background:{sbg2};color:{sc2};padding:0.15rem 0.45rem;border-radius:5px;font-size:0.75rem;font-weight:700;">{slbl}</span></td>
+                    </tr>"""
+                st.markdown(f"""
+                <div style="overflow-x:auto;margin-bottom:1rem;">
+                <table style="width:100%;border-collapse:collapse;background:#0F172A;border-radius:8px;overflow:hidden;">
+                    <thead><tr style="background:#1E3A5F;">
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;text-align:left;">Staff</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Opened</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Opening</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Expected</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Submitted</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Diff</th>
+                        <th style="padding:0.55rem 0.7rem;color:#60A5FA;">Status</th>
+                    </tr></thead>
+                    <tbody>{shift_rows}</tbody>
+                </table></div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("Aaj koi shift record nahi. Staff ko Fee Collection → 💼 Shift Management se shift shuru karni chahiye.")
+        except Exception as e:
+            st.warning(f"Shifts load nahi ho sake: {e}")
+
+        st.divider()
+
         # ── Gym + Date selectors ───────────────────────────────────────────
         gym_opts_sm = {g.name: g.id for g in gyms}
         sm_col1, sm_col2, sm_col3 = st.columns([2, 1, 1])

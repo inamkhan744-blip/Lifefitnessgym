@@ -922,13 +922,153 @@ def render_receipt_audit(gym_id):
 # MAIN RENDER FUNCTION
 # ============================================
 
+# ============================================
+# SHIFT MANAGEMENT
+# ============================================
+
+def render_shift_management(gym_id, role, current_user):
+    """Staff opens/closes their cash shift. Admin sees all shifts."""
+
+    st.markdown("### 💼 Shift Cash Management")
+    st.caption("Shift start mein opening cash declare karein, shift end mein actual cash submit karein.")
+
+    gyms = db.get_all_gyms()
+    if not gyms:
+        st.info("Pehle gym add karein.")
+        return
+
+    # Determine working gym
+    if gym_id:
+        sel_gid = gym_id
+    else:
+        opts = {g.name: g.id for g in gyms}
+        sel_gid = opts[st.selectbox("🏋️ Gym", list(opts.keys()), key="shift_gym")]
+
+    # ── Active shift for this user ──────────────────────────────────────────
+    active = db.get_active_shift(sel_gid, current_user)
+
+    col_open, col_close = st.columns(2)
+
+    with col_open:
+        st.markdown("""
+        <div style="background:#0F172A;border:2px solid #34D399;border-radius:12px;padding:1rem;">
+        <div style="color:#34D399;font-weight:700;font-size:1rem;margin-bottom:0.5rem;">▶️ Shift Shuru Karein</div>
+        """, unsafe_allow_html=True)
+        if active:
+            opened_str = active.opened_at.strftime('%d %b %Y %H:%M') if active.opened_at else "—"
+            st.success(f"✅ Aapki shift {opened_str} se open hai")
+            st.caption(f"Opening cash: PKR {active.opening_cash:,.0f}")
+        else:
+            with st.form("open_shift_form", clear_on_submit=True):
+                opening_cash = st.number_input("Opening Cash (PKR)", min_value=0.0, value=0.0, step=100.0, key="shift_open_cash")
+                if st.form_submit_button("▶️ Shift Shuru Karein", type="primary", use_container_width=True):
+                    ok, result = db.open_shift(sel_gid, current_user, role, opening_cash)
+                    if ok:
+                        st.success("✅ Shift shuru ho gayi!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {result}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_close:
+        st.markdown("""
+        <div style="background:#0F172A;border:2px solid #F87171;border-radius:12px;padding:1rem;">
+        <div style="color:#F87171;font-weight:700;font-size:1rem;margin-bottom:0.5rem;">⏹️ Shift Band Karein</div>
+        """, unsafe_allow_html=True)
+        if active:
+            with st.form("close_shift_form", clear_on_submit=True):
+                closing_cash = st.number_input("Actual Cash on Hand (PKR)", min_value=0.0, value=0.0, step=100.0, key="shift_close_cash")
+                st.caption("Shift ke dौران collect ki gayi saari fees + opening cash = expected amount")
+                if st.form_submit_button("⏹️ Shift Band Karein", type="primary", use_container_width=True):
+                    ok, result = db.close_shift(active.id, closing_cash)
+                    if ok:
+                        exp   = result["expected"]
+                        diff  = result["discrepancy"]
+                        stat  = result["status"]
+                        if stat == "flagged":
+                            st.error(f"🚨 DISCREPANCY! Expected: PKR {exp:,.0f} | Submitted: PKR {closing_cash:,.0f} | SHORT: PKR {abs(diff):,.0f}")
+                        else:
+                            st.success(f"✅ Shift band! Expected: PKR {exp:,.0f} | Submitted: PKR {closing_cash:,.0f} ✔️")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {result}")
+        else:
+            st.info("Pehle shift shuru karein.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Today's all shifts (admin sees all, staff sees own) ────────────────
+    st.markdown("#### 📋 Aaj Ki Shifts")
+    try:
+        all_shifts = db.get_today_shifts(gym_id=sel_gid)
+        if role not in ["admin", "owner"]:
+            all_shifts = [s for s in all_shifts if s.staff_user == current_user]
+
+        if all_shifts:
+            rows_html = ""
+            for s in all_shifts:
+                status_map = {
+                    "open":    ("#34D399", "#065F46", "🟢 Open"),
+                    "closed":  ("#60A5FA", "#1E3A5F", "✅ Closed"),
+                    "flagged": ("#F87171", "#7F1D1D", "🚨 Flagged"),
+                }
+                sc, sbg, slabel = status_map.get(s.status, ("#94A3B8", "#1E293B", s.status))
+                diff_str = ""
+                if s.discrepancy is not None and s.status != "open":
+                    color = "#34D399" if s.discrepancy >= 0 else "#F87171"
+                    sign  = "+" if s.discrepancy >= 0 else ""
+                    diff_str = f'<span style="color:{color};font-weight:700;">{sign}PKR {s.discrepancy:,.0f}</span>'
+
+                opened_str  = s.opened_at.strftime('%H:%M')  if s.opened_at  else "—"
+                closed_str  = s.closed_at.strftime('%H:%M')  if s.closed_at  else "—"
+                expected_str = f"PKR {s.expected_cash:,.0f}" if s.expected_cash is not None else "—"
+                closing_str  = f"PKR {s.closing_cash:,.0f}"  if s.closing_cash  is not None else "—"
+
+                rows_html += f"""
+                <tr style="border-bottom:1px solid #1E293B;">
+                    <td style="padding:0.5rem 0.75rem;color:#F8FAFC;font-weight:600;">{s.staff_user}</td>
+                    <td style="padding:0.5rem 0.75rem;color:#94A3B8;">{opened_str}</td>
+                    <td style="padding:0.5rem 0.75rem;color:#94A3B8;">{closed_str}</td>
+                    <td style="padding:0.5rem 0.75rem;color:#34D399;font-weight:700;">PKR {s.opening_cash:,.0f}</td>
+                    <td style="padding:0.5rem 0.75rem;color:#FBBF24;font-weight:700;">{expected_str}</td>
+                    <td style="padding:0.5rem 0.75rem;color:#F8FAFC;">{closing_str}</td>
+                    <td style="padding:0.5rem 0.75rem;">{diff_str}</td>
+                    <td style="padding:0.5rem 0.75rem;"><span style="background:{sbg};color:{sc};padding:0.2rem 0.5rem;border-radius:6px;font-size:0.75rem;font-weight:700;">{slabel}</span></td>
+                </tr>"""
+
+            st.markdown(f"""
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;background:#0F172A;border-radius:8px;overflow:hidden;">
+                <thead>
+                    <tr style="background:#1E3A5F;">
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;text-align:left;">Staff</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Open</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Close</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Opening Cash</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Expected</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Submitted</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Difference</th>
+                        <th style="padding:0.6rem 0.75rem;color:#60A5FA;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>{rows_html}</tbody>
+            </table>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("Aaj koi shift record nahi.")
+    except Exception as e:
+        st.warning(f"Shifts load nahi ho sake: {e}")
+
+
 def render(gym_id, role, current_user):
     """Main render function - called from app.py"""
     
     st.title("💰 Fee Collection")
     st.caption("Collect membership fees and manage payment records")
     
-    tabs = ["📝 Collect Fee", "📋 History & Admin"]
+    tabs = ["📝 Collect Fee", "📋 History & Admin", "💼 Shift Management"]
     if role == 'admin':
         tabs.append("📊 Receipt Audit Log")
     tab_objs = st.tabs(tabs)
@@ -939,6 +1079,9 @@ def render(gym_id, role, current_user):
     with tab_objs[1]:
         render_history_admin(gym_id, role, current_user)
 
-    if role == 'admin' and len(tab_objs) > 2:
-        with tab_objs[2]:
+    with tab_objs[2]:
+        render_shift_management(gym_id, role, current_user)
+
+    if role == 'admin' and len(tab_objs) > 3:
+        with tab_objs[3]:
             render_receipt_audit(gym_id)

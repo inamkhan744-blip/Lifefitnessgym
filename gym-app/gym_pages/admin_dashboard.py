@@ -282,6 +282,41 @@ def render(gym_id, role, username):
     """, unsafe_allow_html=True)
 
     # ============================================
+    # 🚨 FRAUD ALERT BANNER (Anti-Theft)
+    # ============================================
+    if role.lower() in ["admin", "owner"]:
+        try:
+            alerts = db.check_fraud_alerts(gym_id=gym_id)
+            if alerts:
+                critical = [a for a in alerts if a["severity"] == "critical"]
+                warnings = [a for a in alerts if a["severity"] == "warning"]
+
+                header_color = "#7F1D1D" if critical else "#78350F"
+                border_color = "#EF4444" if critical else "#F59E0B"
+                title_color  = "#FCA5A5" if critical else "#FCD34D"
+                title_text   = f"🚨 {len(critical)} CRITICAL ALERT{'S' if len(critical)!=1 else ''} — Fori Attention Chahiye!" if critical else f"⚠️ {len(warnings)} Suspicious Activity Alert{'s' if len(warnings)!=1 else ''} Aaj"
+
+                rows_html = ""
+                for a in alerts:
+                    bg   = "#450A0A" if a["severity"] == "critical" else "#422006"
+                    bc   = "#EF4444" if a["severity"] == "critical" else "#F59E0B"
+                    rows_html += f"""
+                    <div style="background:{bg};border-left:4px solid {bc};border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">
+                        <div style="font-weight:700;color:#F8FAFC;font-size:0.95rem;">{a['icon']} {a['title']}</div>
+                        <div style="color:#CBD5E1;font-size:0.82rem;margin-top:0.2rem;">{a['detail']}</div>
+                    </div>"""
+
+                st.markdown(f"""
+                <div style="background:{header_color};border:2px solid {border_color};border-radius:12px;padding:1rem 1.25rem;margin-bottom:1rem;">
+                    <div style="font-size:1.1rem;font-weight:800;color:{title_color};margin-bottom:0.75rem;">{title_text}</div>
+                    {rows_html}
+                    <div style="color:#94A3B8;font-size:0.75rem;margin-top:0.5rem;">Auditor page → 🛡️ Staff Monitor tab mein full details dekhein.</div>
+                </div>
+                """, unsafe_allow_html=True)
+        except Exception:
+            pass
+
+    # ============================================
     # ANNOUNCEMENT SECTION
     # ============================================
     if role.lower() in ["admin", "owner"] and gyms:

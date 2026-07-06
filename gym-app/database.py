@@ -134,7 +134,8 @@ class Gym(Base):
     receipt_logs = relationship("ReceiptLog", back_populates="gym", cascade="all, delete-orphan")
     staff_targets = relationship("StaffTarget", back_populates="gym", cascade="all, delete-orphan")
     announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
-    activity_logs = relationship("ActivityLog", back_populates="gym", cascade="all, delete-orphan")
+    activity_logs  = relationship("ActivityLog",  back_populates="gym", cascade="all, delete-orphan")
+    shift_sessions = relationship("ShiftSession", back_populates="gym", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -363,6 +364,24 @@ class ActivityLog(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="activity_logs")
+
+
+class ShiftSession(Base):
+    """Staff shift — opening / closing cash for anti-theft reconciliation."""
+    __tablename__ = "shift_sessions"
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id         = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    staff_user     = Column(String(80), nullable=False)
+    role           = Column(String(20))
+    opened_at      = Column(DateTime, default=datetime.now)
+    closed_at      = Column(DateTime, nullable=True)
+    opening_cash   = Column(Float, default=0.0)
+    expected_cash  = Column(Float, nullable=True)   # opening + collections during shift
+    closing_cash   = Column(Float, nullable=True)   # what staff actually handed over
+    discrepancy    = Column(Float, nullable=True)   # closing_cash - expected_cash (negative = short)
+    status         = Column(String(20), default="open")  # open / closed / flagged
+
+    gym = relationship("Gym", back_populates="shift_sessions")
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -1497,9 +1516,8 @@ def get_daily_fee_summary(gym_id=None, target_date=None):
     """Return (total_collected, count, records) for a given day — for cash reconciliation."""
     db = get_db()
     try:
-        from sqlalchemy import func as sqlfunc
         date_str = str(target_date or datetime.now().date())
-        q = db.query(FeeRecord).filter(FeeRecord.collection_date == date_str)
+        q = db.query(FeeRecord).filter(FeeRecord.payment_date == date_str)
         if gym_id:
             q = q.filter_by(gym_id=gym_id)
         records = q.all()
@@ -1507,6 +1525,233 @@ def get_daily_fee_summary(gym_id=None, target_date=None):
         return total, len(records), records
     finally:
         db.close()
+
+
+# ── Shift Session Functions ─────────────────────────────────────────────────────
+
+def open_shift(gym_id, staff_user, role, opening_cash=0.0):
+    """Start a new shift for a staff member."""
+    db = get_db()
+    try:
+        existing = db.query(ShiftSession).filter_by(
+            gym_id=gym_id, staff_user=staff_user, status="open"
+        ).first()
+        if existing:
+            return False, "Aapki pehle se ek shift open hai. Pehle band karein."
+        s = ShiftSession(
+            gym_id=gym_id, staff_user=staff_user, role=role,
+            opening_cash=float(opening_cash), status="open"
+        )
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+        log_activity(user=staff_user, action="SHIFT_OPENED",
+                     details=f"Opening cash: PKR {opening_cash:,.0f}",
+                     gym_id=gym_id, role=role, amount=opening_cash)
+        return True, s.id
+    except Exception as e:
+        try: db.rollback()
+        except: pass
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def close_shift(shift_id, closing_cash):
+    """Close a shift — compute expected cash and discrepancy."""
+    db = get_db()
+    try:
+        shift = db.query(ShiftSession).filter_by(id=shift_id).first()
+        if not shift:
+            return False, "Shift nahi mili."
+        if shift.status != "open":
+            return False, "Yeh shift already band hai."
+
+        # Total collected during shift window
+        opened_str = shift.opened_at.strftime("%Y-%m-%d")
+        recs = db.query(FeeRecord).filter(
+            FeeRecord.gym_id == shift.gym_id,
+            FeeRecord.collected_by == shift.staff_user,
+            FeeRecord.payment_date >= opened_str,
+        ).all()
+        # Filter to records created after shift opened
+        shift_collections = [r for r in recs if r.created_at and r.created_at >= shift.opened_at]
+        collected = sum(r.amount or 0 for r in shift_collections)
+
+        expected = (shift.opening_cash or 0) + collected
+        discrepancy = float(closing_cash) - expected
+        status = "flagged" if discrepancy < -1 else "closed"
+
+        shift.closed_at     = datetime.now()
+        shift.expected_cash = expected
+        shift.closing_cash  = float(closing_cash)
+        shift.discrepancy   = discrepancy
+        shift.status        = status
+        db.commit()
+
+        log_activity(
+            user=shift.staff_user, action="SHIFT_CLOSED",
+            details=f"Opening: PKR {shift.opening_cash:,.0f} | Collected: PKR {collected:,.0f} | Expected: PKR {expected:,.0f} | Submitted: PKR {closing_cash:,.0f} | Diff: PKR {discrepancy:,.0f}",
+            gym_id=shift.gym_id, role=shift.role, amount=discrepancy,
+            record_ref="FLAGGED" if status == "flagged" else "OK"
+        )
+        return True, {"expected": expected, "closing": closing_cash, "discrepancy": discrepancy, "status": status}
+    except Exception as e:
+        try: db.rollback()
+        except: pass
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_active_shift(gym_id, staff_user):
+    """Return open shift for a staff member or None."""
+    db = get_db()
+    try:
+        return db.query(ShiftSession).filter_by(
+            gym_id=gym_id, staff_user=staff_user, status="open"
+        ).first()
+    finally:
+        db.close()
+
+
+def get_today_shifts(gym_id=None):
+    """Return all shifts opened today."""
+    db = get_db()
+    try:
+        today_start = datetime.combine(datetime.now().date(), datetime.min.time())
+        q = db.query(ShiftSession).filter(ShiftSession.opened_at >= today_start)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return q.order_by(ShiftSession.opened_at.desc()).all()
+    finally:
+        db.close()
+
+
+def check_fraud_alerts(gym_id=None, target_date=None):
+    """
+    Scan activity logs and fee records for suspicious patterns.
+    Returns list of alert dicts: {severity, icon, title, detail}
+    severity: 'critical' | 'warning'
+    """
+    from collections import defaultdict
+    alerts = []
+    check_date = target_date or datetime.now().date()
+    date_str = str(check_date)
+    today_start = datetime.combine(check_date, datetime.min.time())
+    today_end   = datetime.combine(check_date, datetime.max.time())
+
+    dbs = get_db()
+    try:
+        # ── 1. Staff with too many deletions today ──────────────────────────
+        delete_logs = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_DELETED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            delete_logs = delete_logs.filter_by(gym_id=gym_id)
+        del_by = defaultdict(list)
+        for lg in delete_logs.all():
+            del_by[lg.user].append(lg)
+        for user, entries in del_by.items():
+            n = len(entries)
+            total_deleted = sum(e.amount or 0 for e in entries)
+            if n >= 4:
+                alerts.append({
+                    "severity": "critical",
+                    "icon": "🚨",
+                    "title": f"{user} ne aaj {n} fee records DELETE kiye!",
+                    "detail": f"Deleted amount: PKR {total_deleted:,.0f} — Fori jaanch karein!"
+                })
+            elif n >= 2:
+                alerts.append({
+                    "severity": "warning",
+                    "icon": "⚠️",
+                    "title": f"{user} ne aaj {n} fee records delete kiye",
+                    "detail": f"Deleted amount: PKR {total_deleted:,.0f}"
+                })
+
+        # ── 2. Staff with too many edits today ─────────────────────────────
+        edit_logs = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_EDITED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            edit_logs = edit_logs.filter_by(gym_id=gym_id)
+        edit_by = defaultdict(int)
+        for lg in edit_logs.all():
+            edit_by[lg.user] += 1
+        for user, n in edit_by.items():
+            if n >= 3:
+                alerts.append({
+                    "severity": "warning",
+                    "icon": "✏️",
+                    "title": f"{user} ne aaj {n} baar fee records EDIT kiye",
+                    "detail": "Zyada edits amount manipulation ki nishani ho sakti hai."
+                })
+
+        # ── 3. Off-hours transactions (before 7am or after 10pm) ───────────
+        off_q = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_COLLECTED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            off_q = off_q.filter_by(gym_id=gym_id)
+        off_hours = []
+        for lg in off_q.all():
+            if lg.created_at:
+                h = lg.created_at.hour
+                if h < 7 or h >= 22:
+                    off_hours.append(lg)
+        if off_hours:
+            names = list({e.user for e in off_hours})
+            alerts.append({
+                "severity": "warning",
+                "icon": "🌙",
+                "title": f"Off-hours fee collection ({len(off_hours)} transactions)",
+                "detail": f"Staff: {', '.join(names)} — Normal hours se bahar fees collect ki gayi."
+            })
+
+        # ── 4. Flagged shifts (discrepancy) ────────────────────────────────
+        flagged_shifts = dbs.query(ShiftSession).filter(
+            ShiftSession.status == "flagged",
+            ShiftSession.closed_at >= today_start,
+        )
+        if gym_id:
+            flagged_shifts = flagged_shifts.filter_by(gym_id=gym_id)
+        for s in flagged_shifts.all():
+            alerts.append({
+                "severity": "critical",
+                "icon": "💸",
+                "title": f"{s.staff_user} ki shift mein cash short!",
+                "detail": f"Expected: PKR {s.expected_cash:,.0f} | Submitted: PKR {s.closing_cash:,.0f} | Short: PKR {abs(s.discrepancy):,.0f}"
+            })
+
+        # ── 5. Large single deletion (> 3000) ──────────────────────────────
+        big_del = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_DELETED",
+            ActivityLog.amount >= 3000,
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            big_del = big_del.filter_by(gym_id=gym_id)
+        for lg in big_del.all():
+            alerts.append({
+                "severity": "critical",
+                "icon": "💰",
+                "title": f"Bara amount delete kiya — PKR {(lg.amount or 0):,.0f}",
+                "detail": f"Staff: {lg.user} | Receipt: {lg.record_ref or '—'} | Time: {lg.created_at.strftime('%H:%M') if lg.created_at else '—'}"
+            })
+
+        return alerts
+    except Exception:
+        return []
+    finally:
+        dbs.close()
 
 
 # ── Body Measurements ──────────────────────────────────────────────────────────
