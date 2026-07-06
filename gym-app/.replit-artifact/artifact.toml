@@ -13,7 +13,7 @@ kind = "web"
   run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
   [services.production]
-  run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
+  run = "cd /home/runner/workspace/gym-app && PYTHONPATH=/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages REPLIT_PYTHONPATH=/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages /home/runner/workspace/.pythonlibs/bin/python run.py"
 
   [services.production.health.startup]
   path = "/_stcore/health"
