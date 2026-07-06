@@ -10,6 +10,12 @@ from PIL import Image
 import io
 import numpy as np
 
+try:
+    import plotly.graph_objects as go
+    _PLOTLY = True
+except ImportError:
+    _PLOTLY = False
+
 import database as db
 import styles
 
@@ -999,37 +1005,377 @@ def render_face_recognition_tab(gym_id, role, current_user, gyms):
 
 
 # ============================================
+# ── STATS BAR ────────────────────────────────
+# ============================================
+
+def _today_kpi_bar(sel_gid):
+    """Live KPI strip shown above the tab bar"""
+    members    = db.get_members(gym_id=sel_gid, status="Active")
+    total      = len(members)
+    att_today  = db.get_attendance(gym_id=sel_gid, check_date=date.today())
+    present    = sum(1 for a in att_today if a.status == "Present")
+    absent     = sum(1 for a in att_today if a.status == "Absent")
+    late       = sum(1 for a in att_today if a.status == "Late")
+    marked     = len(att_today)
+    pct        = round(present / total * 100) if total else 0
+    alert_cnt  = len(db.get_absent_members(days=3, gym_id=sel_gid))
+    unmarked   = total - marked
+
+    st.markdown(f"""
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;">
+      <div style="flex:1;min-width:110px;background:linear-gradient(135deg,#064E3B,#065F46);
+           border:1px solid #10B981;border-radius:12px;padding:0.7rem 0.8rem;text-align:center;">
+        <div style="font-size:1.8rem;font-weight:900;color:#10B981;">{present}</div>
+        <div style="font-size:0.7rem;color:#6EE7B7;">✅ Present Today</div>
+        <div style="font-size:0.65rem;color:#34D399;">{pct}% of {total} active</div>
+      </div>
+      <div style="flex:1;min-width:110px;background:linear-gradient(135deg,#1E293B,#0F172A);
+           border:1px solid #475569;border-radius:12px;padding:0.7rem 0.8rem;text-align:center;">
+        <div style="font-size:1.8rem;font-weight:900;color:#94A3B8;">{unmarked}</div>
+        <div style="font-size:0.7rem;color:#94A3B8;">⏳ Unmarked</div>
+        <div style="font-size:0.65rem;color:#64748B;">{marked}/{total} done</div>
+      </div>
+      <div style="flex:1;min-width:110px;background:linear-gradient(135deg,#7F1D1D,#991B1B);
+           border:1px solid #EF4444;border-radius:12px;padding:0.7rem 0.8rem;text-align:center;">
+        <div style="font-size:1.8rem;font-weight:900;color:#FCA5A5;">{alert_cnt}</div>
+        <div style="font-size:0.7rem;color:#FCA5A5;">🚨 3+ Day Absent</div>
+        <div style="font-size:0.65rem;color:#F87171;">At-risk members</div>
+      </div>
+      <div style="flex:1;min-width:110px;background:linear-gradient(135deg,#1E1B4B,#312E81);
+           border:1px solid #818CF8;border-radius:12px;padding:0.7rem 0.8rem;text-align:center;">
+        <div style="font-size:1.8rem;font-weight:900;color:#818CF8;">{late}</div>
+        <div style="font-size:0.7rem;color:#A5B4FC;">🕐 Late Today</div>
+        <div style="font-size:0.65rem;color:#6366F1;">{absent} absent</div>
+      </div>
+      <div style="flex:1;min-width:110px;background:linear-gradient(135deg,#0C4A6E,#075985);
+           border:1px solid #38BDF8;border-radius:12px;padding:0.7rem 0.8rem;text-align:center;">
+        <div style="font-size:1.2rem;font-weight:900;color:#38BDF8;">{date.today().strftime('%d %b')}</div>
+        <div style="font-size:0.72rem;color:#7DD3FC;">{date.today().strftime('%A')}</div>
+        <div style="font-size:0.65rem;color:#38BDF8;">📅 Today</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ============================================
+# ── ANALYTICS TAB ────────────────────────────
+# ============================================
+
+def _render_analytics_tab(sel_gid, role, current_user):
+    """Full analytics: trend chart, hourly heatmap, leaderboard, absent alerts, AI"""
+
+    # ── 30-day Trend ──────────────────────────────────────────────────────
+    st.markdown("#### 📈 30-Day Attendance Trend")
+    trend = db.get_attendance_trend(sel_gid, days=30)
+    if trend and _PLOTLY:
+        df_t = pd.DataFrame(trend)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name="Present", x=df_t["date"], y=df_t["present"],
+                             marker_color="#10B981"))
+        fig.add_trace(go.Bar(name="Late",    x=df_t["date"], y=df_t["late"],
+                             marker_color="#F59E0B"))
+        fig.add_trace(go.Bar(name="Absent",  x=df_t["date"], y=df_t["absent"],
+                             marker_color="#EF4444"))
+        fig.update_layout(
+            barmode="stack",
+            plot_bgcolor="#0F172A", paper_bgcolor="#0F172A",
+            font=dict(color="#F8FAFC"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=0, r=0, t=30, b=0),
+            height=260,
+            xaxis=dict(showgrid=False, tickfont=dict(size=9)),
+            yaxis=dict(showgrid=True, gridcolor="#1E293B", title="Members"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # summary row below chart
+        avg_present = round(sum(t["present"] for t in trend) / len(trend), 1)
+        max_day = max(trend, key=lambda t: t["present"])
+        min_day = min((t for t in trend if t["present"] > 0),
+                      key=lambda t: t["present"], default=max_day)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("30-Day Avg Present/Day", avg_present)
+        c2.metric("🔝 Best Day", f"{max_day['date']} ({max_day['present']})")
+        c3.metric("📉 Quietest Day", f"{min_day['date']} ({min_day['present']})")
+    else:
+        st.info("Abhi koi attendance data nahi hai. Kuch din baad yahan trends nazar ayenge.")
+
+    st.divider()
+
+    # ── Hourly Heatmap + Monthly Leaderboard ──────────────────────────────
+    col_l, col_r = st.columns([1, 1])
+
+    with col_l:
+        st.markdown("#### 🕐 Peak Check-in Hours")
+        hourly = db.get_attendance_by_hour(sel_gid)
+        if hourly and _PLOTLY and any(v > 0 for v in hourly.values()):
+            hours  = list(range(24))
+            counts = [hourly.get(h, 0) for h in hours]
+            mx     = max(counts) if max(counts) > 0 else 1
+            colors = ["#F59E0B" if c == mx else "#3B82F6" for c in counts]
+            labels = [f"{h:02d}:00" for h in hours]
+            fig2 = go.Figure(go.Bar(x=labels, y=counts, marker_color=colors,
+                                    hovertemplate="%{x}: %{y} check-ins<extra></extra>"))
+            fig2.update_layout(
+                plot_bgcolor="#0F172A", paper_bgcolor="#0F172A",
+                font=dict(color="#F8FAFC"),
+                margin=dict(l=0, r=0, t=10, b=0),
+                height=240,
+                xaxis=dict(showgrid=False, tickangle=45, tickfont=dict(size=9)),
+                yaxis=dict(showgrid=True, gridcolor="#1E293B"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+            peak_h = max(hourly, key=hourly.get)
+            st.caption(f"🏆 Peak: **{peak_h:02d}:00–{peak_h+1:02d}:00** "
+                       f"({hourly[peak_h]} all-time check-ins)")
+        else:
+            st.info("Not enough data yet for hourly chart.")
+
+    with col_r:
+        st.markdown("#### 🏆 Top Attenders This Month")
+        leaders = db.get_attendance_leaderboard(sel_gid, limit=8)
+        if leaders:
+            for i, ld in enumerate(leaders):
+                m      = ld["member"]
+                streak = ld.get("streak", 0)
+                medal  = ["🥇", "🥈", "🥉"][i] if i < 3 else f"**{i+1}.**"
+                s_badge = f" 🔥{streak}d" if streak >= 3 else ""
+                photo_b64 = get_attendance_photo_b64(m.photo_path or "", m.serial_number or "")
+                img_html = (
+                    f'<img src="{photo_b64}" style="width:32px;height:32px;'
+                    f'border-radius:50%;object-fit:cover;border:1.5px solid #10B981;">'
+                    if photo_b64 else
+                    '<span style="font-size:1.4rem;">👤</span>'
+                )
+                st.markdown(
+                    f"""<div style="display:flex;align-items:center;gap:8px;
+                            padding:5px 0;border-bottom:1px solid #1E293B;">
+                      <span style="font-size:1rem;min-width:22px;">{medal}</span>
+                      {img_html}
+                      <span style="color:#F8FAFC;font-weight:600;flex:1;
+                            font-size:0.88rem;">{m.full_name}</span>
+                      <span style="color:#10B981;font-size:0.82rem;white-space:nowrap;">
+                        {ld['count']}d{s_badge}</span>
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+        else:
+            st.info("No attendance data this month.")
+
+    st.divider()
+
+    # ── Absent Alert Grid ──────────────────────────────────────────────────
+    absent_thresh = st.slider(
+        "🚨 Absent Alert — minimum days absent",
+        min_value=1, max_value=14, value=3, key="att_abs_threshold"
+    )
+    absent_members = db.get_absent_members(days=absent_thresh, gym_id=sel_gid)
+    last_visits    = db.get_all_member_last_visits(sel_gid)
+
+    st.markdown(f"#### 🚨 Members Absent {absent_thresh}+ Days "
+                f"<span style='color:#EF4444;'>({len(absent_members)})</span>",
+                unsafe_allow_html=True)
+
+    if not absent_members:
+        st.success(f"✅ Koi bhi member {absent_thresh}+ din se absent nahi! Zabardast!")
+    else:
+        cols_per_row = 3
+        for i in range(0, len(absent_members), cols_per_row):
+            row_ms = absent_members[i : i + cols_per_row]
+            row_cols = st.columns(cols_per_row)
+            for j, m in enumerate(row_ms):
+                lv = last_visits.get(m.id)
+                if lv:
+                    try:
+                        days_ago  = (date.today() - date.fromisoformat(lv)).days
+                        since_txt = f"📅 {days_ago} din pehle"
+                        color     = "#EF4444" if days_ago >= 7 else "#F59E0B"
+                    except Exception:
+                        since_txt = f"📅 {lv}"; color = "#EF4444"
+                else:
+                    since_txt = "📅 Kabhi nahi aaya"; color = "#9CA3AF"
+
+                photo_b64 = get_attendance_photo_b64(m.photo_path or "", m.serial_number or "")
+                img_html = (
+                    f'<img src="{photo_b64}" style="width:64px;height:64px;object-fit:cover;'
+                    f'border-radius:50%;border:2px solid {color};">'
+                    if photo_b64 else
+                    '<div style="font-size:2.5rem;text-align:center;">👤</div>'
+                )
+                with row_cols[j]:
+                    st.markdown(f"""
+                    <div style="background:#1E293B;border:2px solid {color};
+                         border-radius:12px;padding:12px;text-align:center;margin-bottom:8px;">
+                      <div style="display:flex;justify-content:center;margin-bottom:6px;">
+                        {img_html}
+                      </div>
+                      <div style="color:#F8FAFC;font-weight:700;font-size:0.88rem;
+                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        {m.full_name}</div>
+                      <div style="color:#94A3B8;font-size:0.73rem;">{m.serial_number}</div>
+                      <div style="color:{color};font-size:0.73rem;">{since_txt}</div>
+                      <div style="color:#64748B;font-size:0.7rem;">{m.membership_type or '—'}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Streak Kings ──────────────────────────────────────────────────────
+    st.markdown("#### 🔥 Active Streak Trackers")
+    all_active  = db.get_members(gym_id=sel_gid, status="Active")
+    streak_data = []
+    for m in all_active[:60]:
+        s = db.get_member_streak(m.id)
+        if s >= 3:
+            streak_data.append({"member": m, "streak": s})
+    streak_data.sort(key=lambda x: x["streak"], reverse=True)
+
+    if not streak_data:
+        st.info("Abhi koi member 3+ day streak mein nahi hai. Members ko motivate karein! 💪")
+    else:
+        n_cols = min(len(streak_data), 4)
+        s_cols = st.columns(n_cols)
+        for i, sd in enumerate(streak_data[:8]):
+            m      = sd["member"]
+            s      = sd["streak"]
+            color  = "#EF4444" if s >= 14 else "#F59E0B" if s >= 7 else "#F97316"
+            with s_cols[i % n_cols]:
+                st.markdown(f"""
+                <div style="background:#1E293B;border:2px solid {color};
+                     border-radius:10px;padding:10px;text-align:center;margin-bottom:8px;">
+                  <div style="font-size:1.5rem;">🔥</div>
+                  <div style="color:{color};font-size:1.5rem;font-weight:900;">{s}</div>
+                  <div style="color:#94A3B8;font-size:0.65rem;">day streak</div>
+                  <div style="color:#F8FAFC;font-size:0.75rem;font-weight:600;
+                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    {m.full_name}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Late-Comers Summary ───────────────────────────────────────────────
+    late_summary = db.get_late_members_summary(sel_gid, days=30)
+    if late_summary:
+        st.markdown("#### 🕐 Frequently Late Members (Last 30 Days)")
+        lt_rows = []
+        for ld in late_summary:
+            m = ld["member"]
+            lt_rows.append({
+                "Member": m.full_name,
+                "Serial": m.serial_number,
+                "Late Count (30d)": ld["late_count"],
+                "Type": m.membership_type or "—",
+            })
+        st.dataframe(pd.DataFrame(lt_rows), use_container_width=True, hide_index=True)
+        st.divider()
+
+    # ── AI Insights ───────────────────────────────────────────────────────
+    st.markdown("#### 🤖 AI Attendance Insights")
+
+    if st.button("🤖 Generate AI Insights (Groq)", key="gen_att_ai",
+                 type="primary", use_container_width=True):
+        with st.spinner("AI data analyze kar raha hai..."):
+            try:
+                from groq import Groq
+                client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+                members_total    = len(all_active)
+                att_td           = db.get_attendance(gym_id=sel_gid, check_date=date.today())
+                present_today    = sum(1 for a in att_td if a.status == "Present")
+                pct_today        = round(present_today / members_total * 100) if members_total else 0
+                absent_alert_cnt = len(absent_members)
+
+                recent_trend = db.get_attendance_trend(sel_gid, days=7)
+                trend_txt    = ", ".join([f"{t['date']}: {t['present']}" for t in recent_trend])
+
+                leaders2     = db.get_attendance_leaderboard(sel_gid, limit=3)
+                leaders_txt  = ", ".join(
+                    [f"{ld['member'].full_name} ({ld['count']} din)" for ld in leaders2]
+                ) if leaders2 else "Data nahi"
+
+                prompt = f"""Gym attendance ka professional analysis karo aur Roman Urdu mein actionable insights do:
+
+DATA:
+- Active members: {members_total}
+- Aaj present: {present_today} ({pct_today}%)
+- {absent_thresh}+ din se absent: {absent_alert_cnt} members
+- 7-din trend: {trend_txt}
+- Top attenders: {leaders_txt}
+- Active streaks (3+d): {len(streak_data)} members
+
+5 actionable points do:
+1. Attendance trend (acha/bura kyu)
+2. At-risk members ke liye urgent action
+3. Peak hours optimize karne ke tips
+4. Member retention ke liye strategy
+5. Staff ke liye aaj ka priority task
+
+Roman Urdu mein, concise aur specific raho. Har point mein concrete number ya action ho."""
+
+                resp = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system",
+                         "content": "Tum ek professional gym analytics AI ho. Concise aur actionable raho."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=700,
+                    temperature=0.65,
+                )
+                ai_text = resp.choices[0].message.content
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,#0F172A,#1E1B4B);
+                     border:1px solid #3B82F6;border-radius:14px;padding:1.2rem 1.4rem;
+                     line-height:1.8;color:#E2E8F0;white-space:pre-wrap;">
+                {ai_text}
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e:
+                st.warning(f"AI insights load nahi hue: {e}")
+    else:
+        st.caption("💡 Groq LLaMA-3.3 se live attendance analysis — Roman Urdu mein tips.")
+
+
+# ============================================
 # MAIN RENDER FUNCTION
 # ============================================
 
 def render(gym_id, role, current_user):
     init_session_state()
-    
-    styles.page_header("📅", "Daily Attendance Controls",
-                       "Scan a member's QR code or monitor live AI security logs")
+
+    styles.page_header("📅", "Attendance Management",
+                       "Smart tracking with QR scan, face recognition, analytics & AI alerts")
 
     gyms = db.get_all_gyms()
     if not gyms:
         st.info("Add a gym first.")
         return
 
-    tab_scan, tab_manual, tab_face, tab_view = st.tabs(
-        ["🎯 QR Scan & Main Dashboard AI", "✅ Mark Manually", "📸 Face Check-in", "📊 View Records"]
-    )
+    gym_opts = {g.name: g.id for g in gyms}
 
-    # ── QR Scan & Main Dashboard Intel Tab ───────────────────────────────────
+    # ── Resolve gym at top level so all tabs share it ──────────────────────
+    if gym_id:
+        sel_gid = gym_id
+        gname   = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
+    else:
+        chosen  = st.selectbox("📍 Select Gym", list(gym_opts.keys()),
+                               key="att_main_gym_top")
+        sel_gid = gym_opts[chosen]
+        gname   = chosen
+
+    # ── Live stats bar ──────────────────────────────────────────────────────
+    _today_kpi_bar(sel_gid)
+
+    tab_scan, tab_manual, tab_face, tab_analytics, tab_records = st.tabs([
+        "🎯 QR Scan", "✅ Manual Mark", "📸 Face Check-in",
+        "📊 Analytics", "📋 Records"
+    ])
+
+    # ── Tab 1: QR Scan ────────────────────────────────────────────────────────
     with tab_scan:
         st.components.v1.html(_AUDIO_PRIMER_JS, height=0)
-        gym_opts = {g.name: g.id for g in gyms}
-        if gym_id:
-            sel_gid = gym_id
-            gname = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
-            st.caption(f"📍 Scanning at: **{gname}** · {date.today().isoformat()}")
-        else:
-            chosen = st.selectbox("Select gym (kiosk location)",
-                                  list(gym_opts.keys()), key="qr_scan_gym")
-            sel_gid = gym_opts[chosen]
-            st.caption(f"📍 {date.today().isoformat()}")
+        st.caption(f"📍 Scanning at: **{gname}** · {date.today().isoformat()}")
 
         last = st.session_state.get("qr_last_result")
         if last:
@@ -1120,23 +1466,14 @@ def render(gym_id, role, current_user):
             st.dataframe(df_all, use_container_width=True, hide_index=True,
                          height=min(200, 50 + 35 * len(recent)))
 
-    # ── Mark Manually ────────────────────────────────────────────────────────
+    # ── Tab 2: Manual Mark ────────────────────────────────────────────────────
     with tab_manual:
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            if gym_id:
-                gname = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
-                st.text_input("Gym", value=gname, disabled=True, key="att_gym_display")
-                sel_gid = gym_id
-            else:
-                chosen = st.selectbox("Gym", list(gym_opts.keys()), key="att_gym")
-                sel_gid = gym_opts[chosen]
-
-        with c2:
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            st.text_input("Gym", value=gname, disabled=True, key="att_gym_display")
+        with mc2:
             att_date = st.date_input("Attendance Date", value=date.today(), key="att_date")
-
-        with c3:
+        with mc3:
             st.write("")
             st.write("")
             if st.button("🔄 Reset Today's Marks", use_container_width=True,
@@ -1152,49 +1489,85 @@ def render(gym_id, role, current_user):
         if session_key not in st.session_state:
             st.session_state[session_key] = set(existing.keys())
 
-        marked_ids = st.session_state[session_key]
+        marked_ids     = st.session_state[session_key]
         pending_members = [m for m in all_active_members if m.id not in marked_ids]
-        marked_members = [m for m in all_active_members if m.id in marked_ids]
+        marked_members  = [m for m in all_active_members if m.id in marked_ids]
 
-        s1, s2, s3, s4 = st.columns(4)
-        total = len(all_active_members)
-        done = len(marked_members)
+        total    = len(all_active_members)
+        done     = len(marked_members)
         remaining = len(pending_members)
         progress = (done / total * 100) if total > 0 else 0
+        present_count = sum(1 for _, s in existing.items() if s == "Present")
 
+        s1, s2, s3, s4 = st.columns(4)
         with s1:
-            st.markdown(styles.metric_card("Total Active", total,
-                                           "Members", "purple"), unsafe_allow_html=True)
+            st.markdown(styles.metric_card("Total Active", total, "Members", "purple"),
+                        unsafe_allow_html=True)
         with s2:
-            st.markdown(styles.metric_card("✅ Marked", done,
-                                           f"{progress:.0f}% done", "green"), unsafe_allow_html=True)
+            st.markdown(styles.metric_card("✅ Marked", done, f"{progress:.0f}% done", "green"),
+                        unsafe_allow_html=True)
         with s3:
-            st.markdown(styles.metric_card("⏳ Pending", remaining,
-                                           "Abhi baqi hain", "amber"), unsafe_allow_html=True)
+            st.markdown(styles.metric_card("⏳ Pending", remaining, "Baqi hain", "amber"),
+                        unsafe_allow_html=True)
         with s4:
-            present_count = sum(1 for mid, s in existing.items() if s == "Present")
-            st.markdown(styles.metric_card("🟢 Present", present_count,
-                                           "Aaj aaye", "blue"), unsafe_allow_html=True)
+            st.markdown(styles.metric_card("🟢 Present", present_count, "Aaj aaye", "blue"),
+                        unsafe_allow_html=True)
 
         if total > 0:
             st.progress(done / total, text=f"Progress: {done}/{total} members marked")
 
+        # ── Bulk action buttons ───────────────────────────────────────────
+        st.divider()
+        ba1, ba2, ba3 = st.columns(3)
+        with ba1:
+            if st.button("🚀 Mark ALL Present", use_container_width=True,
+                         type="primary", key="bulk_all_present",
+                         help="Sabhi pending members ko Present mark karo"):
+                count = 0
+                for m in pending_members:
+                    ok, _ = db.mark_attendance(m.id, sel_gid, att_date,
+                                               "Present", current_user)
+                    if ok:
+                        st.session_state[session_key].add(m.id)
+                        count += 1
+                st.toast(f"✅ {count} members Present mark ho gaye!", icon="✅")
+                st.rerun()
+        with ba2:
+            if st.button("❌ Mark ALL Absent", use_container_width=True,
+                         key="bulk_all_absent",
+                         help="Sabhi pending members ko Absent mark karo"):
+                count = 0
+                for m in pending_members:
+                    ok, _ = db.mark_attendance(m.id, sel_gid, att_date,
+                                               "Absent", current_user)
+                    if ok:
+                        st.session_state[session_key].add(m.id)
+                        count += 1
+                st.toast(f"❌ {count} members Absent mark ho gaye!", icon="❌")
+                st.rerun()
+        with ba3:
+            st.caption(f"💡 {remaining} members pending · Bulk mark all pending members at once")
+
         st.divider()
 
-        search_col, info_col = st.columns([2, 1])
-        with search_col:
+        # ── Search + filter ───────────────────────────────────────────────
+        sc1, sc2 = st.columns([2, 1])
+        with sc1:
             search_q = st.text_input("🔍 Search member",
                                      placeholder="Name ya Serial number...",
                                      key="manual_att_search",
                                      label_visibility="collapsed")
-        with info_col:
+        with sc2:
             st.caption("💡 Mark karte jayein — naam list se hat jayega")
 
         if search_q:
-            q = search_q.lower()
+            q_lower = search_q.lower()
             pending_members = [m for m in pending_members
-                               if q in m.full_name.lower()
-                               or q in (m.serial_number or "").lower()]
+                               if q_lower in m.full_name.lower()
+                               or q_lower in (m.serial_number or "").lower()]
+
+        # ── Bulk-load last visits for streak/last-visit badges ────────────
+        last_visits_map = db.get_all_member_last_visits(sel_gid)
 
         st.markdown(f"### 📋 Pending Members ({len(pending_members)})")
 
@@ -1206,26 +1579,62 @@ def render(gym_id, role, current_user):
         else:
             for m in pending_members:
                 with st.container():
-                    col_pic, col_info, col_p, col_a, col_l = st.columns([1.2, 3, 1.2, 1.2, 1.2])
+                    col_pic, col_info, col_p, col_a, col_l = st.columns([1.2, 3.5, 1.1, 1.1, 1.1])
 
                     with col_pic:
-                        show_member_photo(m.photo_path, width=90)
+                        show_member_photo(m.photo_path, width=88)
 
                     with col_info:
+                        # Streak badge
+                        streak = db.get_member_streak(m.id)
+                        streak_html = ""
+                        if streak >= 7:
+                            streak_html = (f'<span style="background:#EF4444;color:#fff;'
+                                           f'border-radius:6px;padding:1px 6px;font-size:0.7rem;'
+                                           f'font-weight:700;">🔥{streak}d streak</span> ')
+                        elif streak >= 3:
+                            streak_html = (f'<span style="background:#F59E0B;color:#000;'
+                                           f'border-radius:6px;padding:1px 6px;font-size:0.7rem;'
+                                           f'font-weight:700;">🔥{streak}d streak</span> ')
+
+                        # Last visit badge
+                        lv = last_visits_map.get(m.id)
+                        if lv:
+                            try:
+                                days_ago = (date.today() - date.fromisoformat(lv)).days
+                                if days_ago == 0:
+                                    lv_html = ('<span style="color:#10B981;font-size:0.72rem;">'
+                                               '📅 Aaj aaya</span>')
+                                elif days_ago <= 2:
+                                    lv_html = (f'<span style="color:#F59E0B;font-size:0.72rem;">'
+                                               f'📅 {days_ago}d ago</span>')
+                                else:
+                                    lv_html = (f'<span style="color:#EF4444;font-size:0.72rem;">'
+                                               f'📅 {days_ago}d ago</span>')
+                            except Exception:
+                                lv_html = f'<span style="color:#94A3B8;font-size:0.72rem;">📅 {lv}</span>'
+                        else:
+                            lv_html = '<span style="color:#64748B;font-size:0.72rem;">📅 Kabhi nahi aaya</span>'
+
+                        # Monthly rate
+                        att_rate = db.get_member_attendance_rate(m.id, days=30)
+                        rate_color = "#10B981" if att_rate >= 70 else "#F59E0B" if att_rate >= 40 else "#EF4444"
+                        rate_html  = (f'<span style="color:{rate_color};font-size:0.72rem;">'
+                                      f'📊 {att_rate}% (30d)</span>')
+
                         st.markdown(
-                            f"""
-                            <div style="padding-top:12px;">
-                                <div style="font-size:1.2rem; font-weight:700; color:#F8FAFC;">
-                                    {m.full_name}
-                                </div>
-                                <div style="font-size:0.9rem; color:#94A3B8;">
-                                    🆔 {m.serial_number} · {m.membership_type or 'N/A'}
-                                </div>
-                                <div style="font-size:0.85rem; color:#64748B;">
-                                    📞 {m.phone or '—'}
-                                </div>
-                            </div>
-                            """,
+                            f"""<div style="padding-top:8px;">
+                              <div style="font-size:1.1rem;font-weight:700;color:#F8FAFC;">
+                                {m.full_name}
+                              </div>
+                              <div style="font-size:0.85rem;color:#94A3B8;margin-top:2px;">
+                                🆔 {m.serial_number} · {m.membership_type or 'N/A'}
+                                &nbsp;📞 {m.phone or '—'}
+                              </div>
+                              <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">
+                                {streak_html}{lv_html}&nbsp;&nbsp;{rate_html}
+                              </div>
+                            </div>""",
                             unsafe_allow_html=True
                         )
 
@@ -1237,7 +1646,7 @@ def render(gym_id, role, current_user):
                                                          "Present", current_user)
                             if ok:
                                 st.session_state[session_key].add(m.id)
-                                st.toast(f"✅ {m.full_name} marked Present", icon="✅")
+                                st.toast(f"✅ {m.full_name}", icon="✅")
                                 st.rerun()
                             else:
                                 st.error(msg)
@@ -1250,7 +1659,7 @@ def render(gym_id, role, current_user):
                                                          "Absent", current_user)
                             if ok:
                                 st.session_state[session_key].add(m.id)
-                                st.toast(f"❌ {m.full_name} marked Absent", icon="❌")
+                                st.toast(f"❌ {m.full_name}", icon="❌")
                                 st.rerun()
                             else:
                                 st.error(msg)
@@ -1263,90 +1672,135 @@ def render(gym_id, role, current_user):
                                                          "Late", current_user)
                             if ok:
                                 st.session_state[session_key].add(m.id)
-                                st.toast(f"🕐 {m.full_name} marked Late", icon="🕐")
+                                st.toast(f"🕐 {m.full_name}", icon="🕐")
                                 st.rerun()
                             else:
                                 st.error(msg)
 
                     st.markdown(
-                        "<hr style='margin:0.5rem 0; border-color:#1E293B;'>",
+                        "<hr style='margin:0.4rem 0;border-color:#1E293B;'>",
                         unsafe_allow_html=True
                     )
 
         if marked_members:
             st.divider()
-            with st.expander(f"✅ Already Marked Today ({len(marked_members)}) — Click to view"):
+            with st.expander(
+                f"✅ Already Marked Today ({len(marked_members)}) — Click to view"
+            ):
+                status_map = {
+                    "Present": "✅ Present", "Absent": "❌ Absent",
+                    "Late": "🕐 Late",     "Excused": "📝 Excused",
+                }
                 marked_rows = []
                 for m in marked_members:
-                    status = existing.get(m.id, "—")
-                    status_emoji = {
-                        "Present": "✅ Present",
-                        "Absent": "❌ Absent",
-                        "Late": "🕐 Late",
-                        "Excused": "📝 Excused"
-                    }.get(status, status)
-
+                    stat = existing.get(m.id, "—")
                     marked_rows.append({
                         "Serial": m.serial_number,
-                        "Name": m.full_name,
-                        "Status": status_emoji,
-                        "Type": m.membership_type or "—",
+                        "Name":   m.full_name,
+                        "Status": status_map.get(stat, stat),
+                        "Type":   m.membership_type or "—",
                     })
-
                 st.dataframe(pd.DataFrame(marked_rows),
                              use_container_width=True, hide_index=True)
+                st.caption("💡 Galti? Upar **'🔄 Reset Today's Marks'** button dabayein.")
 
-                st.caption("💡 Galti se mark kiya? Upar **'🔄 Reset Today's Marks'** button dabayein.")
-
-    # ========== TAB 3: FACE RECOGNITION ==========
+    # ── Tab 3: Face Recognition ───────────────────────────────────────────────
     with tab_face:
         render_face_recognition_tab(gym_id, role, current_user, gyms)
 
-    # ── View Records ──────────────────────────────────────────────────────────
-    with tab_view:
-        vc1, vc2, vc3 = st.columns(3)
-        with vc1:
-            if gym_id:
-                vgid = gym_id
-                st.text_input("Gym",
-                              value=next((g.name for g in gyms if g.id == gym_id), ""),
-                              disabled=True, key="vatt_gym_display")
-            else:
-                chosen2 = st.selectbox("Gym", list(gym_opts.keys()),
-                                       key="vatt_gym")
-                vgid = gym_opts[chosen2]
-        with vc2:
-            vdate = st.date_input("Date", value=date.today(), key="vatt_date")
-        with vc3:
+    # ── Tab 4: Analytics ──────────────────────────────────────────────────────
+    with tab_analytics:
+        _render_analytics_tab(sel_gid, role, current_user)
+
+    # ── Tab 5: Records (Date-Range + Export) ──────────────────────────────────
+    with tab_records:
+        st.markdown("### 📋 Attendance Records")
+
+        rc1, rc2, rc3, rc4 = st.columns([2, 2, 1.2, 1.2])
+        with rc1:
+            date_range = st.date_input(
+                "📅 Date Range",
+                value=(date.today() - timedelta(days=6), date.today()),
+                key="rec_date_range",
+            )
+        with rc2:
+            status_choices = ["All", "Present", "Absent", "Late", "Excused"]
+            status_filter  = st.selectbox("Status Filter", status_choices,
+                                          key="rec_status_filter")
+        with rc3:
+            name_search = st.text_input("🔍 Name / Serial", key="rec_name_search",
+                                        label_visibility="collapsed",
+                                        placeholder="Name / Serial…")
+        with rc4:
             st.write("")
-            st.write("")
-            if st.button("🔄 Fix Photo Orientations", use_container_width=True,
-                        help="Clear photo cache and reload with correct orientation"):
+            if st.button("🔄 Clear Cache", use_container_width=True,
+                         help="Clear photo cache"):
                 st.session_state.attendance_photo_cache = {}
-                st.success("✅ Photo cache cleared! Images will reload with correct orientation.")
                 st.rerun()
 
-        records = db.get_attendance(gym_id=vgid, check_date=vdate)
-        members_map = {m.id: m for m in db.get_members(gym_id=vgid)}
-        if records:
-            rows = []
-            present = 0
-            for r in records:
-                m = members_map.get(r.member_id)
-                if r.status == "Present":
-                    present += 1
-                rows.append({
-                    "Serial": m.serial_number if m else "—",
-                    "Name": m.full_name if m else "—",
-                    "Status": r.status,
-                    "Marked By": r.marked_by or "—",
-                    "Time": r.created_at.strftime("%H:%M") if r.created_at else "—",
-                })
-            mc1, mc2, mc3 = st.columns(3)
-            mc1.metric("Total Marked", len(records))
-            mc2.metric("Present", present)
-            mc3.metric("Absent / Other", len(records) - present)
-            st.dataframe(pd.DataFrame(rows), use_container_width=True,
-                         hide_index=True)
+        # resolve date range
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            from_date, to_date = date_range
         else:
-            st.info(f"No attendance records for {vdate}.")
+            from_date = to_date = (date_range if not isinstance(date_range, (list, tuple))
+                                   else date_range[0])
+
+        records = db.get_attendance_range(
+            gym_id=sel_gid,
+            from_date=from_date,
+            to_date=to_date,
+            status_filter=status_filter if status_filter != "All" else None,
+        )
+        members_map = {m.id: m for m in db.get_members(gym_id=sel_gid)}
+
+        # Build rows
+        rows = []
+        for r in records:
+            m = members_map.get(r.member_id)
+            name   = (m.full_name if m else "—")
+            serial = (m.serial_number if m else "—")
+            mtype  = (m.membership_type if m else "—")
+            if name_search:
+                q_s = name_search.lower()
+                if q_s not in name.lower() and q_s not in serial.lower():
+                    continue
+            rows.append({
+                "Date":      r.check_date,
+                "Serial":    serial,
+                "Name":      name,
+                "Status":    r.status,
+                "Type":      mtype or "—",
+                "Marked By": r.marked_by or "—",
+                "Time":      r.created_at.strftime("%H:%M") if r.created_at else "—",
+            })
+
+        # KPI strip
+        total_r   = len(rows)
+        present_r = sum(1 for r in rows if r["Status"] == "Present")
+        absent_r  = sum(1 for r in rows if r["Status"] == "Absent")
+        late_r    = sum(1 for r in rows if r["Status"] == "Late")
+        rate_r    = round(present_r / total_r * 100) if total_r else 0
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Total Records", total_r)
+        k2.metric("✅ Present", present_r)
+        k3.metric("❌ Absent", absent_r)
+        k4.metric("🕐 Late", late_r)
+        k5.metric("📊 Attendance %", f"{rate_r}%")
+
+        if rows:
+            df_rec = pd.DataFrame(rows)
+            st.dataframe(df_rec, use_container_width=True, hide_index=True)
+
+            # ── Export CSV ────────────────────────────────────────────
+            csv_buf = io.StringIO()
+            df_rec.to_csv(csv_buf, index=False)
+            st.download_button(
+                label="⬇️ Export to CSV",
+                data=csv_buf.getvalue().encode("utf-8"),
+                file_name=f"attendance_{from_date}_{to_date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        else:
+            st.info(f"Is period mein koi records nahi hain ({from_date} — {to_date}).")

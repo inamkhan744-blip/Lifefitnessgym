@@ -1170,6 +1170,107 @@ def get_attendance_by_hour(gym_id=None):
         db.close()
 
 
+def get_attendance_trend(gym_id=None, days=30):
+    """Daily attendance count for last N days — for trend charts"""
+    session = get_db()
+    try:
+        today = date.today()
+        results = []
+        for i in range(days - 1, -1, -1):
+            d = today - timedelta(days=i)
+            base = session.query(Attendance).filter(Attendance.check_date == str(d))
+            if gym_id:
+                base = base.filter(Attendance.gym_id == gym_id)
+            recs = base.all()
+            results.append({
+                "date":    d.strftime("%d %b"),
+                "present": sum(1 for r in recs if r.status == "Present"),
+                "absent":  sum(1 for r in recs if r.status == "Absent"),
+                "late":    sum(1 for r in recs if r.status == "Late"),
+            })
+        return results
+    finally:
+        session.close()
+
+
+def get_all_member_last_visits(gym_id=None):
+    """Bulk-fetch last Present date per member — {member_id: date_str}"""
+    session = get_db()
+    try:
+        q = session.query(
+            Attendance.member_id,
+            func.max(Attendance.check_date).label("last_date")
+        ).filter(Attendance.status == "Present")
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        rows = q.group_by(Attendance.member_id).all()
+        return {r.member_id: r.last_date for r in rows}
+    finally:
+        session.close()
+
+
+def get_member_attendance_rate(member_id, days=30):
+    """Attendance % for a member over last N days"""
+    session = get_db()
+    try:
+        today = date.today()
+        cutoff = str(today - timedelta(days=days))
+        present = session.query(func.count(Attendance.id)).filter(
+            Attendance.member_id == member_id,
+            Attendance.check_date >= cutoff,
+            Attendance.status == "Present"
+        ).scalar() or 0
+        return round(present / days * 100, 1)
+    finally:
+        session.close()
+
+
+def get_late_members_summary(gym_id=None, days=30):
+    """Members with most Late markings in last N days"""
+    session = get_db()
+    try:
+        today = date.today()
+        cutoff = str(today - timedelta(days=days))
+        q = session.query(
+            Attendance.member_id,
+            func.count(Attendance.id).label("late_count")
+        ).filter(
+            Attendance.status == "Late",
+            Attendance.check_date >= cutoff
+        )
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        rows = q.group_by(Attendance.member_id).order_by(
+            func.count(Attendance.id).desc()
+        ).limit(10).all()
+        results = []
+        for row in rows:
+            m = session.query(Member).filter_by(id=row.member_id).first()
+            if m:
+                results.append({"member": m, "late_count": row.late_count})
+        return results
+    finally:
+        session.close()
+
+
+def get_attendance_range(gym_id=None, from_date=None, to_date=None, status_filter=None):
+    """Get attendance records for a date range with optional status filter"""
+    session = get_db()
+    try:
+        q = session.query(Attendance)
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        if from_date:
+            q = q.filter(Attendance.check_date >= str(from_date))
+        if to_date:
+            q = q.filter(Attendance.check_date <= str(to_date))
+        if status_filter and status_filter != "All":
+            q = q.filter(Attendance.status == status_filter)
+        return q.order_by(Attendance.check_date.desc(), Attendance.created_at.desc()).all()
+    finally:
+        session.close()
+
+
 # ── Fee Records ────────────────────────────────────────────────────────────────
 
 def add_fee_record(member_id, gym_id, amount, payment_method, payment_date,
