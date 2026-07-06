@@ -10,21 +10,52 @@ import database as db
 # YOUTUBE SEARCH FUNCTION
 # ============================================
 
-def search_youtube(query: str, max_results: int = 8) -> list:
-    """Search YouTube and return video IDs"""
+def search_youtube(query: str, max_results: int = 10) -> list:
+    """Search YouTube; return list of {id, title} dicts."""
     try:
-        search_url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-        
-        response = requests.get(search_url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }, timeout=10)
-        
-        video_ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', response.text)
-        video_ids = list(dict.fromkeys(video_ids))  # Remove duplicates
-        
-        return video_ids[:max_results]
+        import json as _json
+        url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+        resp = requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }, timeout=12)
+
+        # Try to extract rich JSON embedded in page
+        m = re.search(r'var ytInitialData\s*=\s*(\{.*?\});\s*</script>', resp.text, re.DOTALL)
+        if m:
+            try:
+                data = _json.loads(m.group(1))
+                section = (data.get("contents", {})
+                              .get("twoColumnSearchResultsRenderer", {})
+                              .get("primaryContents", {})
+                              .get("sectionListRenderer", {})
+                              .get("contents", [{}])[0]
+                              .get("itemSectionRenderer", {})
+                              .get("contents", []))
+                results = []
+                for item in section:
+                    vr = item.get("videoRenderer", {})
+                    vid_id = vr.get("videoId", "")
+                    title_runs = vr.get("title", {}).get("runs", [])
+                    title = title_runs[0].get("text", "Unknown") if title_runs else "Unknown"
+                    duration = (vr.get("lengthText", {}).get("simpleText", "") or
+                                vr.get("lengthText", {}).get("accessibility", {})
+                                   .get("accessibilityData", {}).get("label", ""))
+                    thumb = f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"
+                    if vid_id:
+                        results.append({"id": vid_id, "title": title,
+                                        "duration": duration, "thumb": thumb})
+                if results:
+                    return results[:max_results]
+            except Exception:
+                pass
+
+        # Fallback: extract IDs only
+        ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)))
+        return [{"id": v, "title": f"Track {i+1}", "duration": "",
+                 "thumb": f"https://img.youtube.com/vi/{v}/mqdefault.jpg"}
+                for i, v in enumerate(ids[:max_results])]
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"YouTube search error: {e}")
         return []
 
 def extract_youtube_id(url_or_id: str) -> str:
@@ -100,32 +131,28 @@ SYSTEM_PROMPT = (
 # ============================================
 
 def _init_state():
-    if "ai_chat_history" not in st.session_state:
-        st.session_state["ai_chat_history"] = []
-    if "ai_input_counter" not in st.session_state:
-        st.session_state["ai_input_counter"] = 0
-    if "ai_last_question" not in st.session_state:
-        st.session_state["ai_last_question"] = ""
-    if "speak_trigger" not in st.session_state:
-        st.session_state["speak_trigger"] = None
-    if "auto_speak" not in st.session_state:
-        st.session_state["auto_speak"] = True
-    
-    # Music Player
-    if "music_results" not in st.session_state:
-        st.session_state["music_results"] = []
-    if "music_search" not in st.session_state:
-        st.session_state["music_search"] = ""
-    if "active_music" not in st.session_state:
-        st.session_state["active_music"] = None
-    
-    # Video Player
-    if "video_results" not in st.session_state:
-        st.session_state["video_results"] = []
-    if "video_search" not in st.session_state:
-        st.session_state["video_search"] = ""
-    if "active_video" not in st.session_state:
-        st.session_state["active_video"] = None
+    defaults = {
+        "ai_chat_history": [],
+        "ai_input_counter": 0,
+        "ai_last_question": "",
+        "speak_trigger": None,
+        "auto_speak": False,
+        # Music
+        "music_results": [],        # list of {id, title, duration, thumb}
+        "music_search": "",
+        "active_music": None,       # current video_id string
+        "active_music_title": "",
+        "music_queue": [],          # full result list for prev/next
+        "music_queue_idx": 0,
+        # Video
+        "video_results": [],        # list of {id, title, duration, thumb}
+        "video_search": "",
+        "active_video": None,
+        "active_video_title": "",
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 # ============================================
 # HELPER FUNCTIONS
@@ -461,170 +488,385 @@ def render_sidebar_widget(current_page: str, gym_id=None, role="staff", username
 # 🎵 MUSIC PLAYER - SEARCH ANY SONG
 # ============================================
 
+_MUSIC_GENRES = [
+    ("🏋️ Workout", "gym workout motivation music"),
+    ("🇵🇰 Pakistani", "Pakistani pop songs 2024"),
+    ("🎬 Bollywood", "Bollywood hits 2024"),
+    ("⚡ EDM", "EDM workout gym music"),
+    ("☕ Lofi", "lofi hip hop study chill"),
+    ("🎤 Hip-Hop", "hip hop rap workout"),
+    ("🎸 Punjabi", "Punjabi songs 2024"),
+    ("🕌 Naat", "naat sharif new 2024"),
+]
+
 def _music_player():
-    st.markdown("### 🎵 Music Player")
-    st.caption("🔍 Koi bhi song, artist, ya genre search karein!")
-    
-    # Quick suggestions
-    st.markdown("**⚡ Quick Suggestions:**")
-    quick_suggestions = ["Atif Aslam", "Dil Dil Pakistan", "Arijit Singh", "Taylor Swift", "Workout Music", "EDM", "Lofi", "Hindi Songs"]
-    cols = st.columns(4)
-    for i, suggestion in enumerate(quick_suggestions[:4]):
-        if cols[i % 4].button(suggestion, key=f"qs_music_{i}", use_container_width=True):
-            st.session_state['music_search_input'] = suggestion
-            st.rerun()
-    
-    st.markdown("---")
-    
-    # Search
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_query = st.text_input(
-            "🎵 Search Song / Artist:",
-            placeholder="e.g. Atif Aslam, Fitness Motivation...",
-            key="music_search_input",
-            label_visibility="collapsed"
-        )
-    with col2:
-        if st.button("🔍 Search", key="music_search_btn", type="primary", use_container_width=True):
-            if search_query:
-                with st.spinner(f"🎵 Searching '{search_query}'..."):
-                    results = search_youtube(search_query, max_results=8)
-                    if results:
-                        st.session_state['music_results'] = results
-                        st.session_state['music_search'] = search_query
-                        st.rerun()
-                    else:
-                        st.error("❌ No results found")
-    
-    # Show results
-    if st.session_state['music_results']:
-        results = st.session_state['music_results']
-        search = st.session_state.get('music_search', '')
-        
-        st.success(f"🎵 {len(results)} songs found for '{search}'")
-        
-        cols = st.columns(2)
-        for i, video_id in enumerate(results):
-            col_idx = i % 2
-            with cols[col_idx]:
-                with st.container(border=True):
-                    thumb_url = f"https://img.youtube.com/vi/{video_id}/default.jpg"
-                    st.image(thumb_url, use_container_width=True)
-                    
-                    if st.button(f"▶️ Play", key=f"music_play_{i}", use_container_width=True, type="primary"):
-                        st.session_state['active_music'] = video_id
-                        st.rerun()
-        
-        if st.button("🗑️ Clear Results", key="music_clear", use_container_width=True):
-            st.session_state['music_results'] = []
-            st.session_state['music_search'] = ""
-            st.rerun()
-    
-    # Active player
-    if st.session_state.get('active_music'):
-        video_id = st.session_state['active_music']
-        
-        st.divider()
-        st.markdown(f"### 🎵 Now Playing")
-        
+    _init_state()
+
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0F172A,#1E1B4B);border-radius:16px;
+                padding:1.2rem 1.5rem;margin-bottom:1rem;">
+        <h2 style="margin:0;font-size:1.5rem;">🎵 Music Player</h2>
+        <p style="margin:0;color:#94A3B8;font-size:0.9rem;">
+            Search any song • Queue navigation • Continues across pages
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Now playing bar (always visible at top if something is playing)
+    vid   = st.session_state.get("active_music")
+    title = st.session_state.get("active_music_title", "")
+    queue = st.session_state.get("music_queue", [])
+    idx   = st.session_state.get("music_queue_idx", 0)
+
+    if vid:
         st.markdown(f"""
-            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;background:#000;">
-                <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                    src="https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0" 
-                    frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" 
-                    allowfullscreen>
-                </iframe>
+        <div style="background:linear-gradient(90deg,#1E3A5F,#1E1B4B);border:1px solid #3B82F6;
+                    border-radius:12px;padding:0.8rem 1rem;margin-bottom:1rem;
+                    display:flex;align-items:center;gap:0.6rem;">
+            <span style="font-size:1.4rem;">🎵</span>
+            <div>
+                <div style="color:#60A5FA;font-weight:700;font-size:0.85rem;">NOW PLAYING</div>
+                <div style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{title[:70]}</div>
             </div>
+        </div>
         """, unsafe_allow_html=True)
-        
-        if st.button("❌ Stop Music", use_container_width=True):
-            st.session_state['active_music'] = None
+
+        # Player embed — stays alive across page changes via persistent bar
+        st.markdown(f"""
+        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;
+                    border-radius:12px;background:#000;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                src="https://www.youtube.com/embed/{vid}?autoplay=1&rel=0&modestbranding=1"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen>
+            </iframe>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            if st.button("⏮ Prev", key="music_prev", use_container_width=True):
+                if queue and idx > 0:
+                    new_idx = idx - 1
+                    st.session_state["music_queue_idx"]   = new_idx
+                    st.session_state["active_music"]      = queue[new_idx]["id"]
+                    st.session_state["active_music_title"] = queue[new_idx]["title"]
+                    st.rerun()
+        with c2:
+            if st.button("⏭ Next", key="music_next", use_container_width=True):
+                if queue and idx < len(queue) - 1:
+                    new_idx = idx + 1
+                    st.session_state["music_queue_idx"]   = new_idx
+                    st.session_state["active_music"]      = queue[new_idx]["id"]
+                    st.session_state["active_music_title"] = queue[new_idx]["title"]
+                    st.rerun()
+        with c3:
+            if queue:
+                st.caption(f"Track {idx+1}/{len(queue)}")
+        with c4:
+            if st.button("⏹ Stop", key="music_stop", use_container_width=True):
+                st.session_state["active_music"]      = None
+                st.session_state["active_music_title"] = ""
+                st.rerun()
+
+        st.divider()
+
+    # Genre presets
+    st.markdown("#### 🎛️ Genre / Mood — Ek Click Mein")
+    g_cols = st.columns(4)
+    for i, (label, query) in enumerate(_MUSIC_GENRES):
+        if g_cols[i % 4].button(label, key=f"genre_{i}", use_container_width=True):
+            with st.spinner(f"🎵 {label} load ho raha hai..."):
+                res = search_youtube(query, max_results=10)
+            if res:
+                st.session_state["music_results"]     = res
+                st.session_state["music_search"]      = label
+                st.session_state["music_queue"]       = res
+                st.session_state["music_queue_idx"]   = 0
+                st.session_state["active_music"]      = res[0]["id"]
+                st.session_state["active_music_title"] = res[0]["title"]
+                st.rerun()
+            else:
+                st.error("Nahi mila, dobara try karein")
+
+    st.divider()
+
+    # Custom search
+    st.markdown("#### 🔍 Custom Search")
+    s1, s2 = st.columns([4, 1])
+    with s1:
+        query_input = st.text_input("", placeholder="e.g. Atif Aslam, Nusrat Fateh Ali Khan, gym beats...",
+                                    key="music_search_input", label_visibility="collapsed")
+    with s2:
+        do_search = st.button("Search 🔍", key="music_search_btn", type="primary", use_container_width=True)
+
+    if do_search and query_input.strip():
+        with st.spinner(f"Searching '{query_input}'..."):
+            res = search_youtube(query_input.strip(), max_results=10)
+        if res:
+            st.session_state["music_results"] = res
+            st.session_state["music_search"]  = query_input.strip()
+            st.session_state["music_queue"]   = res
+            st.session_state["music_queue_idx"] = 0
+            st.rerun()
+        else:
+            st.error("❌ Koi result nahi mila. Aur kuch try karein.")
+
+    # Results grid
+    results = st.session_state.get("music_results", [])
+    if results:
+        search_label = st.session_state.get("music_search", "")
+        st.success(f"🎵 **{len(results)} tracks** — *{search_label}*")
+        cols = st.columns(2)
+        for i, track in enumerate(results):
+            with cols[i % 2]:
+                is_active = (track["id"] == st.session_state.get("active_music"))
+                border_color = "#3B82F6" if is_active else "#1E293B"
+                st.markdown(f"""
+                <div style="border:2px solid {border_color};border-radius:10px;overflow:hidden;
+                            background:#0F172A;margin-bottom:0.5rem;">
+                    <img src="{track['thumb']}" style="width:100%;height:120px;object-fit:cover;"
+                         onerror="this.src='https://img.youtube.com/vi/{track['id']}/default.jpg'"/>
+                    <div style="padding:0.4rem 0.6rem;">
+                        <div style="font-size:0.78rem;color:#E2E8F0;font-weight:600;
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                             title="{track['title']}">{track['title'][:55]}</div>
+                        <div style="font-size:0.7rem;color:#64748B;">{track.get('duration','')}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                lbl = "▶️ Playing" if is_active else "▶️ Play"
+                if st.button(lbl, key=f"mplay_{i}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["active_music"]      = track["id"]
+                    st.session_state["active_music_title"] = track["title"]
+                    st.session_state["music_queue"]       = results
+                    st.session_state["music_queue_idx"]   = i
+                    st.rerun()
+
+        if st.button("🗑️ Clear Results", key="music_clear", use_container_width=True):
+            st.session_state["music_results"] = []
+            st.session_state["music_search"]  = ""
             st.rerun()
 
 # ============================================
 # 🎬 VIDEO PLAYER - SEARCH ANY VIDEO
 # ============================================
 
+_VIDEO_CATEGORIES = [
+    ("💪 Chest",         "best chest workout gym"),
+    ("🦵 Legs",          "leg workout gym training"),
+    ("🔙 Back",          "back workout gym training"),
+    ("🏃 Cardio",        "cardio HIIT workout"),
+    ("🧘 Yoga",          "yoga for beginners flexibility"),
+    ("⚡ HIIT",          "HIIT fat burn workout"),
+    ("🥗 Diet Tips",     "gym diet plan for muscle gain"),
+    ("🏋️ Motivation",   "gym motivation bodybuilding"),
+    ("💊 Supplements",   "best supplements for gym beginners"),
+    ("🧠 Mind & Body",   "mindfulness meditation stress relief"),
+    ("🇵🇰 Desi Fitness", "Pakistani fitness training urdu"),
+    ("🤸 Flexibility",   "stretching flexibility full body"),
+]
+
 def _video_player():
-    st.markdown("### 🎬 Video Player")
-    st.caption("🔍 Koi bhi workout, exercise, ya informative video search karein!")
-    
-    # Quick suggestions
-    st.markdown("**⚡ Quick Suggestions:**")
-    quick_suggestions = ["Chest Workout", "Yoga for Beginners", "Cardio", "Full Body Workout", "Gym Motivation", "Weight Loss"]
-    cols = st.columns(3)
-    for i, suggestion in enumerate(quick_suggestions[:3]):
-        if cols[i].button(suggestion, key=f"qs_video_{i}", use_container_width=True):
-            st.session_state['video_search_input'] = suggestion
-            st.rerun()
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_query = st.text_input(
-            "🔍 Search Video:",
-            placeholder="e.g. Chest workout, Yoga, Cardio...",
-            key="video_search_input",
-            label_visibility="collapsed"
-        )
-    with col2:
-        if st.button("🔍 Search", key="video_search_btn", type="primary", use_container_width=True):
-            if search_query:
-                with st.spinner(f"🔍 Searching '{search_query}'..."):
-                    results = search_youtube(search_query, max_results=6)
-                    if results:
-                        st.session_state['video_results'] = results
-                        st.session_state['video_search'] = search_query
-                        st.rerun()
-                    else:
-                        st.error("❌ No results found")
-    
-    # Show results
-    if st.session_state['video_results']:
-        results = st.session_state['video_results']
-        search = st.session_state.get('video_search', '')
-        
-        st.success(f"📹 {len(results)} videos found for '{search}'")
-        
-        cols = st.columns(3)
-        for i, video_id in enumerate(results):
-            col_idx = i % 3
-            with cols[col_idx]:
-                with st.container(border=True):
-                    thumb_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
-                    st.image(thumb_url, use_container_width=True)
-                    
-                    if st.button(f"▶️ Play", key=f"video_play_{i}", use_container_width=True, type="primary"):
-                        st.session_state['active_video'] = video_id
-                        st.rerun()
-        
-        if st.button("🗑️ Clear Results", key="video_clear", use_container_width=True):
-            st.session_state['video_results'] = []
-            st.session_state['video_search'] = ""
-            st.rerun()
-    
-    # Active player
-    if st.session_state.get('active_video'):
-        video_id = st.session_state['active_video']
-        
-        st.divider()
-        st.markdown(f"### ▶️ Now Playing")
-        
+    _init_state()
+
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0F172A,#1A1037);border-radius:16px;
+                padding:1.2rem 1.5rem;margin-bottom:1rem;">
+        <h2 style="margin:0;font-size:1.5rem;">🎬 Video Player</h2>
+        <p style="margin:0;color:#94A3B8;font-size:0.9rem;">
+            Workout tutorials • Exercise guides • Nutrition tips
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Active player — always at top when something is playing
+    active_vid   = st.session_state.get("active_video")
+    active_title = st.session_state.get("active_video_title", "")
+
+    if active_vid:
         st.markdown(f"""
-            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;background:#000;">
-                <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                    src="https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0" 
-                    frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" 
-                    allowfullscreen>
-                </iframe>
-            </div>
+        <div style="background:linear-gradient(90deg,#1C1937,#0F172A);border:1px solid #8B5CF6;
+                    border-radius:12px;padding:0.7rem 1rem;margin-bottom:0.8rem;">
+            <span style="color:#A78BFA;font-weight:700;font-size:0.8rem;">▶ NOW PLAYING</span><br/>
+            <span style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{active_title[:80]}</span>
+        </div>
         """, unsafe_allow_html=True)
-        
-        if st.button("❌ Stop Video", use_container_width=True):
-            st.session_state['active_video'] = None
+
+        st.markdown(f"""
+        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;
+                    border-radius:14px;background:#000;box-shadow:0 8px 32px rgba(0,0,0,0.6);
+                    margin-bottom:0.8rem;">
+            <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                src="https://www.youtube.com/embed/{active_vid}?autoplay=1&rel=0&modestbranding=1"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen>
+            </iframe>
+        </div>
+        """, unsafe_allow_html=True)
+
+        cv1, cv2 = st.columns([4, 1])
+        with cv2:
+            if st.button("⏹ Stop", key="video_stop_top", use_container_width=True):
+                st.session_state["active_video"]       = None
+                st.session_state["active_video_title"] = ""
+                st.rerun()
+        st.divider()
+
+    # Category presets
+    st.markdown("#### 🏷️ Categories — Ek Click Mein")
+    cat_cols = st.columns(4)
+    for i, (label, query) in enumerate(_VIDEO_CATEGORIES):
+        if cat_cols[i % 4].button(label, key=f"vcat_{i}", use_container_width=True):
+            with st.spinner(f"🔍 {label} videos dhundh raha hoon..."):
+                res = search_youtube(query, max_results=9)
+            if res:
+                st.session_state["video_results"]      = res
+                st.session_state["video_search"]       = label
+                st.rerun()
+            else:
+                st.error("Nahi mila, dobara try karein")
+
+    st.divider()
+
+    # Custom search
+    st.markdown("#### 🔍 Custom Search")
+    vs1, vs2 = st.columns([4, 1])
+    with vs1:
+        v_query = st.text_input("", placeholder="e.g. Shoulder workout, Weight loss tips, Protein diet...",
+                                key="video_search_input", label_visibility="collapsed")
+    with vs2:
+        do_vsearch = st.button("Search 🔍", key="video_search_btn", type="primary", use_container_width=True)
+
+    if do_vsearch and v_query.strip():
+        with st.spinner(f"Searching '{v_query}'..."):
+            res = search_youtube(v_query.strip(), max_results=9)
+        if res:
+            st.session_state["video_results"] = res
+            st.session_state["video_search"]  = v_query.strip()
             st.rerun()
+        else:
+            st.error("❌ Koi video nahi mila. Kuch aur try karein.")
+
+    # Results grid — 3 columns with titles
+    results = st.session_state.get("video_results", [])
+    if results:
+        search_label = st.session_state.get("video_search", "")
+        st.success(f"📹 **{len(results)} videos** — *{search_label}*")
+        cols3 = st.columns(3)
+        for i, track in enumerate(results):
+            with cols3[i % 3]:
+                is_active = (track["id"] == active_vid)
+                border_col = "#8B5CF6" if is_active else "#1E293B"
+                st.markdown(f"""
+                <div style="border:2px solid {border_col};border-radius:10px;overflow:hidden;
+                            background:#0F172A;margin-bottom:0.5rem;">
+                    <img src="{track['thumb']}" style="width:100%;height:110px;object-fit:cover;"
+                         onerror="this.src='https://img.youtube.com/vi/{track['id']}/default.jpg'"/>
+                    <div style="padding:0.4rem 0.6rem;">
+                        <div style="font-size:0.74rem;color:#E2E8F0;font-weight:600;
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                             title="{track['title']}">{track['title'][:50]}</div>
+                        <div style="font-size:0.68rem;color:#64748B;">{track.get('duration','')}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                lbl = "▶️ Playing" if is_active else "▶️ Play"
+                if st.button(lbl, key=f"vplay_{i}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["active_video"]       = track["id"]
+                    st.session_state["active_video_title"] = track["title"]
+                    st.rerun()
+
+        if st.button("🗑️ Clear Results", key="video_clear", use_container_width=True):
+            st.session_state["video_results"] = []
+            st.session_state["video_search"]  = ""
+            st.rerun()
+
+
+# ============================================
+# 🎵 PERSISTENT SIDEBAR MUSIC BAR
+# ============================================
+
+def render_persistent_music_bar():
+    """
+    Render a compact music mini-player in the sidebar.
+    Uses st.components.v1.html so the YouTube iframe stays alive across page
+    navigations — as long as the video_id doesn't change, Streamlit's React
+    reconciler keeps the same iframe node and music keeps playing.
+    """
+    import streamlit.components.v1 as components
+
+    _init_state()
+    vid   = st.session_state.get("active_music")
+    title = st.session_state.get("active_music_title", "")
+    queue = st.session_state.get("music_queue", [])
+    idx   = st.session_state.get("music_queue_idx", 0)
+
+    if not vid:
+        return  # nothing to show
+
+    # Build the mini-player HTML — must be byte-for-byte identical across reruns
+    # for the SAME song so React doesn't remount the iframe.
+    html = f"""
+<!DOCTYPE html><html><head>
+<style>
+  * {{ margin:0;padding:0;box-sizing:border-box; }}
+  body {{ background:#0F172A;font-family:system-ui,sans-serif;overflow:hidden; }}
+  .bar {{ display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:linear-gradient(90deg,#1E3A5F,#1E1B4B);
+          border-radius:10px;border:1px solid #3B82F6; }}
+  .ico {{ font-size:20px;flex-shrink:0; }}
+  .info {{ flex:1;min-width:0; }}
+  .label {{ color:#60A5FA;font-size:9px;font-weight:700;text-transform:uppercase;
+            letter-spacing:.05em; }}
+  .song {{ color:#F1F5F9;font-size:11px;font-weight:600;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }}
+  iframe {{ width:100%;height:52px;border:none;border-radius:8px;margin-top:6px; }}
+</style></head>
+<body>
+<div class="bar">
+  <div class="ico">🎵</div>
+  <div class="info">
+    <div class="label">Now Playing</div>
+    <div class="song" title="{title}">{title[:60]}</div>
+  </div>
+</div>
+<iframe src="https://www.youtube.com/embed/{vid}?autoplay=1&rel=0&modestbranding=1"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+  allowfullscreen></iframe>
+</body></html>
+"""
+    components.html(html, height=130, scrolling=False)
+
+    # Controls below the component
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("⏮", key="pmb_prev", use_container_width=True, help="Previous track"):
+            if queue and idx > 0:
+                ni = idx - 1
+                st.session_state["music_queue_idx"]    = ni
+                st.session_state["active_music"]       = queue[ni]["id"]
+                st.session_state["active_music_title"] = queue[ni]["title"]
+                st.rerun()
+    with c2:
+        if st.button("⏭", key="pmb_next", use_container_width=True, help="Next track"):
+            if queue and idx < len(queue) - 1:
+                ni = idx + 1
+                st.session_state["music_queue_idx"]    = ni
+                st.session_state["active_music"]       = queue[ni]["id"]
+                st.session_state["active_music_title"] = queue[ni]["title"]
+                st.rerun()
+    with c3:
+        if st.button("⏹", key="pmb_stop", use_container_width=True, help="Stop music"):
+            st.session_state["active_music"]       = None
+            st.session_state["active_music_title"] = ""
+            st.rerun()
+    if queue:
+        st.caption(f"🎵 {idx+1}/{len(queue)} — go to **AI Assistant → Music** for more")
 
 # ============================================
 # 💬 CHAT TAB

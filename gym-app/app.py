@@ -299,6 +299,11 @@ with st.sidebar:
 
     st.divider()
 
+    # Persistent music mini-player (stays playing across page changes)
+    ai_assistant.render_persistent_music_bar()
+
+    st.divider()
+
     # Persistent AI chat widget
     ai_assistant.render_sidebar_widget(
         current_page=st.session_state.get("page", "Dashboard"),
