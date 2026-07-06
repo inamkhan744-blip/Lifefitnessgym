@@ -10,52 +10,143 @@ import database as db
 # YOUTUBE SEARCH FUNCTION
 # ============================================
 
+def _fmt_duration(secs) -> str:
+    """Convert seconds to mm:ss or hh:mm:ss string."""
+    try:
+        s = int(secs)
+        h, rem = divmod(s, 3600)
+        m, sc  = divmod(rem, 60)
+        return f"{h}:{m:02d}:{sc:02d}" if h else f"{m}:{sc:02d}"
+    except Exception:
+        return ""
+
+
+# Simple in-process cache: {query_key: [results]}
+_YT_CACHE: dict = {}
+
+
 def search_youtube(query: str, max_results: int = 10) -> list:
-    """Search YouTube; return list of {id, title} dicts."""
+    """
+    Search YouTube using yt-dlp (handles bot detection automatically).
+    Falls back to Invidious API, then to direct scraping if both fail.
+    Returns list of {id, title, duration, thumb} dicts.
+    """
+    cache_key = f"{query.strip().lower()}|{max_results}"
+    if cache_key in _YT_CACHE:
+        return _YT_CACHE[cache_key]
+
+    # ── Strategy 1: yt-dlp (most reliable, handles all bot checks) ─────────
+    try:
+        from yt_dlp import YoutubeDL
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "socket_timeout": 15,
+        }
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+        results = []
+        for e in (info or {}).get("entries", []):
+            vid_id = e.get("id", "")
+            if not vid_id:
+                continue
+            results.append({
+                "id":       vid_id,
+                "title":    e.get("title", "Unknown"),
+                "duration": _fmt_duration(e.get("duration", 0)),
+                "thumb":    f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg",
+            })
+        if results:
+            _YT_CACHE[cache_key] = results
+            return results
+    except Exception as e:
+        print(f"[yt-dlp] search failed: {e}")
+
+    # ── Strategy 2: Invidious public API (no key needed) ───────────────────
+    invidious_instances = [
+        "https://invidious.io",
+        "https://inv.riverside.rocks",
+        "https://invidious.privacyredirect.com",
+        "https://yt.cdaut.de",
+    ]
+    for base in invidious_instances:
+        try:
+            r = requests.get(
+                f"{base}/api/v1/search",
+                params={"q": query, "type": "video", "page": 1},
+                timeout=8,
+                headers={"User-Agent": "GymPro/1.0"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                results = []
+                for item in data[:max_results]:
+                    vid_id = item.get("videoId", "")
+                    if not vid_id:
+                        continue
+                    thumbs = item.get("videoThumbnails", [])
+                    thumb  = next((t["url"] for t in thumbs if "medium" in t.get("quality","").lower()),
+                                  f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg")
+                    results.append({
+                        "id":       vid_id,
+                        "title":    item.get("title", "Unknown"),
+                        "duration": _fmt_duration(item.get("lengthSeconds", 0)),
+                        "thumb":    thumb,
+                    })
+                if results:
+                    _YT_CACHE[cache_key] = results
+                    return results
+        except Exception:
+            continue
+
+    # ── Strategy 3: Direct scraping (last resort) ──────────────────────────
     try:
         import json as _json
-        url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+        url  = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
         resp = requests.get(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
         }, timeout=12)
-
-        # Try to extract rich JSON embedded in page
         m = re.search(r'var ytInitialData\s*=\s*(\{.*?\});\s*</script>', resp.text, re.DOTALL)
         if m:
-            try:
-                data = _json.loads(m.group(1))
-                section = (data.get("contents", {})
-                              .get("twoColumnSearchResultsRenderer", {})
-                              .get("primaryContents", {})
-                              .get("sectionListRenderer", {})
-                              .get("contents", [{}])[0]
-                              .get("itemSectionRenderer", {})
-                              .get("contents", []))
-                results = []
-                for item in section:
-                    vr = item.get("videoRenderer", {})
-                    vid_id = vr.get("videoId", "")
-                    title_runs = vr.get("title", {}).get("runs", [])
-                    title = title_runs[0].get("text", "Unknown") if title_runs else "Unknown"
-                    duration = (vr.get("lengthText", {}).get("simpleText", "") or
-                                vr.get("lengthText", {}).get("accessibility", {})
-                                   .get("accessibilityData", {}).get("label", ""))
-                    thumb = f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"
-                    if vid_id:
-                        results.append({"id": vid_id, "title": title,
-                                        "duration": duration, "thumb": thumb})
-                if results:
-                    return results[:max_results]
-            except Exception:
-                pass
+            section = (_json.loads(m.group(1))
+                       .get("contents", {})
+                       .get("twoColumnSearchResultsRenderer", {})
+                       .get("primaryContents", {})
+                       .get("sectionListRenderer", {})
+                       .get("contents", [{}])[0]
+                       .get("itemSectionRenderer", {})
+                       .get("contents", []))
+            results = []
+            for item in section:
+                vr = item.get("videoRenderer", {})
+                vid_id = vr.get("videoId", "")
+                if not vid_id:
+                    continue
+                title_runs = vr.get("title", {}).get("runs", [])
+                title = title_runs[0].get("text", "Unknown") if title_runs else "Unknown"
+                dur   = (vr.get("lengthText", {}).get("simpleText", ""))
+                results.append({"id": vid_id, "title": title, "duration": dur,
+                                 "thumb": f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"})
+            if results:
+                _YT_CACHE[cache_key] = results[:max_results]
+                return results[:max_results]
 
-        # Fallback: extract IDs only
         ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)))
-        return [{"id": v, "title": f"Track {i+1}", "duration": "",
-                 "thumb": f"https://img.youtube.com/vi/{v}/mqdefault.jpg"}
-                for i, v in enumerate(ids[:max_results])]
+        results = [{"id": v, "title": f"Track {i+1}", "duration": "",
+                    "thumb": f"https://img.youtube.com/vi/{v}/mqdefault.jpg"}
+                   for i, v in enumerate(ids[:max_results])]
+        if results:
+            _YT_CACHE[cache_key] = results
+        return results
     except Exception as e:
-        print(f"YouTube search error: {e}")
+        print(f"[scrape] YouTube search failed: {e}")
         return []
 
 def extract_youtube_id(url_or_id: str) -> str:
