@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 import database as db
 import styles
+import gym_pages.ai_assistant as ai_assistant
 
 def render(gym_id, role, username):
     gyms = db.get_all_gyms()
@@ -315,6 +316,24 @@ def render(gym_id, role, username):
                 """, unsafe_allow_html=True)
         except Exception:
             pass
+
+    # ============================================
+    # 🤖 STAFF AI COACH — shown to staff only
+    # ============================================
+    if role.lower() == "staff":
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#0F172A,#1E1B4B);
+                    border:1px solid #3B82F6;border-radius:14px;
+                    padding:0.75rem 1rem;margin-bottom:0.75rem;">
+            <span style="color:#60A5FA;font-weight:700;font-size:1rem;">🤖 AI Performance Coach</span>
+            <span style="color:#94A3B8;font-size:0.8rem;"> — Aaj aapki performance ka live analysis</span>
+        </div>
+        """, unsafe_allow_html=True)
+        try:
+            ai_assistant.render_staff_ai_coach(username=username, role=role, gym_id=gym_id)
+        except Exception as _e:
+            st.warning(f"AI Coach load nahi hua: {_e}")
+        st.divider()
 
     # ============================================
     # ANNOUNCEMENT SECTION

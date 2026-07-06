@@ -1615,6 +1615,104 @@ def get_active_shift(gym_id, staff_user):
         db.close()
 
 
+def get_staff_today_metrics(username: str, gym_id=None) -> dict:
+    """
+    Pull all today's performance data for a specific staff member.
+    Used by the AI Staff Coach widget on the dashboard.
+    """
+    from datetime import date as _date
+    today      = _date.today()
+    today_str  = str(today)
+    today_start = datetime.combine(today, datetime.min.time())
+    db = get_db()
+    try:
+        # ── Fees collected today by this staff ──────────────────────────────
+        fq = db.query(FeeRecord).filter(
+            FeeRecord.collected_by == username,
+            FeeRecord.payment_date == today_str,
+        )
+        if gym_id:
+            fq = fq.filter(FeeRecord.gym_id == gym_id)
+        fees      = fq.all()
+        fee_total = sum(r.amount or 0 for r in fees)
+        fee_count = len(fees)
+
+        # ── Attendance marked today by this staff ────────────────────────────
+        aq = db.query(Attendance).filter(
+            Attendance.marked_by == username,
+            Attendance.check_date == today_str,
+        )
+        if gym_id:
+            aq = aq.filter(Attendance.gym_id == gym_id)
+        att_count = aq.count()
+
+        # ── Total active members (benchmark for attendance) ──────────────────
+        mq = db.query(Member).filter(Member.status == "active")
+        if gym_id:
+            mq = mq.filter(Member.gym_id == gym_id)
+        total_active = mq.count()
+
+        # ── Shift status ─────────────────────────────────────────────────────
+        sq = db.query(ShiftSession).filter_by(staff_user=username, status="open")
+        if gym_id:
+            sq = sq.filter(ShiftSession.gym_id == gym_id)
+        active_shift  = sq.first()
+        shift_open    = active_shift is not None
+        shift_id      = active_shift.id if active_shift else None
+        shift_opening = active_shift.opening_cash if active_shift else 0.0
+        shift_opened_at = active_shift.opened_at.strftime("%H:%M") if active_shift else None
+
+        # Count any shifts today (even closed ones)
+        sq2 = db.query(ShiftSession).filter(
+            ShiftSession.staff_user == username,
+            ShiftSession.opened_at >= today_start,
+        )
+        if gym_id:
+            sq2 = sq2.filter(ShiftSession.gym_id == gym_id)
+        shifts_today = sq2.count()
+
+        # ── Activity log ─────────────────────────────────────────────────────
+        lq = db.query(ActivityLog).filter(
+            ActivityLog.user == username,
+            ActivityLog.created_at >= today_start,
+        )
+        if gym_id:
+            lq = lq.filter(ActivityLog.gym_id == gym_id)
+        logs = lq.order_by(ActivityLog.created_at.desc()).all()
+
+        deletions    = [l for l in logs if "DELETE" in (l.action or "").upper()]
+        new_members  = [l for l in logs if l.action in ("MEMBER_ADDED", "MEMBER_REGISTERED")]
+        last_log     = logs[0] if logs else None
+
+        return {
+            "fee_total":           fee_total,
+            "fee_count":           fee_count,
+            "att_count":           att_count,
+            "total_active_members":total_active,
+            "shift_open":          shift_open,
+            "shift_id":            shift_id,
+            "shift_opening_cash":  shift_opening,
+            "shift_opened_at":     shift_opened_at,
+            "shifts_today":        shifts_today,
+            "activity_count":      len(logs),
+            "deletions_today":     len(deletions),
+            "new_members_today":   len(new_members),
+            "last_action":         last_log.action if last_log else None,
+            "last_action_time":    last_log.created_at.strftime("%H:%M") if last_log else None,
+        }
+    except Exception as e:
+        return {
+            "fee_total": 0, "fee_count": 0, "att_count": 0,
+            "total_active_members": 0, "shift_open": False,
+            "shift_id": None, "shift_opening_cash": 0,
+            "shift_opened_at": None, "shifts_today": 0,
+            "activity_count": 0, "deletions_today": 0,
+            "new_members_today": 0, "last_action": None, "last_action_time": None,
+        }
+    finally:
+        db.close()
+
+
 def get_today_shifts(gym_id=None):
     """Return all shifts opened today."""
     db = get_db()

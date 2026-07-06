@@ -879,6 +879,225 @@ def _video_player():
 
 
 # ============================================
+# 🤖 STAFF AI COACH — Personal Dashboard Widget
+# ============================================
+
+def _score_staff(m: dict) -> tuple[int, str, str]:
+    """
+    Compute a 0-100 performance score and a grade.
+    Returns (score, grade, color).
+    """
+    score = 50  # baseline
+
+    # Shift opened today?
+    if m["shift_open"]:
+        score += 10
+    elif m["shifts_today"] > 0:
+        score += 5   # opened but already closed — still counts
+    else:
+        score -= 15  # no shift at all
+
+    # Fees collected
+    if m["fee_count"] >= 5:
+        score += 15
+    elif m["fee_count"] >= 2:
+        score += 8
+    elif m["fee_count"] == 1:
+        score += 3
+
+    # Attendance marking
+    total = m["total_active_members"] or 1
+    att_pct = m["att_count"] / total
+    if att_pct >= 0.8:
+        score += 20
+    elif att_pct >= 0.4:
+        score += 10
+    elif att_pct > 0:
+        score += 4
+
+    # Deletions are bad
+    score -= m["deletions_today"] * 10
+
+    # New members registered
+    score += m["new_members_today"] * 5
+
+    score = max(0, min(100, score))
+
+    if score >= 80:
+        return score, "⭐ Excellent", "#22C55E"
+    elif score >= 60:
+        return score, "✅ Good",     "#3B82F6"
+    elif score >= 40:
+        return score, "⚠️ Average",  "#F59E0B"
+    else:
+        return score, "❌ Poor",     "#EF4444"
+
+
+def _build_coach_prompt(username: str, m: dict, score: int, grade: str) -> str:
+    now_hour = datetime.now().hour
+    time_of_day = "subah" if now_hour < 12 else ("dopahar" if now_hour < 17 else "shaam")
+    att_pct = int((m["att_count"] / max(m["total_active_members"], 1)) * 100)
+
+    return f"""You are GymPro AI Coach. Write a SHORT (max 160 words), personal performance message for staff member "{username}" in Roman Urdu (with some English words fine).
+
+TODAY'S METRICS ({time_of_day}):
+- Performance Score: {score}/100 — {grade}
+- Fees Collected: PKR {m['fee_total']:,.0f} ({m['fee_count']} receipts)
+- Member Attendance Marked: {m['att_count']} out of {m['total_active_members']} ({att_pct}%)
+- Shift: {"✅ OPEN since " + str(m['shift_opened_at']) if m['shift_open'] else ("✅ Completed today" if m['shifts_today'] > 0 else "❌ NOT STARTED — no shift opened!")}
+- Fee Deletions Today: {m['deletions_today']} {"⚠️ SUSPICIOUS!" if m['deletions_today'] > 0 else "✅ none"}
+- New Members Registered: {m['new_members_today']}
+- Total Activities: {m['activity_count']}
+
+TONE RULES — follow exactly:
+- Score ≥ 80 → Start with STRONG shahbashi: "Shahbash {username}! Zabardast kaam!" — then praise specifically what was done well
+- Score 60-79 → Positive but point out 1-2 things to improve
+- Score 40-59 → Motivating but CLEAR about what's missing, give specific numbered steps
+- Score < 40 → Firm, caring, clear about problems + exact steps to fix them RIGHT NOW
+- If no shift → "Pehle SHIFT kholo: Fee Collection page → Shift Management tab → 'Open Shift'"
+- If att_count == 0 and total_active > 0 → "ZARURI: Attendance page par jao, {m['total_active_members']} members ki attendance abhi mark karo!"
+- If deletions > 0 → STERN warning about fee deletions — "har deletion record hota hai, admin dekhta hai"
+- End with 2-3 numbered ACTION ITEMS for next 1 hour
+
+Keep it punchy and real. Not corporate speak. Like a caring senior colleague."""
+
+
+def render_staff_ai_coach(username: str, role: str = "staff", gym_id=None):
+    """
+    Personalized AI performance coach for staff — shown on their dashboard.
+    Evaluates today's work, gives praise or advice, lists pending tasks.
+    """
+    _init_state()
+
+    m = {}
+    try:
+        m = db.get_staff_today_metrics(username, gym_id=gym_id)
+    except Exception:
+        pass
+
+    score, grade, grade_color = _score_staff(m)
+
+    # ── Task checklist ──────────────────────────────────────────────────────
+    tasks = []
+    if not m.get("shift_open") and not m.get("shifts_today", 0):
+        tasks.append(("❌", "Shift abhi tak nahi khuli", "Fee Collection → Shift Management", "critical"))
+    else:
+        tasks.append(("✅", "Shift khuli hai", f"Since {m.get('shift_opened_at','?')}", "ok"))
+
+    att_pct = int((m.get("att_count", 0) / max(m.get("total_active_members", 1), 1)) * 100)
+    if att_pct < 50 and m.get("total_active_members", 0) > 0:
+        tasks.append(("⚠️", f"Attendance sirf {att_pct}% — {m.get('att_count',0)}/{m.get('total_active_members',0)} members",
+                       "Attendance page → mark karo", "warn"))
+    elif att_pct >= 80:
+        tasks.append(("✅", f"Attendance {att_pct}% complete", f"{m.get('att_count',0)} members marked", "ok"))
+    else:
+        tasks.append(("🔶", f"Attendance {att_pct}% — thori aur baqi hai",
+                       "Attendance page mein baki members", "warn"))
+
+    if m.get("fee_count", 0) == 0:
+        tasks.append(("❌", "Aaj abhi koi fee collect nahi hui", "Fee Collection → collect karo", "critical"))
+    else:
+        tasks.append(("✅", f"PKR {m.get('fee_total',0):,.0f} collect kiya ({m.get('fee_count',0)} receipts)", "", "ok"))
+
+    if m.get("deletions_today", 0) > 0:
+        tasks.append(("🚨", f"{m['deletions_today']} fee deletion(s) aaj! Admin ko pata hai.", "Explain karo agar mistake thi", "critical"))
+
+    # ── Score ring HTML ─────────────────────────────────────────────────────
+    ring_color = grade_color
+    score_html = f"""
+<div style="display:flex;align-items:center;gap:1.2rem;padding:1rem 1.25rem;
+            background:linear-gradient(135deg,#0F172A,#1E1B4B);
+            border:2px solid {ring_color};border-radius:14px;margin-bottom:0.8rem;">
+  <div style="position:relative;width:72px;height:72px;flex-shrink:0;">
+    <svg width="72" height="72" viewBox="0 0 72 72">
+      <circle cx="36" cy="36" r="30" fill="none" stroke="#1E293B" stroke-width="8"/>
+      <circle cx="36" cy="36" r="30" fill="none" stroke="{ring_color}" stroke-width="8"
+        stroke-dasharray="{int(score*1.885)} 188.5"
+        stroke-dashoffset="47" stroke-linecap="round" transform="rotate(-90 36 36)"/>
+    </svg>
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                text-align:center;line-height:1;">
+      <div style="font-size:1.1rem;font-weight:800;color:{ring_color};">{score}</div>
+      <div style="font-size:0.5rem;color:#94A3B8;">/ 100</div>
+    </div>
+  </div>
+  <div style="flex:1;">
+    <div style="font-size:1rem;font-weight:700;color:{ring_color};">{grade}</div>
+    <div style="font-size:0.85rem;color:#F1F5F9;font-weight:600;margin-top:0.2rem;">
+      {username}'s Performance — Aaj
+    </div>
+    <div style="font-size:0.75rem;color:#94A3B8;margin-top:0.15rem;">
+      💰 PKR {m.get('fee_total',0):,.0f} &nbsp;·&nbsp;
+      👥 {m.get('att_count',0)}/{m.get('total_active_members',0)} att &nbsp;·&nbsp;
+      {'🟢 Shift Open' if m.get('shift_open') else '🔴 No Shift'}
+    </div>
+  </div>
+</div>"""
+    st.markdown(score_html, unsafe_allow_html=True)
+
+    # ── Task checklist ──────────────────────────────────────────────────────
+    with st.expander("📋 Aaj ka Task Checklist", expanded=True):
+        for icon, label, hint, sev in tasks:
+            bg  = {"critical": "#450A0A", "warn": "#422006", "ok": "#052E16"}.get(sev, "#1E293B")
+            bc  = {"critical": "#EF4444", "warn": "#F59E0B", "ok": "#22C55E"}.get(sev, "#475569")
+            st.markdown(f"""
+<div style="background:{bg};border-left:3px solid {bc};border-radius:8px;
+            padding:0.5rem 0.75rem;margin-bottom:0.4rem;display:flex;
+            justify-content:space-between;align-items:center;">
+  <div>
+    <span style="font-size:0.9rem;">{icon} <strong>{label}</strong></span>
+    {"<div style='font-size:0.72rem;color:#94A3B8;margin-top:0.1rem;'>→ " + hint + "</div>" if hint else ""}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── AI coach message ─────────────────────────────────────────────────────
+    coach_key = f"coach_msg_{username}"
+    if coach_key not in st.session_state:
+        st.session_state[coach_key] = None
+
+    refresh_col, _ = st.columns([1, 3])
+    do_refresh = refresh_col.button("🤖 AI Coach Message", key="staff_coach_btn",
+                                     type="primary", use_container_width=True)
+
+    if do_refresh or (st.session_state[coach_key] is None and score < 60):
+        prompt = _build_coach_prompt(username, m, score, grade)
+        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if groq_key:
+            try:
+                import requests as _r
+                resp = _r.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}",
+                             "Content-Type": "application/json"},
+                    json={"model": "llama-3.3-70b-versatile",
+                          "messages": [{"role": "user", "content": prompt}],
+                          "max_tokens": 400, "temperature": 0.7},
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                st.session_state[coach_key] = resp.json()["choices"][0]["message"]["content"].strip()
+            except Exception as ex:
+                st.session_state[coach_key] = f"AI Coach abhi available nahi. Baad mein try karein. ({ex})"
+        else:
+            st.session_state[coach_key] = "⚠️ GROQ_API_KEY set nahi hai — AI coach unavailable."
+
+    if st.session_state.get(coach_key):
+        msg = st.session_state[coach_key]
+        is_praise = score >= 70
+        msg_bg    = "#052E16" if is_praise else "#1C1917"
+        msg_bc    = "#22C55E" if is_praise else "#F59E0B"
+        msg_ico   = "🎉" if score >= 80 else ("👍" if is_praise else ("⚠️" if score >= 40 else "🚨"))
+        st.markdown(f"""
+<div style="background:{msg_bg};border:1px solid {msg_bc};border-radius:12px;
+            padding:1rem 1.25rem;margin-top:0.5rem;">
+  <div style="color:{msg_bc};font-weight:700;font-size:0.8rem;margin-bottom:0.4rem;">
+    {msg_ico} AI COACH — {grade}
+  </div>
+  <div style="color:#F1F5F9;font-size:0.9rem;line-height:1.6;white-space:pre-wrap;">{msg}</div>
+</div>""", unsafe_allow_html=True)
+
+
+# ============================================
 # 🎵 PERSISTENT SIDEBAR MUSIC BAR
 # ============================================
 
