@@ -80,13 +80,6 @@ def _download_raw(key: str) -> bytes | None:
             except Exception:
                 pass
 
-    # DB fallback — Streamlit Cloud / platforms without Object Storage ke liye
-    try:
-        import database as _db
-        return _db.get_photo_blob_by_path(key)
-    except Exception:
-        pass
-
     return None
 
 

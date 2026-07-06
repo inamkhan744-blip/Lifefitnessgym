@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, date, timedelta
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Date,
-    DateTime, Boolean, Text, ForeignKey, func, text as sa_text, LargeBinary
+    DateTime, Boolean, Text, ForeignKey, func, text as sa_text
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 from sqlalchemy import event
@@ -168,7 +168,6 @@ class Member(Base):
     gender = Column(String(20))
     dob = Column(String(15))
     photo_path = Column(String(255))
-    photo_blob = Column(LargeBinary, nullable=True)
     membership_type = Column(String(40), nullable=False)
     fee_amount = Column(Float, default=0.0)
     join_date = Column(String(15), nullable=False)
@@ -2244,37 +2243,6 @@ def get_stats(gym_id=None):
         }
     finally:
         db.close()
-
-def get_photo_blob_by_path(photo_path: str):
-    """photo_path key se photo bytes wapas karo (Streamlit Cloud fallback)."""
-    if not photo_path:
-        return None
-    db = SessionLocal()
-    try:
-        m = db.query(Member).filter(Member.photo_path == photo_path).first()
-        return bytes(m.photo_blob) if m and m.photo_blob else None
-    except Exception:
-        return None
-    finally:
-        db.close()
-
-
-def save_photo_blob(member_id: int, blob_bytes: bytes):
-    """Photo bytes DB mein save karo taake koi bhi platform use kar sake."""
-    db = SessionLocal()
-    try:
-        m = db.query(Member).filter(Member.id == member_id).first()
-        if m:
-            m.photo_blob = blob_bytes
-            db.commit()
-            return True
-        return False
-    except Exception:
-        db.rollback()
-        return False
-    finally:
-        db.close()
-
 
 def update_member_photo_path(member_id, photo_path):
     """Update member photo_path — accepts object storage key or any path as-is."""
