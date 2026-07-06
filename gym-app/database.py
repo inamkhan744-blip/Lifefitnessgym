@@ -550,6 +550,9 @@ def init_db():
         finally:
             db.close()
 
+    # Run cleanup once per server start (moved out of module-level)
+    clean_corrupt_html_paths()
+
 
 # ── Gym CRUD ───────────────────────────────────────────────────────────────────
 
@@ -2265,8 +2268,7 @@ def clean_corrupt_html_paths():
     except Exception as e:
         print(f"Cleanup update skipped or not needed: {e}")
 
-# Automatically triggers on app startup to keep your database pure
-clean_corrupt_html_paths()
+# NOTE: clean_corrupt_html_paths() is now called inside init_db() — not at import time.
 # Yeh function database.py ke bilkul last mein hona chahiye
 def is_verified(reference_id):
     try:

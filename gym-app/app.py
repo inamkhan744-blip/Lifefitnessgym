@@ -3,7 +3,7 @@ import sys
 import os
 import base64
 from datetime import datetime, timedelta
-import os
+
 os.environ['TZ'] = 'Asia/Karachi'
 import time
 time.tzset()
@@ -28,34 +28,46 @@ else:
 
 st.set_page_config(page_title="GymPro", page_icon="🏋️", layout="wide")
 
-db.init_db()
+# ── Init DB once per server lifetime (not on every render) ────────────────────
+@st.cache_resource
+def _init_db_once():
+    db.init_db()
+    return True
+
+_init_db_once()
 styles.inject_css()
 
-# ── Floating music player ──────────────────────────────────────────────────────
-def add_floating_music_player():
+# ── Music player: encode MP3 once, reuse forever ──────────────────────────────
+@st.cache_data(show_spinner=False)
+def _get_music_b64() -> str | None:
     music_file = os.path.join(os.path.dirname(__file__), "gym_music.mp3")
-    if os.path.exists(music_file):
-        try:
-            with open(music_file, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode()
-            st.markdown(f"""
-            <style>
-            .floating-music {{
-                position: fixed; bottom: 20px; right: 20px;
-                background: #1E293B; border-radius: 50px; padding: 8px 16px;
-                border: 1px solid #334155; z-index: 999;
-            }}
-            .floating-music audio {{ height: 35px; width: 200px; }}
-            @media (max-width: 600px) {{ .floating-music audio {{ width: 140px; }} }}
-            </style>
-            <div class="floating-music">
-                <audio controls loop>
-                    <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
-                </audio>
-            </div>
-            """, unsafe_allow_html=True)
-        except Exception:
-            pass
+    if not os.path.exists(music_file):
+        return None
+    try:
+        with open(music_file, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
+def add_floating_music_player():
+    _b64 = _get_music_b64()
+    if _b64:
+        st.markdown(f"""
+        <style>
+        .floating-music {{
+            position: fixed; bottom: 20px; right: 20px;
+            background: #1E293B; border-radius: 50px; padding: 8px 16px;
+            border: 1px solid #334155; z-index: 999;
+        }}
+        .floating-music audio {{ height: 35px; width: 200px; }}
+        @media (max-width: 600px) {{ .floating-music audio {{ width: 140px; }} }}
+        </style>
+        <div class="floating-music">
+            <audio controls loop>
+                <source src="data:audio/mp3;base64,{_b64}" type="audio/mp3">
+            </audio>
+        </div>
+        """, unsafe_allow_html=True)
 
 add_floating_music_player()
 
@@ -64,7 +76,7 @@ if not auth.require_login():
     auth.login_page()
     st.stop()
 
-# ── Public profile route (no login required) ──────────────────────────────────
+# ── Public profile route ───────────────────────────────────────────────────────
 _profile_param = st.query_params.get("profile")
 if _profile_param:
     from gym_pages import public_profile
@@ -73,28 +85,36 @@ if _profile_param:
     public_profile.render(_mid if _mid is not None else -1)
     st.stop()
 
-# ── Page imports ───────────────────────────────────────────────────────────────
-from gym_pages import (
-    admin_dashboard,
-    setup,
-    members,
-    bulk_id_cards,
-    attendance,
-    fee_collection,
-    expenses,
-    whatsapp,
-    auditor,
-    user_management,
-    reports,
-    membership_card,
-    progress,
-    inventory,
-    complaints,
-    message_center,
-    ai_assistant,
-    staff_targets,
-)
+# ── Cached data helpers (avoid repeated DB hits every render) ─────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_gyms():
+    return db.get_all_gyms()
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _cached_stats(gym_id):
+    return db.get_stats(gym_id)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_sidebar_alerts(gym_id):
+    try:
+        bdays = db.get_birthday_members(days_ahead=1, gym_id=gym_id)
+    except Exception:
+        bdays = []
+    try:
+        absent = db.get_absent_members(days=3, gym_id=gym_id)
+    except Exception:
+        absent = []
+    try:
+        low_s = db.get_stock_items(gym_id=gym_id, low_stock_only=True)
+    except Exception:
+        low_s = []
+    return bdays, absent, low_s
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_theme_settings():
+    return db.get_setting("theme_auto", "0"), db.get_setting("theme_key", "dark_slate")
+
+# ── Session vars ───────────────────────────────────────────────────────────────
 role        = st.session_state.get("role", "staff")
 full_name   = st.session_state.get("full_name", "User")
 username    = st.session_state.get("username", "")
@@ -102,12 +122,11 @@ user_id     = st.session_state.get("user_id")
 gym_id      = st.session_state.get("selected_gym_id")
 user_gym_id = st.session_state.get("user_gym_id")
 
-gyms = db.get_all_gyms()
+gyms = _cached_gyms()
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # Online / Offline status badge
-    _mode = db.DB_MODE
+    _mode        = db.DB_MODE
     _badge_color = "#22c55e" if _mode == "online" else "#f59e0b"
     _badge_icon  = "🟢" if _mode == "online" else "🟡"
     _badge_label = "Online (Cloud DB)" if _mode == "online" else "Offline (Local DB)"
@@ -141,7 +160,7 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Gym selector (admin sees all; staff sees assigned gym)
+    # Gym selector
     if role == "admin" and gyms:
         st.markdown("""<div style="font-size:0.65rem;color:#64748B;text-transform:uppercase;
             letter-spacing:0.08em;margin-bottom:0.3rem;">Switch Gym Location</div>""",
@@ -169,7 +188,7 @@ with st.sidebar:
         st.session_state["selected_gym_id"] = user_gym_id
         gym_id = user_gym_id
 
-    # ── Theme selector (admin only) ────────────────────────────────────────────
+    # Theme selector (admin only)
     if role == "admin":
         st.divider()
         st.markdown(
@@ -177,13 +196,15 @@ with st.sidebar:
             'letter-spacing:0.1em;margin-bottom:0.4rem;">🎨 App Theme</div>',
             unsafe_allow_html=True,
         )
-        _auto_on   = db.get_setting("theme_auto", "0") == "1"
-        _cur_key   = themes.get_daily_theme() if _auto_on else db.get_setting("theme_key", "dark_slate")
+        _theme_auto_str, _theme_key_str = _cached_theme_settings()
+        _auto_on   = _theme_auto_str == "1"
+        _cur_key   = themes.get_daily_theme() if _auto_on else _theme_key_str
         _cur_label = themes.THEME_NAMES.get(_cur_key, "🪨 Dark Slate")
 
         _auto_toggle = st.checkbox("Auto (daily)", value=_auto_on, key="theme_auto_chk")
         if _auto_toggle != _auto_on:
             db.set_setting("theme_auto", "1" if _auto_toggle else "0")
+            _cached_theme_settings.clear()
             st.rerun()
 
         if not _auto_toggle:
@@ -200,6 +221,7 @@ with st.sidebar:
             _picked_key = _all_keys[_all_labels.index(_picked)]
             if _picked_key != _cur_key:
                 db.set_setting("theme_key", _picked_key)
+                _cached_theme_settings.clear()
                 st.rerun()
         else:
             st.caption(f"Today: **{_cur_label}**")
@@ -265,27 +287,23 @@ with st.sidebar:
 
     st.divider()
 
-    # Alert badges
-    try:
-        bdays = db.get_birthday_members(days_ahead=1, gym_id=gym_id)
-        absent = db.get_absent_members(days=3, gym_id=gym_id)
-        low_s  = db.get_stock_items(gym_id=gym_id, low_stock_only=True)
-        if bdays:
-            st.markdown(f'<div style="background:#1E3A1E;border-radius:6px;padding:0.4rem 0.6rem;'
-                        f'font-size:0.75rem;color:#34D399;margin-bottom:0.3rem;">🎂 {len(bdays)} birthday today</div>',
-                        unsafe_allow_html=True)
-        if absent:
-            st.markdown(f'<div style="background:#3A1E1E;border-radius:6px;padding:0.4rem 0.6rem;'
-                        f'font-size:0.75rem;color:#F87171;margin-bottom:0.3rem;">🚶 {len(absent)} absent 3+ days</div>',
-                        unsafe_allow_html=True)
-        if low_s:
-            st.markdown(f'<div style="background:#3A2A1E;border-radius:6px;padding:0.4rem 0.6rem;'
-                        f'font-size:0.75rem;color:#FBBF24;margin-bottom:0.3rem;">📦 {len(low_s)} low stock items</div>',
-                        unsafe_allow_html=True)
-    except Exception:
-        pass
+    # Alert badges — cached, not re-queried every render
+    _bdays, _absent, _low_s = _cached_sidebar_alerts(gym_id)
+    if _bdays:
+        st.markdown(f'<div style="background:#1E3A1E;border-radius:6px;padding:0.4rem 0.6rem;'
+                    f'font-size:0.75rem;color:#34D399;margin-bottom:0.3rem;">🎂 {len(_bdays)} birthday today</div>',
+                    unsafe_allow_html=True)
+    if _absent:
+        st.markdown(f'<div style="background:#3A1E1E;border-radius:6px;padding:0.4rem 0.6rem;'
+                    f'font-size:0.75rem;color:#F87171;margin-bottom:0.3rem;">🚶 {len(_absent)} absent 3+ days</div>',
+                    unsafe_allow_html=True)
+    if _low_s:
+        st.markdown(f'<div style="background:#3A2A1E;border-radius:6px;padding:0.4rem 0.6rem;'
+                    f'font-size:0.75rem;color:#FBBF24;margin-bottom:0.3rem;">📦 {len(_low_s)} low stock items</div>',
+                    unsafe_allow_html=True)
 
-    stats = db.get_stats(gym_id)
+    # Sidebar stats — cached
+    stats = _cached_stats(gym_id)
     st.markdown("""<div style="font-size:0.65rem;color:#64748B;text-transform:uppercase;
         letter-spacing:0.08em;margin:0.5rem 0 0.3rem;">Revenue Analytics</div>""",
                 unsafe_allow_html=True)
@@ -299,13 +317,12 @@ with st.sidebar:
 
     st.divider()
 
-    # Persistent music mini-player (stays playing across page changes)
-    ai_assistant.render_persistent_music_bar()
+    from gym_pages import ai_assistant as _ai
+    _ai.render_persistent_music_bar()
 
     st.divider()
 
-    # Persistent AI chat widget
-    ai_assistant.render_sidebar_widget(
+    _ai.render_sidebar_widget(
         current_page=st.session_state.get("page", "Dashboard"),
         gym_id=gym_id,
         role=role,
@@ -316,7 +333,7 @@ with st.sidebar:
     if st.button("🚪 Sign Out", use_container_width=True):
         auth.logout()
 
-# ── Page router ────────────────────────────────────────────────────────────────
+# ── Page router — lazy imports (each module loaded only when first visited) ────
 page = st.session_state.get("page", "Dashboard")
 
 if not auth.can_access(page):
@@ -325,21 +342,57 @@ if not auth.can_access(page):
 
 gid = st.session_state.get("selected_gym_id")
 
-if   page == "Dashboard":        admin_dashboard.render(gid, role, username)
-elif page == "Gym Setup":        setup.render()
-elif page == "Members":          members.render(gid, role)
-elif page == "Membership Cards": membership_card.render(gid, role)
-elif page == "Bulk ID Cards":    bulk_id_cards.render(gid, role)
-elif page == "Attendance":       attendance.render(gid, role, username)
-elif page == "Progress Tracker": progress.render(gid, role)
-elif page == "Fee Collection":   fee_collection.render(gid, role, username)
-elif page == "Expenses":         expenses.render(gid, role, username)
-elif page == "Inventory":        inventory.render(gid, role)
-elif page == "Reports":          reports.render(gid, role, username)
-elif page == "Message Center":   message_center.render(gid, role)
-elif page == "WhatsApp":         whatsapp.render(gid, role)
-elif page == "Complaints":       complaints.render(gid, role)
-elif page == "Audit":            auditor.render(gid, role, username)
-elif page == "User Management":  user_management.render(user_id)
-elif page == "AI Assistant":     ai_assistant.render(gid, role, username)
-elif page == "Staff Targets":    staff_targets.render(gid, role, username)
+if page == "Dashboard":
+    from gym_pages import admin_dashboard
+    admin_dashboard.render(gid, role, username)
+elif page == "Gym Setup":
+    from gym_pages import setup
+    setup.render()
+elif page == "Members":
+    from gym_pages import members
+    members.render(gid, role)
+elif page == "Membership Cards":
+    from gym_pages import membership_card
+    membership_card.render(gid, role)
+elif page == "Bulk ID Cards":
+    from gym_pages import bulk_id_cards
+    bulk_id_cards.render(gid, role)
+elif page == "Attendance":
+    from gym_pages import attendance
+    attendance.render(gid, role, username)
+elif page == "Progress Tracker":
+    from gym_pages import progress
+    progress.render(gid, role)
+elif page == "Fee Collection":
+    from gym_pages import fee_collection
+    fee_collection.render(gid, role, username)
+elif page == "Expenses":
+    from gym_pages import expenses
+    expenses.render(gid, role, username)
+elif page == "Inventory":
+    from gym_pages import inventory
+    inventory.render(gid, role)
+elif page == "Reports":
+    from gym_pages import reports
+    reports.render(gid, role, username)
+elif page == "Message Center":
+    from gym_pages import message_center
+    message_center.render(gid, role)
+elif page == "WhatsApp":
+    from gym_pages import whatsapp
+    whatsapp.render(gid, role)
+elif page == "Complaints":
+    from gym_pages import complaints
+    complaints.render(gid, role)
+elif page == "Audit":
+    from gym_pages import auditor
+    auditor.render(gid, role, username)
+elif page == "User Management":
+    from gym_pages import user_management
+    user_management.render(user_id)
+elif page == "AI Assistant":
+    from gym_pages import ai_assistant
+    ai_assistant.render(gid, role, username)
+elif page == "Staff Targets":
+    from gym_pages import staff_targets
+    staff_targets.render(gid, role, username)
