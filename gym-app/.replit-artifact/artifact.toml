@@ -10,11 +10,10 @@ kind = "web"
   paths = ["/"]
 
   [services.development]
-  run = "cd /home/runner/workspace/gym-app && python run.py"
+  run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
   [services.production]
-  run = "cd /home/runner/workspace/gym-app && python run.py"
+  run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
   [services.production.health.startup]
   path = "/_stcore/health"
-  
