@@ -14,6 +14,24 @@ GENDERS = ["Male", "Female", "Other", "Prefer not to say"]
 STATUSES = ["Active", "Inactive", "Suspended", "Frozen"]
 
 
+# ── Cached DB helpers (avoid repeated queries on every render) ────────────────
+@st.cache_data(ttl=30, show_spinner=False)
+def _cm(gym_id, status, search):
+    return db.get_members(gym_id=gym_id, status=status, search=search)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _ce(gym_id):
+    return db.get_expiring_members(days=7, gym_id=gym_id)
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _cf(gym_id):
+    return db.get_fee_records(gym_id=gym_id)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _photo_bytes_cached(key: str):
+    return object_store.get_photo_bytes(key or "")
+
+
 def save_photo(f, serial: str = "") -> str:
     """Photo save karo Object Storage mein. serial dene par key mein serial number hoga."""
     file_bytes = f.getbuffer()
@@ -23,7 +41,7 @@ def save_photo(f, serial: str = "") -> str:
 
 def show_photo(photo_field, w=100):
     """Member photo dikhao — st.image() se (reliable, no base64 HTML)."""
-    photo_bytes = object_store.get_photo_bytes(photo_field or "")
+    photo_bytes = _photo_bytes_cached(photo_field or "")
 
     size = f"{w}px"
     if photo_bytes:
@@ -62,11 +80,11 @@ def render(gym_id, role):
     # STATS OVERVIEW - 4 Cards
     # ============================================
     
-    gym_members = db.get_members(gym_id=gym_id)
+    gym_members = _cm(gym_id, "All", "")
     total_members = len(gym_members)
     active_members = sum(1 for m in gym_members if m.status == "Active")
-    expiring_soon = len(db.get_expiring_members(days=7, gym_id=gym_id))
-    gym_fees = db.get_fee_records(gym_id=gym_id)
+    expiring_soon = len(_ce(gym_id))
+    gym_fees = _cf(gym_id)
     total_collected = sum(f.amount for f in gym_fees) if gym_fees else 0
     
     col1, col2, col3, col4 = st.columns(4)
@@ -109,7 +127,7 @@ def render(gym_id, role):
             st.write("")
             st.button("🔄 Refresh", use_container_width=True, key="ml_refresh")
 
-        members = db.get_members(gym_id=selected_gid, status=status_f, search=search)
+        members = _cm(selected_gid, status_f, search)
 
         # ============================================
         # STATS

@@ -12,6 +12,17 @@ import io
 UPLOAD_DIR = "gym-app/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
+# ── Cached DB helpers ─────────────────────────────────────────────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _mc_gyms():
+    return db.get_all_gyms()
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _mc_members(gym_id, status, search):
+    return db.get_members(gym_id=gym_id, status=status, search=search)
+
+
 def init_session_state():
     if 'gallery_loaded' not in st.session_state:
         st.session_state.gallery_loaded = False
@@ -394,7 +405,7 @@ def render(gym_id, role):
     
     styles.page_header("🪪", "Membership Cards", "Digital Identity Verification - Member Photo ID Preview")
     
-    gyms = db.get_all_gyms()
+    gyms = _mc_gyms()
     if not gyms:
         st.info("Add a gym first.")
         return
@@ -419,7 +430,7 @@ def render(gym_id, role):
         status_f = st.selectbox("📊 Status", ["All", "Active", "Inactive", "Suspended", "Frozen"])
 
     # ── Get Members ──────────────────────────────────────────────────────────
-    members = db.get_members(gym_id=sel_gid, status=status_f, search=search)
+    members = _mc_members(sel_gid, status_f, search)
     
     if not members:
         st.info("📭 No members match your filters.")
@@ -458,9 +469,10 @@ def render(gym_id, role):
                     pass
 
     # ── Build Gallery Cache ──────────────────────────────────────────────────
+    member_ids_hash = hash(tuple(m.id for m in members))
     need_rebuild = (
-        not st.session_state.gallery_loaded or 
-        st.session_state._member_count != len(members) or
+        not st.session_state.gallery_loaded or
+        st.session_state.get('_member_ids_hash') != member_ids_hash or
         len(st.session_state.gallery_html) != len(members)
     )
     
@@ -489,6 +501,7 @@ def render(gym_id, role):
         st.session_state.all_members_data = all_members_data
         st.session_state.gallery_loaded = True
         st.session_state._member_count = len(members)
+        st.session_state._member_ids_hash = member_ids_hash
         
         try:
             cache_data = {

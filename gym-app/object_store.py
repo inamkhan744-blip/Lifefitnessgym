@@ -6,6 +6,7 @@ import os
 import io
 import uuid
 import base64
+import streamlit as st
 
 try:
     from replit.object_storage import Client as _ObjClient
@@ -127,11 +128,13 @@ def rename_photo(old_key: str, new_key: str) -> bool:
     return False
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_photo_bytes(key: str) -> bytes | None:
     """
     Photo download karo as compressed bytes (display size).
     st.image() ke saath directly use karo.
     Returns None agar photo nahi mili.
+    5-minute cache — same key dobara download nahi hogi.
     """
     raw = _download_raw(key)
     if raw is None:
