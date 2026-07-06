@@ -303,6 +303,8 @@ with st.sidebar:
     ai_assistant.render_sidebar_widget(
         current_page=st.session_state.get("page", "Dashboard"),
         gym_id=gym_id,
+        role=role,
+        username=username,
     )
 
     st.divider()
@@ -334,5 +336,5 @@ elif page == "WhatsApp":         whatsapp.render(gid, role)
 elif page == "Complaints":       complaints.render(gid, role)
 elif page == "Audit":            auditor.render(gid, role, username)
 elif page == "User Management":  user_management.render(user_id)
-elif page == "AI Assistant":     ai_assistant.render(gid, role)
+elif page == "AI Assistant":     ai_assistant.render(gid, role, username)
 elif page == "Staff Targets":    staff_targets.render(gid, role, username)

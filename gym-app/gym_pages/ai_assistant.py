@@ -83,12 +83,16 @@ PAGE_CONTEXT = {
 }
 
 SYSTEM_PROMPT = (
-    "You are GymPro AI, an expert assistant embedded in GymPro — a professional multi-gym management system. "
-    "You help gym managers, admins, staff, and auditors with: member management, fee collection, "
-    "attendance tracking, financial analysis, expense management, inventory control, membership operations, "
-    "and best practices for gym management.\n"
-    "Be concise, practical, and friendly. Respond in Roman Urdu if the user asks in Roman Urdu. "
-    "If asked something unrelated to gym management, politely redirect to gym topics."
+    "You are GymPro AI — a highly intelligent, real-time gym management assistant embedded directly inside GymPro app. "
+    "You have access to LIVE gym data including member counts, fees, overdue payments, staff activity, and fraud alerts.\n\n"
+    "YOUR PERSONALITY:\n"
+    "- Speak like a smart, caring senior colleague — not a robot\n"
+    "- Roman Urdu mein baat karo jab user Roman Urdu mein likhe\n"
+    "- Be direct, specific, and actionable — no vague answers\n"
+    "- Give exact numbers from the live data provided\n\n"
+    "FOR ADMIN: Give full business intelligence — revenue trends, fraud patterns, staff performance, overdue recovery\n"
+    "FOR STAFF: Give step-by-step guidance — 'ab yeh karo, phir yeh karo' format\n\n"
+    "Always use the LIVE DATA provided in context. Never say 'I don't have access to data' — you do."
 )
 
 # ============================================
@@ -189,15 +193,73 @@ def transcribe_mic(audio_bytes: bytes) -> str:
 # AI RESPONSE ENGINE
 # ============================================
 
-def _build_system_content(page: str, gym_stats: dict) -> str:
+def _get_live_context(gym_id=None, role="staff", username=""):
+    """Build rich real-time data string to inject into every AI call."""
+    lines = []
+    try:
+        stats = db.get_stats(gym_id)
+        lines.append(
+            f"MEMBERS: total={stats.get('total_members',0)}, active={stats.get('active_members',0)}"
+        )
+        rev = stats.get('month_revenue', 0)
+        exp = stats.get('month_expenses', 0)
+        lines.append(
+            f"FINANCIALS (this month): revenue=PKR {rev:,.0f}, expenses=PKR {exp:,.0f}, net=PKR {rev-exp:,.0f}"
+        )
+    except Exception:
+        pass
+    try:
+        today_total, today_count, _ = db.get_daily_fee_summary(gym_id=gym_id)
+        lines.append(f"TODAY'S FEE COLLECTIONS: PKR {today_total:,.0f} in {today_count} receipts")
+    except Exception:
+        pass
+    try:
+        alerts = db.check_fraud_alerts(gym_id=gym_id)
+        if alerts:
+            critical = [a for a in alerts if a["severity"] == "critical"]
+            lines.append(
+                f"FRAUD ALERTS TODAY: {len(alerts)} alerts, {len(critical)} critical. "
+                + " | ".join(a["title"] for a in alerts[:3])
+            )
+        else:
+            lines.append("FRAUD ALERTS TODAY: none — all clear")
+    except Exception:
+        pass
+    try:
+        shifts = db.get_today_shifts(gym_id=gym_id)
+        open_s  = [s for s in shifts if s.status == "open"]
+        flagged = [s for s in shifts if s.status == "flagged"]
+        lines.append(f"SHIFTS TODAY: {len(shifts)} total, {len(open_s)} open, {len(flagged)} flagged")
+    except Exception:
+        pass
+    try:
+        from datetime import date as _date, timedelta
+        overdue_logs = db.get_activity_logs(gym_id=gym_id, action="FEE_DELETED", limit=50,
+                                            date_from=_date.today()-timedelta(days=7))
+        if overdue_logs:
+            lines.append(f"FEE DELETIONS (last 7 days): {len(overdue_logs)} records deleted")
+    except Exception:
+        pass
+    lines.append(f"LOGGED IN USER: {username or 'unknown'}, ROLE: {role}")
+    return "\n".join(lines)
+
+
+def _build_system_content(page: str, gym_stats: dict, role="staff", username="", gym_id=None) -> str:
     page_ctx = PAGE_CONTEXT.get(page, "")
-    stats_ctx = (
-        f"Live gym stats — Total members: {gym_stats.get('total_members', '?')}, "
-        f"Active: {gym_stats.get('active_members', '?')}, "
-        f"Month revenue: PKR {gym_stats.get('month_revenue', 0):,.0f}, "
-        f"Month expenses: PKR {gym_stats.get('month_expenses', 0):,.0f}."
+    live_ctx = _get_live_context(gym_id=gym_id, role=role, username=username)
+    role_instr = (
+        "This user is an ADMIN/OWNER — give full business intelligence, proactively mention risks, "
+        "fraud alerts, overdue recovery, and staff performance. Be a trusted business advisor."
+        if role in ["admin", "owner"] else
+        "This user is STAFF — guide step by step in simple Roman Urdu. "
+        "If they seem confused, break instructions into numbered steps like 1. pehle yeh karo 2. phir yeh."
     )
-    return f"{SYSTEM_PROMPT}\n\nCurrent page: {page}. {page_ctx}\n{stats_ctx}"
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"=== LIVE GYM DATA ===\n{live_ctx}\n\n"
+        f"=== CURRENT PAGE ===\n{page}: {page_ctx}\n\n"
+        f"=== ROLE INSTRUCTION ===\n{role_instr}"
+    )
 
 def _rule_based_response(user_msg: str, page: str, gym_stats: dict) -> str:
     q = user_msg.lower()
@@ -259,9 +321,9 @@ Aap **{page}** page par hain. Poochiye!"""
     
     return f"🤔 Samajh nahi aaya. Aap **{page}** page par hain. Members, fees, attendance, workout, diet — kisi bhi topic par poochiye! 😊"
 
-def get_ai_response(messages: list, page: str, gym_stats: dict) -> str:
-    system_content = _build_system_content(page, gym_stats)
-    
+def get_ai_response(messages: list, page: str, gym_stats: dict,
+                    role="staff", username="", gym_id=None) -> str:
+    system_content = _build_system_content(page, gym_stats, role=role, username=username, gym_id=gym_id)
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     if groq_key:
         try:
@@ -269,21 +331,21 @@ def get_ai_response(messages: list, page: str, gym_stats: dict) -> str:
             payload = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "system", "content": system_content}] + messages,
-                "max_tokens": 600,
-                "temperature": 0.7,
+                "max_tokens": 800,
+                "temperature": 0.5,
             }
             resp = req.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 json=payload,
-                timeout=20,
+                timeout=25,
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
-        except:
+        except Exception:
             pass
-    
     return _rule_based_response(messages[-1]["content"] if messages else "", page, gym_stats)
+
 
 def _api_messages() -> list:
     return [
@@ -291,17 +353,17 @@ def _api_messages() -> list:
         for m in st.session_state.get("ai_chat_history", [])[-20:]
     ]
 
-def _push_and_respond(user_text: str, page: str, gym_stats: dict):
+
+def _push_and_respond(user_text: str, page: str, gym_stats: dict,
+                      role="staff", username="", gym_id=None):
     if st.session_state.get("ai_last_question", "") == user_text:
         st.warning("⚠️ Yeh sawaal already pooch chuke ho!")
         return
-    
     st.session_state["ai_last_question"] = user_text
     st.session_state["ai_chat_history"].append({"role": "user", "content": user_text})
-    
     with st.spinner("🤔 Soch raha hoon..."):
-        reply = get_ai_response(_api_messages(), page, gym_stats)
-    
+        reply = get_ai_response(_api_messages(), page, gym_stats,
+                                role=role, username=username, gym_id=gym_id)
     st.session_state["ai_chat_history"].append({"role": "assistant", "content": reply})
     
     if st.session_state.get("auto_speak", True):
@@ -314,50 +376,84 @@ def _push_and_respond(user_text: str, page: str, gym_stats: dict):
 # SIDEBAR WIDGET
 # ============================================
 
-def render_sidebar_widget(current_page: str, gym_id=None):
+def render_sidebar_widget(current_page: str, gym_id=None, role="staff", username=""):
     _init_state()
-    
     gym_stats = {}
     try:
         gym_stats = db.get_stats(gym_id)
-    except:
+    except Exception:
         pass
-    
-    with st.expander("🤖 AI Assistant", expanded=False):
+
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
+    role_color = "#FBBF24" if role in ["admin", "owner"] else "#60A5FA"
+
+    with st.expander(f"🤖 AI Assistant — {role_label}", expanded=False):
+
+        # Proactive snapshot for admin
+        if role in ["admin", "owner"]:
+            try:
+                alerts = db.check_fraud_alerts(gym_id=gym_id)
+                today_total, today_count, _ = db.get_daily_fee_summary(gym_id=gym_id)
+                alert_badge = f"🚨 {len(alerts)} alert{'s' if len(alerts)!=1 else ''}" if alerts else "✅ Sab theek"
+                st.markdown(f"""
+                <div style="background:#0F172A;border:1px solid {role_color};border-radius:8px;
+                            padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.78rem;">
+                    <span style="color:{role_color};font-weight:700;">{role_label}</span>
+                    <span style="color:#94A3B8;"> · </span>
+                    <span style="color:#34D399;">💰 PKR {today_total:,.0f} aaj</span>
+                    <span style="color:#94A3B8;"> · </span>
+                    <span style="color:{'#F87171' if alerts else '#34D399'};">{alert_badge}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception:
+                pass
+
+        # Quick chips — role specific
+        if role in ["admin", "owner"]:
+            chips = ["Aaj ka summary?", "Koi fraud alert?", "Overdue members?", "Staff performance?"]
+        else:
+            chips = ["Fee kaise collect karein?", "Member kaise register karein?", "Shift kaise kholein?"]
+
+        chip_cols = st.columns(2)
+        for i, chip in enumerate(chips[:4]):
+            if chip_cols[i % 2].button(chip, key=f"sb_chip_{i}", use_container_width=True):
+                _push_and_respond(chip, current_page, gym_stats, role=role, username=username, gym_id=gym_id)
+
+        # Chat history preview
         history = st.session_state.get("ai_chat_history", [])
-        
         if history:
-            html = '<div style="max-height:150px;overflow-y:auto;font-size:0.8rem;">'
-            for msg in history[-5:]:
-                if msg["role"] == "user":
-                    html += f'<div style="background:#1E3A5F;padding:4px 8px;margin:2px 0;border-radius:5px;">👤 {msg["content"][:80]}...</div>'
-                else:
-                    html += f'<div style="background:#1E1E3A;padding:4px 8px;margin:2px 0;border-radius:5px;">🤖 {msg["content"][:80]}...</div>'
+            html = '<div style="max-height:180px;overflow-y:auto;font-size:0.78rem;margin:0.3rem 0;">'
+            for msg in history[-6:]:
+                bg  = "#1E3A5F" if msg["role"] == "user" else "#1a1a3a"
+                ico = "👤" if msg["role"] == "user" else "🤖"
+                txt = msg["content"][:100] + ("…" if len(msg["content"]) > 100 else "")
+                html += f'<div style="background:{bg};padding:4px 8px;margin:2px 0;border-radius:5px;">{ico} {txt}</div>'
             html += "</div>"
             st.markdown(html, unsafe_allow_html=True)
         else:
-            st.caption(f"Page: {current_page}. Kuch poochiye!")
-        
+            st.caption(f"📍 {current_page} · Kuch bhi poochiye!")
+
         key = f"sb_chat_{st.session_state.get('ai_input_counter', 0)}"
-        user_input = st.text_input("Message", placeholder="Roman Urdu mein likhein...", key=key, label_visibility="collapsed")
-        
+        user_input = st.text_input("", placeholder="Roman Urdu mein likhein...", key=key,
+                                   label_visibility="collapsed")
         col1, col2 = st.columns([3, 1])
-        send = col1.button("Send", key="sb_send_btn", type="primary", use_container_width=True)
-        clear = col2.button("🗑", key="sb_clear_btn", use_container_width=True)
-        
+        send  = col1.button("Send ➤", key="sb_send_btn",  type="primary", use_container_width=True)
+        clear = col2.button("🗑",     key="sb_clear_btn", use_container_width=True)
+
         if clear:
             st.session_state["ai_chat_history"] = []
             st.session_state["ai_last_question"] = ""
             st.session_state["ai_input_counter"] += 1
             st.rerun()
-        
+
         if send and user_input.strip():
-            _push_and_respond(user_input.strip(), current_page, gym_stats)
-        
-        auto = st.toggle("🔊 Voice Reply", value=st.session_state.get("auto_speak", True))
+            _push_and_respond(user_input.strip(), current_page, gym_stats,
+                              role=role, username=username, gym_id=gym_id)
+
+        auto = st.toggle("🔊 Voice", value=st.session_state.get("auto_speak", False), key="sb_voice_toggle")
         st.session_state["auto_speak"] = auto
-        
-        if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", True):
+
+        if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", False):
             play_tts(st.session_state["speak_trigger"])
             st.session_state["speak_trigger"] = None
 
@@ -534,29 +630,42 @@ def _video_player():
 # 💬 CHAT TAB
 # ============================================
 
-def _chat_tab(page: str, gym_stats: dict):
-    st.markdown("### 💬 AI Chat with Voice")
-    st.caption("🎤 **Roman Urdu mein sawal poochiye ya microphone use karein**")
-    
-    st.markdown("#### ⚡ Quick Questions")
-    chips = [
-        "Kitne members hain?",
-        "Aaj ki attendance?",
-        "Diet plan batao",
-        "Workout routine",
-        "Fees collection?",
-        "Expenses kya hain?"
-    ]
+def _chat_tab(page: str, gym_stats: dict, role="staff", username="", gym_id=None):
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
+
+    st.markdown(f"### 💬 GymPro AI — {role_label}")
+    st.caption("Real-time gym data ke saath AI — Roman Urdu mein poochiye, seedha jawab milega")
+
+    # Role-specific quick action chips
+    if role in ["admin", "owner"]:
+        chips = [
+            "Aaj ka mukammal summary do",
+            "Koi fraud ya chori alert hai?",
+            "Overdue members ki list aur total pending",
+            "Is mahine ka profit/loss",
+            "Staff mein se kaunsa sabse zyada collect kar raha hai?",
+            "Kaunse members aaj expire ho rahe hain?",
+        ]
+    else:
+        chips = [
+            "Fee kaise collect karein?",
+            "Naya member kaise register karein?",
+            "Shift kaise shuru karein?",
+            "Attendance kaise mark karein?",
+            "Receipt print kaise karein?",
+            "Member ki fee update kaise karein?",
+        ]
+
+    st.markdown("#### ⚡ Quick Questions — Ek Click Mein Jawab")
     cols = st.columns(3)
     for i, chip in enumerate(chips):
         if cols[i % 3].button(chip, key=f"chip_{i}", use_container_width=True):
-            _push_and_respond(chip, page, gym_stats)
-    
+            _push_and_respond(chip, page, gym_stats, role=role, username=username, gym_id=gym_id)
+
     st.divider()
-    
-    st.markdown("### 🎤 Voice Input")
-    
+
     if hasattr(st, "audio_input"):
+        st.markdown("### 🎤 Voice Input")
         voice_file = st.audio_input("🎙️ Press and speak (Roman Urdu/English)", key="mic_recorder_main")
         if voice_file is not None:
             audio_bytes = voice_file.read()
@@ -564,70 +673,71 @@ def _chat_tab(page: str, gym_stats: dict):
                 transcribed = transcribe_mic(audio_bytes)
                 if transcribed:
                     st.success(f"🗣️ Aapne kaha: **{transcribed}**")
-                    _push_and_respond(transcribed, page, gym_stats)
+                    _push_and_respond(transcribed, page, gym_stats, role=role, username=username, gym_id=gym_id)
                 else:
                     st.error("❌ Samajh nahi aaya. Dobara bolein.")
-    
-    st.divider()
-    
+        st.divider()
+
     history = st.session_state.get("ai_chat_history", [])
     for msg in history:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-    
-    if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", True):
+
+    if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", False):
         play_tts(st.session_state["speak_trigger"])
         st.session_state["speak_trigger"] = None
-    
+
     st.divider()
-    
+
     key = f"chat_input_{st.session_state.get('ai_input_counter', 0)}"
     col1, col2, col3 = st.columns([6, 1, 1])
-    user_input = col1.text_input("💬 Roman Urdu mein likhein:", key=key, label_visibility="collapsed",
-                                 placeholder="e.g. Aaj kitne members aaye?")
-    send = col2.button("Send ➤", key="send_chat_btn", type="primary", use_container_width=True)
+    user_input = col1.text_input("", key=key, label_visibility="collapsed",
+                                 placeholder="Roman Urdu mein likhein — e.g. Aaj kitna collect hua?")
+    send  = col2.button("Send ➤",  key="send_chat_btn",  type="primary", use_container_width=True)
     clear = col3.button("🗑 Clear", key="clear_chat_btn", use_container_width=True)
-    
+
     if clear:
         st.session_state["ai_chat_history"] = []
         st.session_state["ai_last_question"] = ""
         st.session_state["ai_input_counter"] += 1
         st.rerun()
-    
+
     if send and user_input.strip():
-        _push_and_respond(user_input.strip(), page, gym_stats)
+        _push_and_respond(user_input.strip(), page, gym_stats, role=role, username=username, gym_id=gym_id)
 
 # ============================================
 # MAIN RENDER
 # ============================================
 
-def render(gym_id=None, role=None):
+def render(gym_id=None, role=None, username=""):
     _init_state()
-    
-    st.markdown("""
+    role = role or "staff"
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
+
+    st.markdown(f"""
         <div style='text-align:center;padding:1rem;'>
-            <h1>🤖 AI Gym Assistant</h1>
-            <p style='font-size:1.1rem;'>💬 Chat • 🎵 Music • 🎬 Video</p>
+            <h1>🤖 GymPro AI Assistant</h1>
+            <p style='font-size:1.1rem;color:#94A3B8;'>Live gym data · Roman Urdu · Voice</p>
+            <p style='font-size:0.9rem;color:#FBBF24;'>{role_label} — {username}</p>
         </div>
     """, unsafe_allow_html=True)
-    
     st.divider()
-    
+
     current_page = st.session_state.get("page", "AI Assistant")
     gym_stats = {}
     try:
         gym_stats = db.get_stats(gym_id)
-    except:
+    except Exception:
         pass
-    
+
     tab1, tab2, tab3 = st.tabs(["💬 AI Chat", "🎬 Video", "🎵 Music"])
-    
+
     with tab1:
-        _chat_tab(current_page, gym_stats)
-    
+        _chat_tab(current_page, gym_stats, role=role, username=username, gym_id=gym_id)
+
     with tab2:
         _video_player()
-    
+
     with tab3:
         _music_player()
 
