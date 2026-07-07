@@ -204,8 +204,31 @@ def build_css(key: str) -> str:
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-* {{
-    font-family: 'Inter', sans-serif!important;
+/* Target font specifically — wildcard on SVG causes mobile double-render */
+body, p, span, div, h1, h2, h3, h4, h5, h6,
+button, input, select, textarea, label,
+td, th, li, a, small, caption {{
+    font-family: 'Inter', sans-serif !important;
+}}
+
+/* ── Fix mobile double-text: hide native HTML disclosure marker ── */
+details > summary {{
+    list-style: none !important;
+    -webkit-appearance: none !important;
+}}
+details > summary::-webkit-details-marker,
+details > summary::marker {{
+    display: none !important;
+    content: '' !important;
+}}
+/* Hide _arr helper span that leaks as visible text on some browsers */
+[data-testid="stExpander"] summary ._arr,
+[data-testid="stExpander"] summary span[class*="_arr"] {{
+    font-size: 0 !important;
+    color: transparent !important;
+    width: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
 }}
 
 .stApp {{
@@ -346,7 +369,7 @@ section[data-testid="stSidebar"].stButton > button:hover {{
 /* ── SELECTBOX TEXT VISIBILITY FIX ────────────────────────── */
 /* Force white text in selectbox */
 div[data-testid="stSelectbox"] label {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
@@ -356,11 +379,11 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] span {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"] {{
@@ -371,30 +394,30 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"] {{
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"] {{
     background: {c_bg}!important;
-    color: {text}!important !important;
+    color: {text}!important;
     padding: 8px 12px!important;
     border-radius: 6px!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"]:hover {{
     background: {p_dim}!important;
-    color: {p}!important !important;
+    color: {p}!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"][aria-selected="true"] {{
     background: {p_grad}!important;
-    color: #0A0A0A!important !important;
+    color: #0A0A0A!important;
     font-weight: 700!important;
 }}
 
 div[data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
-    fill: {text}!important !important;
+    fill: {text}!important;
     opacity: 0.6!important;
 }}
 
 /* Sidebar selectbox */
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
@@ -403,11 +426,11 @@ section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] span {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"] {{
@@ -417,38 +440,38 @@ section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"] {{
     background: {c_bg}!important;
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"]:hover {{
     background: {p_dim}!important;
-    color: {p}!important !important;
+    color: {p}!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="option"][aria-selected="true"] {{
     background: {p_grad}!important;
-    color: #0A0A0A!important !important;
+    color: #0A0A0A!important;
 }}
 
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
-    fill: {text}!important !important;
+    fill: {text}!important;
 }}
 
 /* Force all sidebar text to white */
 section[data-testid="stSidebar"] * {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] label {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] .stCheckbox label {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 
 section[data-testid="stSidebar"] .stCheckbox label span {{
-    color: {text}!important !important;
+    color: {text}!important;
 }}
 </style>
 """

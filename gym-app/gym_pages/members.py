@@ -102,11 +102,11 @@ def render(gym_id, role):
 
     st.markdown("---")
 
-    # ── Tabs — Members first (most used), Register second ────────────────────
-    tab_list, tab_add = st.tabs(["📋 Members", "➕ Register New Member"])
+    # ── Tabs — Register first, Members second ────────────────────────────────
+    tab_add, tab_list = st.tabs(["➕ Register New Member", "📋 Members"])
 
     # ══════════════════════════════════════════════════════════════════════════
-    # TAB 1 — MEMBER LIST
+    # TAB 2 — MEMBER LIST
     # ══════════════════════════════════════════════════════════════════════════
     with tab_list:
         gym_opts = {g.name: g.id for g in gyms}
@@ -251,30 +251,85 @@ def render(gym_id, role):
             with st.expander(f"💰 Fees Not Collected — {len(unpaid_list)} members  |  PKR {unpaid_total:,.0f} pending", expanded=bool(unpaid_list)):
                 if unpaid_list:
                     display = [{k: v for k, v in r.items() if k != "_fee"} for r in unpaid_list]
-                    st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(display),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "#":           st.column_config.NumberColumn("#", width="small"),
+                            "Serial":      st.column_config.TextColumn("Serial #", width="small"),
+                            "Name":        st.column_config.TextColumn("Name", width="medium"),
+                            "Phone":       st.column_config.TextColumn("Phone", width="small"),
+                            "Pending Fee": st.column_config.TextColumn("Pending Fee", width="small"),
+                            "Since":       st.column_config.TextColumn("Since", width="small"),
+                            "Days":        st.column_config.TextColumn("Days", width="small"),
+                        },
+                    )
                 else:
                     st.success("✅ All fees are up to date!")
 
             with st.expander(f"✅ Active Members — {len(active_list)}", expanded=False):
                 if active_list:
-                    st.dataframe(pd.DataFrame(active_list), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(active_list),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "#":         st.column_config.NumberColumn("#", width="small"),
+                            "Serial":    st.column_config.TextColumn("Serial #", width="small"),
+                            "Name":      st.column_config.TextColumn("Name", width="medium"),
+                            "Phone":     st.column_config.TextColumn("Phone", width="small"),
+                            "Type":      st.column_config.TextColumn("Type", width="small"),
+                            "Fee":       st.column_config.TextColumn("Fee", width="small"),
+                            "Expiry":    st.column_config.TextColumn("Expiry", width="small"),
+                            "Remaining": st.column_config.TextColumn("Left", width="small"),
+                        },
+                    )
                 else:
                     st.info("No active members.")
 
             with st.expander(f"⏳ Expiring in 7 Days — {len(upcoming_list)}", expanded=bool(upcoming_list)):
                 if upcoming_list:
-                    st.dataframe(pd.DataFrame(upcoming_list), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(upcoming_list),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "#":        st.column_config.NumberColumn("#", width="small"),
+                            "Serial":   st.column_config.TextColumn("Serial #", width="small"),
+                            "Name":     st.column_config.TextColumn("Name", width="medium"),
+                            "Phone":    st.column_config.TextColumn("Phone", width="small"),
+                            "Type":     st.column_config.TextColumn("Type", width="small"),
+                            "Fee":      st.column_config.TextColumn("Fee", width="small"),
+                            "Expiry":   st.column_config.TextColumn("Expiry", width="small"),
+                            "Days Left":st.column_config.TextColumn("Days Left", width="small"),
+                        },
+                    )
                 else:
                     st.info("No members expiring soon.")
 
             with st.expander(f"🚨 Expired Members — {len(expired_list)}", expanded=False):
                 if expired_list:
-                    st.dataframe(pd.DataFrame(expired_list), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(expired_list),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "#":       st.column_config.NumberColumn("#", width="small"),
+                            "Serial":  st.column_config.TextColumn("Serial #", width="small"),
+                            "Name":    st.column_config.TextColumn("Name", width="medium"),
+                            "Phone":   st.column_config.TextColumn("Phone", width="small"),
+                            "Type":    st.column_config.TextColumn("Type", width="small"),
+                            "Fee":     st.column_config.TextColumn("Fee", width="small"),
+                            "Expired": st.column_config.TextColumn("Expired", width="small"),
+                            "Overdue": st.column_config.TextColumn("Overdue", width="small"),
+                        },
+                    )
                 else:
                     st.success("No expired members.")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # TAB 2 — REGISTER
+    # TAB 1 — REGISTER
     # ══════════════════════════════════════════════════════════════════════════
     with tab_add:
         _register_form(gyms, gym_id, role)
