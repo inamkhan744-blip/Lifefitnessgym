@@ -13,4 +13,4 @@ paths = ["/"]
 run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
 [services.production]
-run = "bash /home/runner/workspace/gym-app/start.sh"
+run = ["/bin/bash", "/home/runner/workspace/gym-app/start.sh"]
