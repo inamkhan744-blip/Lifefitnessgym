@@ -13,7 +13,4 @@ paths = ["/"]
 run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
 [services.production]
-run = ["/bin/bash", "/home/runner/workspace/gym-app/start.sh"]
-
-[services.production.health.startup]
-path = "/_stcore/health"
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python -m streamlit run app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"

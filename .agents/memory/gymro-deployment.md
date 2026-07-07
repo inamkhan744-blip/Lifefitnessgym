@@ -27,25 +27,24 @@ paths = ["/"]
 run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
 [services.production]
-run = ["/bin/bash", "/home/runner/workspace/gym-app/start.sh"]
-
-[services.production.health.startup]
-path = "/_stcore/health"
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python -m streamlit run app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
 ```
 
-**Key:** `localPort = 8080` — Cloud Run (Autoscale) injects PORT env and routes on port 8080. Both `start.sh` and `run.py` must default to port 8080 when PORT env is not set.
+**Critical rule: production `run` must be a STRING, not an array.** Array format `run = ["/bin/bash", "..."]` causes pid1 to silently skip the service with zero runtime logs. The development run is a string, production must also be a string.
+
+**Key:** `localPort = 8080` — both dev (`run.py`) and prod (streamlit args) must bind to port 8080.
 
 ### Port alignment rule
-`localPort` in artifact.toml, `PORT` default in `start.sh`, and `PORT` default in `run.py` must all match. Mismatch causes health check to probe the wrong port.
+`localPort` in artifact.toml, `PORT` default in `run.py`, and `--server.port` in the production run command must all be 8080. Mismatch causes health check to probe wrong port.
 
 ## cv2 / face_engine lazy import
 cv2 is imported lazily in `face_engine.py` (only loaded on first function call). Do NOT add `import cv2` at module level anywhere — Cloud Run (gVisor sandbox) may SIGKILL the process on compiled C++ extension load. All cv2 references in `gym_pages/members.py` are inside try/except blocks inside functions.
 
-## Deployment history / notes
-- GCE (Reserved VM): attempted, failed — unknown root cause (zero runtime logs from `fetchDeploymentLogs`)
-- Autoscale (Cloud Run): switched by user in UI; build 98d2a48d failed at "Creating Autoscale service" ~5 min after service creation
-- Root cause theory: port mismatch — Cloud Run routes on 8080, app was starting on 5000
-- Fix applied: localPort=8080, PORT defaults=8080, health path=/_stcore/health
+## Deployment type
+Use **Reserved VM (GCE)**, not Autoscale (Cloud Run). Cloud Run lacks SOCI/ZTOC streaming so the ~3.6 GB Repl layer must fully download before the startup probe fires — the probe times out first. GCE uses SOCI lazy streaming and starts the container immediately.
+
+## Repl layer size (post-cleanup)
+After deleting `node_modules/` (500 MB) and `.local/share/pnpm/store/` (465 MB), the Repl layer is ~3.6 GB (dominated by `.pythonlibs/` at 3.4 GB). These JS directories are safe to delete since the app is pure Python. Restore with `pnpm install` if JS tooling is needed.
 
 ## How to bootstrap artifact from scratch
 ```javascript
