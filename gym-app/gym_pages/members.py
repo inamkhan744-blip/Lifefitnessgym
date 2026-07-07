@@ -248,8 +248,17 @@ def render(gym_id, role):
             st.markdown("---")
             unpaid_total = sum(r["_fee"] for r in unpaid_list)
 
-            with st.expander(f"💰 Fees Not Collected — {len(unpaid_list)} members  |  PKR {unpaid_total:,.0f} pending", expanded=bool(unpaid_list)):
+            # ── Inner tabs (no expander = no _arrow_right icon leak on mobile) ──
+            tl1, tl2, tl3, tl4 = st.tabs([
+                f"Fees ({len(unpaid_list)})",
+                f"Active ({len(active_list)})",
+                f"Expiring ({len(upcoming_list)})",
+                f"Expired ({len(expired_list)})",
+            ])
+
+            with tl1:
                 if unpaid_list:
+                    st.markdown(f"**PKR {unpaid_total:,.0f} pending** — {len(unpaid_list)} members")
                     display = [{k: v for k, v in r.items() if k != "_fee"} for r in unpaid_list]
                     st.dataframe(
                         pd.DataFrame(display),
@@ -260,15 +269,15 @@ def render(gym_id, role):
                             "Serial":      st.column_config.TextColumn("Serial #", width="small"),
                             "Name":        st.column_config.TextColumn("Name", width="medium"),
                             "Phone":       st.column_config.TextColumn("Phone", width="small"),
-                            "Pending Fee": st.column_config.TextColumn("Pending Fee", width="small"),
+                            "Pending Fee": st.column_config.TextColumn("Fee", width="small"),
                             "Since":       st.column_config.TextColumn("Since", width="small"),
                             "Days":        st.column_config.TextColumn("Days", width="small"),
                         },
                     )
                 else:
-                    st.success("✅ All fees are up to date!")
+                    st.success("All fees are up to date!")
 
-            with st.expander(f"✅ Active Members — {len(active_list)}", expanded=False):
+            with tl2:
                 if active_list:
                     st.dataframe(
                         pd.DataFrame(active_list),
@@ -288,27 +297,27 @@ def render(gym_id, role):
                 else:
                     st.info("No active members.")
 
-            with st.expander(f"⏳ Expiring in 7 Days — {len(upcoming_list)}", expanded=bool(upcoming_list)):
+            with tl3:
                 if upcoming_list:
                     st.dataframe(
                         pd.DataFrame(upcoming_list),
                         use_container_width=True,
                         hide_index=True,
                         column_config={
-                            "#":        st.column_config.NumberColumn("#", width="small"),
-                            "Serial":   st.column_config.TextColumn("Serial #", width="small"),
-                            "Name":     st.column_config.TextColumn("Name", width="medium"),
-                            "Phone":    st.column_config.TextColumn("Phone", width="small"),
-                            "Type":     st.column_config.TextColumn("Type", width="small"),
-                            "Fee":      st.column_config.TextColumn("Fee", width="small"),
-                            "Expiry":   st.column_config.TextColumn("Expiry", width="small"),
-                            "Days Left":st.column_config.TextColumn("Days Left", width="small"),
+                            "#":         st.column_config.NumberColumn("#", width="small"),
+                            "Serial":    st.column_config.TextColumn("Serial #", width="small"),
+                            "Name":      st.column_config.TextColumn("Name", width="medium"),
+                            "Phone":     st.column_config.TextColumn("Phone", width="small"),
+                            "Type":      st.column_config.TextColumn("Type", width="small"),
+                            "Fee":       st.column_config.TextColumn("Fee", width="small"),
+                            "Expiry":    st.column_config.TextColumn("Expiry", width="small"),
+                            "Days Left": st.column_config.TextColumn("Days Left", width="small"),
                         },
                     )
                 else:
                     st.info("No members expiring soon.")
 
-            with st.expander(f"🚨 Expired Members — {len(expired_list)}", expanded=False):
+            with tl4:
                 if expired_list:
                     st.dataframe(
                         pd.DataFrame(expired_list),
