@@ -5,7 +5,7 @@ version = "1.0.0"
 id = "gymPro5000PythonStreamlit"
 
 [[services]]
-localPort = 5000
+localPort = 8080
 name = "Start application"
 paths = ["/"]
 
@@ -14,3 +14,6 @@ run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/b
 
 [services.production]
 run = ["/bin/bash", "/home/runner/workspace/gym-app/start.sh"]
+
+[services.production.health.startup]
+path = "/_stcore/health"

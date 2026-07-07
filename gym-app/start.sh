@@ -62,7 +62,7 @@ echo "--- Verifying imports ---"
 }
 "$PYTHON" -c "import sqlalchemy; print('sqlalchemy:', sqlalchemy.__version__)" || echo "WARNING: sqlalchemy import failed"
 
-PORT="${PORT:-5000}"
+PORT="${PORT:-8080}"
 echo "=== Starting Streamlit on 0.0.0.0:${PORT} ==="
 
 cd /home/runner/workspace/gym-app
