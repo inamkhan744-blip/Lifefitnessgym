@@ -5,7 +5,7 @@ version = "1.0.0"
 id = "gymPro5000PythonStreamlit"
 
 [[services]]
-localPort = 8080
+localPort = 5000
 name = "Start application"
 paths = ["/"]
 
@@ -13,4 +13,4 @@ paths = ["/"]
 run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
 [services.production]
-run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python -m streamlit run app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none"
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"

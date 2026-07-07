@@ -6,7 +6,7 @@ import signal
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-port = os.environ.get("PORT", "8080")
+port = os.environ.get("PORT", "5000")
 
 
 def free_port(p):
