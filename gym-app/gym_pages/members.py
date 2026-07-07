@@ -76,39 +76,43 @@ def render(gym_id, role):
             st.warning("⚠️ Aapka account kisi gym se assign nahi hai. Admin se rabta karein.")
             return
 
-    # ============================================
-    # STATS OVERVIEW - 4 Cards
-    # ============================================
-    
+    # ── STATS — single row, shown once ───────────────────────────────────────
     gym_members = _cm(gym_id, "All", "")
-    total_members = len(gym_members)
+    today = date.today()
+    total_members  = len(gym_members)
     active_members = sum(1 for m in gym_members if m.status == "Active")
-    expiring_soon = len(_ce(gym_id))
-    gym_fees = _cf(gym_id)
+    expired_count  = 0
+    for m in gym_members:
+        if m.expiry_date:
+            try:
+                if (date.fromisoformat(str(m.expiry_date)) - today).days < 0:
+                    expired_count += 1
+            except Exception:
+                pass
+    expiring_soon  = len(_ce(gym_id))
+    gym_fees       = _cf(gym_id)
     total_collected = sum(f.amount for f in gym_fees) if gym_fees else 0
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("👥 Total Members", total_members)
-    with col2:
-        st.metric("✅ Active Members", active_members)
-    with col3:
-        st.metric("⚠️ Expiring Soon", expiring_soon)
-    with col4:
-        st.metric("💰 Total Fees", f"PKR {total_collected:,.0f}")
-    
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("👥 Total Members",    total_members)
+    c2.metric("✅ Active",           active_members)
+    c3.metric("🚨 Expired",          expired_count)
+    c4.metric("⏳ Expiring (7 days)", expiring_soon)
+    c5.metric("💰 Fees Collected",   f"PKR {total_collected:,.0f}")
+
     st.markdown("---")
 
-    tab_add, tab_list = st.tabs(["➕ Register Member", "📋 Member List"])
+    # ── Tabs — Members first (most used), Register second ────────────────────
+    tab_list, tab_add = st.tabs(["📋 Members", "➕ Register New Member"])
 
-    with tab_add:
-        _register_form(gyms, gym_id, role)
-
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 1 — MEMBER LIST
+    # ══════════════════════════════════════════════════════════════════════════
     with tab_list:
-        f1, f2, f3, f4 = st.columns([2, 2, 1, 1])
         gym_opts = {g.name: g.id for g in gyms}
 
+        # ── Filters + Export row ──────────────────────────────────────────────
+        f1, f2, f3, f4, f5 = st.columns([2, 2, 1, 1, 1])
         with f1:
             if gym_id or role == "staff":
                 chosen_gym_name = next((g.name for g in gyms if g.id == gym_id), gyms[0].name)
@@ -125,33 +129,74 @@ def render(gym_id, role):
         with f4:
             st.write("")
             st.write("")
-            st.button("🔄 Refresh", use_container_width=True, key="ml_refresh")
+            st.button("🔄 Refresh", use_container_width=True, key="ml_refresh",
+                      on_click=lambda: _cm.clear())
+        with f5:
+            st.write("")
+            st.write("")
+            export_btn = st.button("⬇️ Export CSV", use_container_width=True, key="ml_export")
 
         members = _cm(selected_gid, status_f, search)
 
-        # ============================================
-        # STATS
-        # ============================================
-        
-        active_c = sum(1 for m in members if m.status == "Active")
-        inactive_c = sum(1 for m in members if m.status == "Inactive")
-        suspended_c = sum(1 for m in members if m.status == "Suspended")
-        frozen_c = sum(1 for m in members if m.status == "Frozen")
-        
-        col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
-        col_s1.metric("📊 Total", len(members))
-        col_s2.metric("✅ Active", active_c)
-        col_s3.metric("⛔ Inactive", inactive_c)
-        col_s4.metric("⏸️ Suspended", suspended_c)
-        col_s5.metric("❄️ Frozen", frozen_c)
-
-        st.divider()
+        # ── Export CSV ────────────────────────────────────────────────────────
+        if export_btn and members:
+            import io as _io2
+            rows = []
+            for m in members:
+                rows.append({
+                    "Serial #": m.serial_number,
+                    "Full Name": m.full_name,
+                    "Phone": m.phone or "",
+                    "Email": m.email or "",
+                    "Gender": m.gender or "",
+                    "DOB": m.dob or "",
+                    "Membership": m.membership_type or "",
+                    "Fee (PKR)": m.fee_amount or 0,
+                    "Join Date": m.join_date,
+                    "Expiry Date": m.expiry_date or "",
+                    "Status": m.status,
+                    "Notes": m.notes or "",
+                })
+            csv_buf = _io2.StringIO()
+            pd.DataFrame(rows).to_csv(csv_buf, index=False)
+            st.download_button("📥 Download CSV", data=csv_buf.getvalue(),
+                               file_name="members_export.csv", mime="text/csv",
+                               key="ml_csv_dl")
 
         if not members:
             st.info("📭 No members match your filters.")
         else:
-            today = date.today()
+            # ── Member selector — at top so detail is immediately visible ─────
+            st.markdown("#### 👤 Select Member")
+            member_options = {m.serial_number: m for m in members}
 
+            # colour-coded label for expired/expiring
+            def _label(s):
+                m = member_options[s]
+                badge = ""
+                if m.expiry_date:
+                    try:
+                        d = (date.fromisoformat(str(m.expiry_date)) - today).days
+                        if d < 0:
+                            badge = " 🔴 EXPIRED"
+                        elif d <= 7:
+                            badge = f" 🟡 {d}d left"
+                    except Exception:
+                        pass
+                return f"{s} — {m.full_name}{badge}"
+
+            selected_serial = st.selectbox(
+                "Member",
+                list(member_options.keys()),
+                format_func=_label,
+                key="ml_select_member",
+                label_visibility="collapsed",
+            )
+            selected_m = member_options.get(selected_serial)
+            if selected_m:
+                _member_detail(selected_m, gyms, role)
+
+            # ── Summary tables (collapsible) ──────────────────────────────────
             active_list   = []
             expired_list  = []
             upcoming_list = []
@@ -163,7 +208,6 @@ def render(gym_id, role):
                 is_upcoming = False
                 days_left   = None
                 days_over   = None
-
                 if expiry_str:
                     try:
                         exp       = date.fromisoformat(expiry_str)
@@ -180,427 +224,300 @@ def render(gym_id, role):
                 phone   = m.phone or "—"
 
                 if m.status == "Active" and not is_expired:
-                    active_list.append({
-                        "No": len(active_list) + 1,
-                        "Serial #": m.serial_number or "—",
-                        "Member Name": m.full_name,
-                        "Phone": phone,
-                        "Membership": m.membership_type or "—",
-                        "Monthly Fee": fee_str,
-                        "Expiry Date": expiry_str or "—",
-                        "Remaining": f"{days_left}d" if days_left is not None else "—",
-                        "_color": "#10B981",
-                    })
-
+                    active_list.append({"#": len(active_list)+1, "Serial": m.serial_number or "—",
+                        "Name": m.full_name, "Phone": phone, "Type": m.membership_type or "—",
+                        "Fee": fee_str, "Expiry": expiry_str or "—",
+                        "Remaining": f"{days_left}d" if days_left is not None else "—"})
                 if is_expired:
-                    expired_list.append({
-                        "No": len(expired_list) + 1,
-                        "Serial #": m.serial_number or "—",
-                        "Member Name": m.full_name,
-                        "Phone": phone,
-                        "Membership": m.membership_type or "—",
-                        "Monthly Fee": fee_str,
-                        "Expired On": expiry_str or "—",
-                        "Overdue": f"{days_over}d",
-                        "_color": "#EF4444",
-                    })
-                    unpaid_list.append({
-                        "No": len(unpaid_list) + 1,
-                        "Serial #": m.serial_number or "—",
-                        "Member Name": m.full_name,
-                        "Phone": phone,
-                        "Membership": m.membership_type or "—",
-                        "Pending Fee": fee_str,
-                        "Fee Due Since": expiry_str or "—",
-                        "Days Overdue": f"{days_over} days",
-                        "_fee": m.fee_amount or 0,
-                    })
-
+                    expired_list.append({"#": len(expired_list)+1, "Serial": m.serial_number or "—",
+                        "Name": m.full_name, "Phone": phone, "Type": m.membership_type or "—",
+                        "Fee": fee_str, "Expired": expiry_str or "—", "Overdue": f"{days_over}d"})
+                    unpaid_list.append({"#": len(unpaid_list)+1, "Serial": m.serial_number or "—",
+                        "Name": m.full_name, "Phone": phone, "Pending Fee": fee_str,
+                        "Since": expiry_str or "—", "Days": f"{days_over}d",
+                        "_fee": m.fee_amount or 0})
                 if is_upcoming and not is_expired:
-                    upcoming_list.append({
-                        "No": len(upcoming_list) + 1,
-                        "Serial #": m.serial_number or "—",
-                        "Member Name": m.full_name,
-                        "Phone": phone,
-                        "Membership": m.membership_type or "—",
-                        "Monthly Fee": fee_str,
-                        "Expiry Date": expiry_str or "—",
-                        "Days Left": f"{days_left}d",
-                        "_color": "#F59E0B",
-                    })
-
+                    upcoming_list.append({"#": len(upcoming_list)+1, "Serial": m.serial_number or "—",
+                        "Name": m.full_name, "Phone": phone, "Type": m.membership_type or "—",
+                        "Fee": fee_str, "Expiry": expiry_str or "—", "Days Left": f"{days_left}d"})
                 if not expiry_str and m.status == "Active":
-                    unpaid_list.append({
-                        "No": len(unpaid_list) + 1,
-                        "Serial #": m.serial_number or "—",
-                        "Member Name": m.full_name,
-                        "Phone": phone,
-                        "Membership": m.membership_type or "—",
-                        "Pending Fee": fee_str,
-                        "Fee Due Since": "Not Set",
-                        "Days Overdue": "—",
-                        "_fee": m.fee_amount or 0,
-                    })
+                    unpaid_list.append({"#": len(unpaid_list)+1, "Serial": m.serial_number or "—",
+                        "Name": m.full_name, "Phone": phone, "Pending Fee": fee_str,
+                        "Since": "Not Set", "Days": "—", "_fee": m.fee_amount or 0})
 
-            def _html_table(rows, cols, border_color, last_col_badge=False):
-                if not rows:
-                    return ""
-                th_style = (
-                    "padding:8px 12px;text-align:left;font-size:0.78rem;"
-                    "font-weight:700;color:#94A3B8;text-transform:uppercase;"
-                    "letter-spacing:0.05em;border-bottom:1px solid #334155;"
-                    "white-space:nowrap;"
-                )
-                td_style = (
-                    "padding:8px 12px;font-size:0.84rem;color:#E2E8F0;"
-                    "border-bottom:1px solid #1E293B;white-space:nowrap;"
-                )
-                header = "".join(f'<th style="{th_style}">{c}</th>' for c in cols)
-                body   = ""
-                for i, row in enumerate(rows):
-                    bg      = "#0F172A" if i % 2 == 0 else "#0D1526"
-                    left_b  = f"border-left:3px solid {border_color};"
-                    cells   = ""
-                    for ci, col in enumerate(cols):
-                        val  = row.get(col, "—")
-                        extra = ""
-                        if col in ("Remaining", "Days Left"):
-                            extra = f"color:#34D399;font-weight:600;"
-                        elif col in ("Overdue", "Days Overdue"):
-                            extra = f"color:#F87171;font-weight:600;"
-                        elif col == "Pending Fee":
-                            extra = f"color:#FBBF24;font-weight:700;"
-                        elif col == "Member Name":
-                            extra = f"color:#F1F5F9;font-weight:600;"
-                        elif col == "Serial #":
-                            extra = f"color:#A78BFA;font-weight:600;"
-                        elif col == "No":
-                            extra = f"color:#64748B;"
-                        cells += f'<td style="{td_style}{extra}">{val}</td>'
-                    body += f'<tr style="background:{bg};{left_b}">{cells}</tr>'
-                return (
-                    '<div style="overflow-x:auto;overflow-y:auto;max-height:360px;'
-                    'border-radius:10px;border:1px solid #1E293B;">'
-                    f'<table style="width:100%;border-collapse:collapse;">'
-                    f'<thead><tr style="background:#1E293B;position:sticky;top:0;z-index:1;">'
-                    f'{header}</tr></thead>'
-                    f'<tbody>{body}</tbody>'
-                    '</table></div>'
-                )
-
-            def _section_header(icon, title, count, amount_str, border, bg):
-                return f"""
-                <div style="background:{bg};border:1.5px solid {border};border-radius:10px;
-                    padding:0.7rem 1rem;margin-bottom:0.6rem;display:flex;
-                    align-items:center;justify-content:space-between;">
-                  <span style="color:{border};font-weight:700;font-size:1rem;">
-                    {icon} {title}
-                  </span>
-                  <span>
-                    <span style="background:{border}22;color:{border};font-size:0.78rem;
-                        font-weight:700;padding:2px 10px;border-radius:20px;margin-right:8px;">
-                      {count} members
-                    </span>
-                    {f'<span style="color:#94A3B8;font-size:0.82rem;">{amount_str}</span>' if amount_str else ""}
-                  </span>
-                </div>"""
-
-            # ── 💰 FEES NOT COLLECTED (most important — shown first) ───────────
+            st.markdown("---")
             unpaid_total = sum(r["_fee"] for r in unpaid_list)
-            st.markdown(_section_header(
-                "💰", "Fees Not Collected",
-                len(unpaid_list),
-                f"Total Pending: PKR {unpaid_total:,.0f}" if unpaid_list else "",
-                "#EF4444", "#1A0505"
-            ), unsafe_allow_html=True)
 
-            if unpaid_list:
-                unpaid_cols = ["No","Serial #","Member Name","Phone","Membership","Pending Fee","Fee Due Since","Days Overdue"]
-                st.markdown(
-                    _html_table(unpaid_list, unpaid_cols, "#EF4444"),
-                    unsafe_allow_html=True,
-                )
-                st.caption(f"⚠️ {len(unpaid_list)} members have unpaid or overdue fees")
-            else:
-                st.success("✅ All members' fees are up to date!")
+            with st.expander(f"💰 Fees Not Collected — {len(unpaid_list)} members  |  PKR {unpaid_total:,.0f} pending", expanded=bool(unpaid_list)):
+                if unpaid_list:
+                    display = [{k: v for k, v in r.items() if k != "_fee"} for r in unpaid_list]
+                    st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
+                else:
+                    st.success("✅ All fees are up to date!")
 
-            st.markdown("<br>", unsafe_allow_html=True)
+            with st.expander(f"✅ Active Members — {len(active_list)}", expanded=False):
+                if active_list:
+                    st.dataframe(pd.DataFrame(active_list), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No active members.")
 
-            # ── ✅ ACTIVE MEMBERS ─────────────────────────────────────────────
-            act_total = sum((m.fee_amount or 0) for m in members
-                            if m.status == "Active" and m.expiry_date and
-                            (date.fromisoformat(str(m.expiry_date)) - today).days >= 0)
-            st.markdown(_section_header(
-                "✅", "Active Members",
-                len(active_list),
-                f"Total Fees: PKR {act_total:,.0f}" if active_list else "",
-                "#10B981", "#021A0F"
-            ), unsafe_allow_html=True)
+            with st.expander(f"⏳ Expiring in 7 Days — {len(upcoming_list)}", expanded=bool(upcoming_list)):
+                if upcoming_list:
+                    st.dataframe(pd.DataFrame(upcoming_list), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No members expiring soon.")
 
-            if active_list:
-                act_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expiry Date","Remaining"]
-                st.markdown(_html_table(active_list, act_cols, "#10B981"), unsafe_allow_html=True)
-                st.caption(f"📋 {len(active_list)} active members")
-            else:
-                st.info("No active members found.")
+            with st.expander(f"🚨 Expired Members — {len(expired_list)}", expanded=False):
+                if expired_list:
+                    st.dataframe(pd.DataFrame(expired_list), use_container_width=True, hide_index=True)
+                else:
+                    st.success("No expired members.")
 
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── ⏳ EXPIRING SOON ──────────────────────────────────────────────
-            st.markdown(_section_header(
-                "⏳", "Expiring Within 7 Days",
-                len(upcoming_list), "", "#F59E0B", "#1A1005"
-            ), unsafe_allow_html=True)
-
-            if upcoming_list:
-                up_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expiry Date","Days Left"]
-                st.markdown(_html_table(upcoming_list, up_cols, "#F59E0B"), unsafe_allow_html=True)
-                st.caption(f"📋 {len(upcoming_list)} members expiring soon — contact them to renew")
-            else:
-                st.info("✅ No members expiring within 7 days.")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── 🚨 EXPIRED MEMBERS ────────────────────────────────────────────
-            st.markdown(_section_header(
-                "🚨", "Expired Members",
-                len(expired_list), "", "#EF4444", "#1A0505"
-            ), unsafe_allow_html=True)
-
-            if expired_list:
-                exp_cols = ["No","Serial #","Member Name","Phone","Membership","Monthly Fee","Expired On","Overdue"]
-                st.markdown(_html_table(expired_list, exp_cols, "#EF4444"), unsafe_allow_html=True)
-                st.caption(f"📋 {len(expired_list)} expired members")
-            else:
-                st.success("✅ No expired members found.")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── 📊 QUICK SUMMARY ─────────────────────────────────────────────
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("✅ Active",        len(active_list))
-            s2.metric("💰 Unpaid",        len(unpaid_list),  delta=f"-PKR {unpaid_total:,.0f}" if unpaid_total else None, delta_color="inverse")
-            s3.metric("⏳ Expiring Soon", len(upcoming_list))
-            s4.metric("🚨 Expired",       len(expired_list))
-
-            st.divider()
-            st.markdown("### 👤 Member Details")
-            
-            # ============================================
-            # MEMBER SELECTION
-            # ============================================
-            
-            member_options = {m.serial_number: m for m in members}
-            
-            selected_serial = st.selectbox(
-                "Select member to view/edit",
-                list(member_options.keys()),
-                format_func=lambda s: f"{s} — {member_options[s].full_name}",
-                key="ml_select_member",
-            )
-            
-            selected_m = member_options.get(selected_serial)
-            if selected_m:
-                _member_detail(selected_m, gyms, role)
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 2 — REGISTER
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_add:
+        _register_form(gyms, gym_id, role)
 
 
 def _member_detail(m, gyms, role):
-    # ============================================
-    # ENHANCED MEMBER DETAIL
-    # ============================================
-    
-    col_photo, col_info = st.columns([1, 4])
+    today = date.today()
+    gym_name = next((g.name for g in gyms if g.id == m.gym_id), "—")
+
+    # ── Status badge & days calculation ──────────────────────────────────────
+    status_color = {"Active": "#10B981", "Inactive": "#EF4444",
+                    "Suspended": "#F59E0B", "Frozen": "#3B82F6"}.get(m.status, "#94A3B8")
+    status_emoji = {"Active": "🟢", "Inactive": "🔴",
+                    "Suspended": "🟡", "Frozen": "🔵"}.get(m.status, "⚪")
+    days_left = None
+    is_expired = False
+    if m.expiry_date:
+        try:
+            days_left  = (date.fromisoformat(str(m.expiry_date)) - today).days
+            is_expired = days_left < 0
+        except Exception:
+            pass
+
+    # birthday check
+    birthday_today = False
+    if m.dob:
+        try:
+            dob = date.fromisoformat(str(m.dob))
+            birthday_today = (dob.month == today.month and dob.day == today.day)
+        except Exception:
+            pass
+
+    st.markdown("---")
+
+    # ── Top row: photo + info card ────────────────────────────────────────────
+    col_photo, col_info = st.columns([1, 3])
     with col_photo:
-        show_photo(m.photo_path, w=160)
-    
+        show_photo(m.photo_path, w=150)
+
     with col_info:
-        gym_name = next((g.name for g in gyms if g.id == m.gym_id), "—")
-        
-        status_emoji = {
-            "Active": "🟢",
-            "Inactive": "🔴",
-            "Suspended": "🟡",
-            "Frozen": "🔵",
-        }.get(m.status, "⚪")
-        
-        st.markdown(f"### {status_emoji} {m.full_name}")
-        st.caption(f"🆔 {m.serial_number} · 📍 {gym_name}")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        birthday_banner = " 🎂 Birthday Today!" if birthday_today else ""
+        st.markdown(
+            f"<h3 style='margin:0;color:#F1F5F9'>{status_emoji} {m.full_name}{birthday_banner}</h3>"
+            f"<p style='margin:2px 0;color:#A78BFA;font-weight:600'>🆔 {m.serial_number} &nbsp;·&nbsp; "
+            f"<span style='color:#64748B'>📍 {gym_name}</span></p>",
+            unsafe_allow_html=True,
+        )
+
+        # expiry alert
+        if is_expired:
+            st.error(f"🚨 Membership expired {abs(days_left)} days ago")
+        elif days_left is not None and days_left <= 7:
+            st.warning(f"⏳ Expires in {days_left} day(s) — {m.expiry_date}")
+        elif days_left is not None:
+            st.success(f"✅ Active — {days_left} days remaining (expires {m.expiry_date})")
+
+        d1, d2, d3 = st.columns(3)
+        with d1:
             st.markdown("**📋 Membership**")
-            st.write(f"Type: **{m.membership_type}**")
+            st.write(f"Type: **{m.membership_type or '—'}**")
             st.write(f"Fee: **PKR {m.fee_amount:,.0f}**")
             st.write(f"Joined: **{m.join_date}**")
-        
-        with col2:
+        with d2:
             st.markdown("**📞 Contact**")
             st.write(f"Phone: **{m.phone or '—'}**")
             st.write(f"Email: **{m.email or '—'}**")
             st.write(f"Gender: **{m.gender or '—'}**")
-        
-        with col3:
-            st.markdown("**📅 Dates**")
-            st.write(f"Expires: **{m.expiry_date or '—'}**")
+        with d3:
+            st.markdown("**📅 Info**")
+            st.write(f"Expiry: **{m.expiry_date or '—'}**")
             st.write(f"DOB: **{m.dob or '—'}**")
-            if m.expiry_date:
-                try:
-                    exp = date.fromisoformat(m.expiry_date)
-                    days = (exp - date.today()).days
-                    if days >= 0:
-                        st.write(f"Days Left: **{days} days**")
-                    else:
-                        st.write(f"Days Left: **{days} days (EXPIRED)**")
-                except:
-                    pass
-        
-        if m.notes:
-            st.info(f"📝 Notes: {m.notes}")
+            st.write(f"Status: **{m.status}**")
 
-    # ============================================
-    # QUICK ACTION BUTTONS
-    # ============================================
-    
-    st.markdown("---")
-    st.markdown("### ⚡ Quick Actions")
-    
-    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
-    
-    with col_q1:
-        if st.button("📱 WhatsApp", use_container_width=True, key=f"wa_{m.id}"):
-            if m.phone:
-                wa_link = f"https://wa.me/{m.phone.replace(' ', '').replace('-', '')}"
-                st.markdown(f'<a href="{wa_link}" target="_blank">Open WhatsApp</a>', unsafe_allow_html=True)
-            else:
-                st.warning("No phone number")
-    
-    with col_q2:
-        if st.button("📋 Copy Serial", use_container_width=True, key=f"copy_{m.id}"):
+        if m.notes:
+            st.info(f"📝 {m.notes}")
+
+    # ── Quick Actions row ─────────────────────────────────────────────────────
+    st.markdown("#### ⚡ Quick Actions")
+    qa1, qa2, qa3, qa4, qa5 = st.columns(5)
+
+    # WhatsApp — proper clickable link
+    with qa1:
+        if m.phone:
+            clean_phone = m.phone.replace(" ", "").replace("-", "").replace("+", "")
+            wa_url = f"https://wa.me/{clean_phone}"
+            st.link_button("📱 WhatsApp", wa_url, use_container_width=True)
+        else:
+            st.button("📱 WhatsApp", disabled=True, use_container_width=True, key=f"wa_dis_{m.id}")
+
+    # Copy serial
+    with qa2:
+        if st.button("📋 Serial #", use_container_width=True, key=f"copy_{m.id}"):
             st.code(m.serial_number)
-    
-    with col_q3:
+
+    # Renew
+    with qa3:
         renew_key = f"renew_active_{m.id}"
-        if st.button("📅 Renew Membership", use_container_width=True, key=f"renew_btn_{m.id}"):
+        if st.button("📅 Renew", use_container_width=True, key=f"renew_btn_{m.id}"):
             st.session_state[renew_key] = not st.session_state.get(renew_key, False)
             st.rerun()
-    
-    with col_q4:
-        if st.button("📊 View Progress", use_container_width=True, key=f"progress_{m.id}"):
+
+    # Quick status change
+    with qa4:
+        qs_key = f"qs_toggle_{m.id}"
+        if st.button("🔄 Change Status", use_container_width=True, key=f"qs_btn_{m.id}"):
+            st.session_state[qs_key] = not st.session_state.get(qs_key, False)
+            st.rerun()
+
+    # Progress
+    with qa5:
+        if st.button("📊 Progress", use_container_width=True, key=f"progress_{m.id}"):
             st.session_state["page"] = "Progress Tracker"
             st.rerun()
-    
-    # ============================================
-    # RENEW POPUP
-    # ============================================
-    
+
+    # ── Quick Status Change panel ─────────────────────────────────────────────
+    qs_key = f"qs_toggle_{m.id}"
+    if st.session_state.get(qs_key, False):
+        with st.container():
+            st.markdown("**🔄 Change Status**")
+            new_status_cols = st.columns(4)
+            for idx, s in enumerate(STATUSES):
+                with new_status_cols[idx]:
+                    is_cur = m.status == s
+                    if st.button(
+                        f"{'✅ ' if is_cur else ''}{s}",
+                        key=f"qs_{m.id}_{s}",
+                        type="primary" if is_cur else "secondary",
+                        use_container_width=True,
+                    ):
+                        db.update_member(m.id, status=s)
+                        st.session_state[qs_key] = False
+                        _cm.clear()
+                        st.success(f"Status updated to **{s}**")
+                        st.rerun()
+
+    # ── Renew panel ───────────────────────────────────────────────────────────
     renew_key = f"renew_active_{m.id}"
     if st.session_state.get(renew_key, False):
         with st.container():
-            st.markdown("---")
-            st.markdown("#### 📅 Renew Membership")
-            
+            st.markdown("**📅 Renew Membership**")
             st.info(f"Current expiry: **{m.expiry_date or 'Not set'}**")
-            
-            new_expiry = st.date_input(
-                "New Expiry Date",
-                value=date.fromisoformat(m.expiry_date) + timedelta(days=30) if m.expiry_date else date.today() + timedelta(days=30),
-                key=f"renew_date_{m.id}"
-            )
-            
-            col_r1, col_r2, col_r3 = st.columns(3)
-            with col_r1:
-                if st.button("✅ Confirm Renewal", key=f"renew_confirm_{m.id}", type="primary"):
-                    db.update_member(m.id, expiry_date=str(new_expiry), status="Active")
-                    st.success(f"✅ Membership renewed until {new_expiry}!")
+            try:
+                base = date.fromisoformat(str(m.expiry_date)) if m.expiry_date else today
+            except Exception:
+                base = today
+
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            with rc1:
+                if st.button("1 Month", use_container_width=True, key=f"ren1_{m.id}"):
+                    new_exp = base + timedelta(days=30)
+                    db.update_member(m.id, expiry_date=str(new_exp), status="Active")
                     st.session_state[renew_key] = False
-                    st.balloons()
+                    _cm.clear()
+                    st.success(f"✅ Renewed until {new_exp}")
                     st.rerun()
-            with col_r2:
+            with rc2:
+                if st.button("3 Months", use_container_width=True, key=f"ren3_{m.id}"):
+                    new_exp = base + timedelta(days=90)
+                    db.update_member(m.id, expiry_date=str(new_exp), status="Active")
+                    st.session_state[renew_key] = False
+                    _cm.clear()
+                    st.success(f"✅ Renewed until {new_exp}")
+                    st.rerun()
+            with rc3:
+                if st.button("6 Months", use_container_width=True, key=f"ren6_{m.id}"):
+                    new_exp = base + timedelta(days=180)
+                    db.update_member(m.id, expiry_date=str(new_exp), status="Active")
+                    st.session_state[renew_key] = False
+                    _cm.clear()
+                    st.success(f"✅ Renewed until {new_exp}")
+                    st.rerun()
+            with rc4:
+                if st.button("1 Year", use_container_width=True, key=f"ren12_{m.id}"):
+                    new_exp = base + timedelta(days=365)
+                    db.update_member(m.id, expiry_date=str(new_exp), status="Active")
+                    st.session_state[renew_key] = False
+                    _cm.clear()
+                    st.success(f"✅ Renewed until {new_exp}")
+                    st.rerun()
+
+            custom_exp = st.date_input("Or pick custom date",
+                                       value=base + timedelta(days=30),
+                                       key=f"renew_date_{m.id}")
+            rcc1, rcc2 = st.columns(2)
+            with rcc1:
+                if st.button("✅ Confirm Custom", key=f"renew_confirm_{m.id}", type="primary"):
+                    db.update_member(m.id, expiry_date=str(custom_exp), status="Active")
+                    st.session_state[renew_key] = False
+                    _cm.clear()
+                    st.success(f"✅ Renewed until {custom_exp}")
+                    st.rerun()
+            with rcc2:
                 if st.button("❌ Cancel", key=f"renew_cancel_{m.id}"):
                     st.session_state[renew_key] = False
                     st.rerun()
-            with col_r3:
-                if st.button("🗑️ Close", key=f"renew_close_{m.id}"):
-                    st.session_state[renew_key] = False
-                    st.rerun()
 
-    # ============================================
-    # QR CODE
-    # ============================================
-    
+    # ── ID Card & QR ─────────────────────────────────────────────────────────
     with st.expander("🪪 ID Card & QR Code"):
-        gyms = db.get_all_gyms()
-        gym_name = next((g.name for g in gyms if g.id == m.gym_id), "GymPro")
-
+        gyms_all = db.get_all_gyms()
+        gname = next((g.name for g in gyms_all if g.id == m.gym_id), "GymPro")
         try:
-            card_png = id_card.generate_id_card_png(m, gym_name)
+            card_png = id_card.generate_id_card_png(m, gname)
             st.image(card_png, caption="Member ID Card Preview", use_container_width=True)
-
             dl1, dl2, dl3 = st.columns(3)
-
             with dl1:
-                st.download_button(
-                    "⬇️ Download PNG",
-                    data=card_png,
-                    file_name=f"{m.serial_number}_id_card.png",
-                    mime="image/png",
-                    key=f"card_png_{m.id}",
-                    use_container_width=True,
-                )
-
+                st.download_button("⬇️ Download PNG", data=card_png,
+                                   file_name=f"{m.serial_number}_id_card.png", mime="image/png",
+                                   key=f"card_png_{m.id}", use_container_width=True)
             with dl2:
                 try:
-                    card_pdf = id_card.generate_id_card_pdf(m, gym_name)
-                    st.download_button(
-                        "⬇️ Download PDF",
-                        data=card_pdf,
-                        file_name=f"{m.serial_number}_id_card.pdf",
-                        mime="application/pdf",
-                        key=f"card_pdf_{m.id}",
-                        use_container_width=True,
-                    )
+                    card_pdf = id_card.generate_id_card_pdf(m, gname)
+                    st.download_button("⬇️ Download PDF", data=card_pdf,
+                                       file_name=f"{m.serial_number}_id_card.pdf",
+                                       mime="application/pdf", key=f"card_pdf_{m.id}",
+                                       use_container_width=True)
                 except Exception as e:
-                    st.warning(f"PDF error: {e}")
-
+                    st.warning(f"PDF: {e}")
             with dl3:
                 qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
-                st.download_button(
-                    "⬇️ QR Code Only",
-                    data=qr_png,
-                    file_name=f"{m.serial_number}_qr.png",
-                    mime="image/png",
-                    key=f"qr_dl_{m.id}",
-                    use_container_width=True,
-                )
-
+                st.download_button("⬇️ QR Code", data=qr_png,
+                                   file_name=f"{m.serial_number}_qr.png", mime="image/png",
+                                   key=f"qr_dl_{m.id}", use_container_width=True)
         except Exception as e:
-            st.error(f"ID card generation error: {e}")
+            st.error(f"ID card error: {e}")
             qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
             st.image(qr_png, width=200, caption=m.serial_number)
             st.download_button("⬇️ QR PNG", data=qr_png,
-                               file_name=f"{m.serial_number}_qr.png",
-                               mime="image/png", key=f"qr_fb_{m.id}")
+                               file_name=f"{m.serial_number}_qr.png", mime="image/png",
+                               key=f"qr_fb_{m.id}")
 
-    # ============================================
-    # FACE RECOGNITION
-    # ============================================
-    
+    # ── Face Recognition ──────────────────────────────────────────────────────
     with st.expander("📸 Face Recognition Registration"):
         st.info("Register member's face for automatic check-in")
-        
         try:
-            import psycopg2
-            import os as os_env
-            DATABASE_URL = os_env.environ.get('DATABASE_URL')
-            conn = psycopg2.connect(DATABASE_URL)
+            import psycopg2, os as os_env
+            conn   = psycopg2.connect(os_env.environ.get("DATABASE_URL"))
             cursor = conn.cursor()
             cursor.execute("SELECT face_encoding FROM members WHERE id = %s", (m.id,))
             result = cursor.fetchone()
             cursor.close()
             conn.close()
-            
             if result and result[0]:
-                st.success("✅ Face already registered for this member!")
+                st.success("✅ Face already registered!")
                 if st.button("🔄 Re-register Face", key=f"rereg_face_{m.id}"):
                     register_face_for_member(m.id)
             else:
@@ -610,30 +527,29 @@ def _member_detail(m, gyms, role):
             st.error(f"Database error: {e}")
             register_face_for_member(m.id)
 
-    # ============================================
-    # EDIT SECTION
-    # ============================================
-    
+    # ── Edit & Delete (admin/staff only) ──────────────────────────────────────
     if role in ("admin", "staff"):
-        with st.expander("✏️ Edit Member", expanded=False):
+        with st.expander("✏️ Edit Member Details", expanded=False):
             _edit_form(m, gyms)
+
         if role == "admin":
             st.divider()
-            col_del1, col_del2 = st.columns([1, 5])
+            col_del1, _ = st.columns([1, 5])
             with col_del1:
                 if st.button("🗑️ Delete Member", key=f"del_m_{m.id}", type="primary"):
                     st.session_state[f"confirm_del_m_{m.id}"] = True
             if st.session_state.get(f"confirm_del_m_{m.id}"):
-                st.warning("⚠️ Permanently delete this member? This action cannot be undone!")
-                col_del1, col_del2 = st.columns(2)
-                if col_del1.button("✅ Yes, Delete", key=f"cdy_{m.id}", type="primary"):
+                st.warning("⚠️ Permanently delete this member? Cannot be undone!")
+                cd1, cd2 = st.columns(2)
+                if cd1.button("✅ Yes, Delete", key=f"cdy_{m.id}", type="primary"):
                     if m.photo_path:
                         object_store.delete_photo(m.photo_path)
                     db.delete_member(m.id)
-                    st.success("✅ Member deleted successfully.")
+                    st.success("✅ Member deleted.")
                     st.session_state.pop(f"confirm_del_m_{m.id}", None)
+                    _cm.clear()
                     st.rerun()
-                if col_del2.button("❌ Cancel", key=f"cdn_{m.id}"):
+                if cd2.button("❌ Cancel", key=f"cdn_{m.id}"):
                     st.session_state.pop(f"confirm_del_m_{m.id}", None)
                     st.rerun()
 
