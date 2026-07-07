@@ -755,15 +755,15 @@ def _edit_form(m, gyms):
         if save:
             photo_path = m.photo_path
             if photo:
-                new_key = f"member_photos/{m.serial_number}.jpg"
                 photo_bytes = photo.getbuffer()
-                object_store.upload_photo(bytes(photo_bytes), photo.name, serial=m.serial_number)
-                if m.photo_path and m.photo_path != new_key:
+                uploaded_key = object_store.upload_photo(bytes(photo_bytes), photo.name, serial=m.serial_number)
+                if m.photo_path and m.photo_path != uploaded_key:
                     try:
                         object_store.delete_photo(m.photo_path)
                     except Exception:
                         pass
-                photo_path = new_key
+                photo_path = uploaded_key
+                object_store.get_photo_bytes.clear()
             ok, msg = db.update_member(
                 m.id, full_name=full_name, phone=phone, email=email,
                 gender=gender, dob=str(dob) if dob else "",

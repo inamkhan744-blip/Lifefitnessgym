@@ -636,22 +636,13 @@ def render(gym_id, role):
         
         _up_sig = f"{selected_m.id}_{new_photo.name}_{new_photo.size}" if new_photo else None
         if new_photo and st.session_state.get("_card_last_upload") != _up_sig:
-            ext = os.path.splitext(new_photo.name)[-1].lower()
-            clean_s = str(selected_m.serial_number).strip().replace("-", "").lower()
-            new_filename = f"{clean_s}{ext}"
-            path = os.path.join(UPLOAD_DIR, new_filename)
-
-            img = Image.open(new_photo)
-            img = ImageOps.exif_transpose(img)
-            if img.mode not in ("RGB",):
-                img = img.convert("RGB")
-            if img.width > 400:
-                img = img.resize((400, int(img.height * 400 / img.width)), Image.Resampling.LANCZOS)
-            img.save(path, "JPEG", quality=70, optimize=True)
+            photo_bytes = new_photo.getbuffer()
+            uploaded_key = object_store.upload_photo(bytes(photo_bytes), new_photo.name, serial=selected_m.serial_number)
+            object_store.get_photo_bytes.clear()
 
             db.update_member(
                 selected_m.id,
-                photo_path=f"gym-app/uploads/{new_filename}",
+                photo_path=uploaded_key,
                 full_name=selected_m.full_name,
                 phone=selected_m.phone or "",
                 email=selected_m.email or "",
