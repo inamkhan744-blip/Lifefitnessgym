@@ -1,19 +1,16 @@
 kind = "web"
-  previewPath = "/"
-  title = "GymPro"
-  version = "1.0.0"
-  id = "gymPro5000PythonStreamlit"
+previewPath = "/"
+title = "GymPro"
+version = "1.0.0"
+id = "gymPro5000PythonStreamlit"
 
-  [[services]]
-  localPort = 5000
-  name = "Start application"
-  paths = ["/"]
+[[services]]
+localPort = 5000
+name = "Start application"
+paths = ["/"]
 
-  [services.development]
-  run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
+[services.development]
+run = "cd /home/runner/workspace/gym-app && /home/runner/workspace/.pythonlibs/bin/python run.py"
 
-  [services.production]
-  run = "bash /home/runner/workspace/gym-app/start.sh"
-
-  [services.production.health.startup]
-  path = "/_stcore/health"
+[services.production]
+run = "bash /home/runner/workspace/gym-app/start.sh"
