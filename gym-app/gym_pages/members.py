@@ -697,7 +697,7 @@ def _register_form(gyms, gym_id, role):
                         new_key = f"member_photos/{serial}.jpg"
                         if object_store.rename_photo(photo_path, new_key):
                             member = db.get_member_by_serial(serial)
-                            if member:
+                            if member and not photo_path.startswith("http"):
                                 db.update_member_photo_path(member.id, new_key)
                     st.success(f"🎉 {msg}")
                     st.balloons()
