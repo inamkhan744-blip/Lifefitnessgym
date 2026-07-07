@@ -764,6 +764,7 @@ def _edit_form(m, gyms):
                         pass
                 photo_path = uploaded_key
                 object_store.get_photo_bytes.clear()
+                st.session_state.photo_cache = {}
             ok, msg = db.update_member(
                 m.id, full_name=full_name, phone=phone, email=email,
                 gender=gender, dob=str(dob) if dob else "",

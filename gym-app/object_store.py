@@ -98,6 +98,7 @@ def _cloudinary_upload(image_bytes: bytes, public_id: str) -> str | None:
             public_id=public_id,
             folder="gymapp_members",
             overwrite=True,
+            invalidate=True,
             resource_type="image",
         )
         return result.get("secure_url")
