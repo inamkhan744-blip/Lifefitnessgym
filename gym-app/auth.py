@@ -6,9 +6,11 @@ ROLE_PAGES = {
     "admin":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
                 "Fee Collection", "Expenses", "Inventory", "Reports",
                 "Message Center", "WhatsApp", "Complaints", "Audit",
-                "Gym Setup", "User Management", "AI Assistant", "Staff Targets"],
+                "Gym Setup", "User Management", "AI Assistant", "Staff Targets",
+                "Member Portal"],
     "staff":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
-                "Fee Collection", "Expenses", "Inventory", "Complaints", "AI Assistant"],
+                "Fee Collection", "Expenses", "Inventory", "Complaints", "AI Assistant",
+                "Member Portal"],
     "auditor": ["Dashboard", "Audit", "Reports", "AI Assistant"],
 }
 

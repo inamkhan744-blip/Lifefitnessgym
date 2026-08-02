@@ -363,7 +363,7 @@ def render(gym_id, role, current_user):
     ])
 
     # ============================================
-    # TAB 1: ADD EXPENSE (DATABASE COMPATIBLE)
+    # TAB 1: ADD EXPENSE
     # ============================================
     
     with tab_add:
@@ -402,7 +402,6 @@ def render(gym_id, role, current_user):
                 if amount <= 0:
                     st.error("❌ Amount must be greater than 0!")
                 else:
-                    # ✅ DATABASE COMPATIBLE - Using correct parameters
                     ok, msg = db.add_expense(
                         gym_id=sel_gid,
                         amount=amount,
@@ -551,9 +550,26 @@ def render(gym_id, role, current_user):
                                 new_staff = st.text_input("Staff Name", value=selected_exp.staff_name or "")
                                 
                                 if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
-                                    # Note: update_expense may not exist in database, so we'll just show a message
-                                    st.warning("⚠️ Edit functionality requires update_expense in database.py")
-                                    st.info(f"Would update: {selected_exp.id} with {new_category} - PKR {new_amount}")
+                                    # ✅ Try update_expense if available
+                                    if hasattr(db, 'update_expense'):
+                                        ok, msg = db.update_expense(
+                                            expense_id=selected_id,
+                                            amount=new_amount,
+                                            category=new_category,
+                                            description=new_description,
+                                            expense_date=new_date,
+                                            staff_name=new_staff
+                                        )
+                                        if ok:
+                                            st.success("✅ Expense updated!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ {msg}")
+                                    else:
+                                        # Fallback: show what would be updated
+                                        st.warning("⚠️ update_expense not available in database.py")
+                                        st.info(f"Would update: {selected_id} with {new_category} - PKR {new_amount:,.2f}")
+                
                 # Delete
                 with col_delete:
                     with st.expander("🗑️ Delete Record", expanded=False):
@@ -599,7 +615,6 @@ def render(gym_id, role, current_user):
                 category_totals[cat] = category_totals.get(cat, 0) + e.amount
             
             if category_totals:
-                # Create pie chart
                 fig = go.Figure(data=[go.Pie(
                     labels=list(category_totals.keys()),
                     values=list(category_totals.values()),
@@ -625,7 +640,6 @@ def render(gym_id, role, current_user):
             # Monthly trend
             st.subheader("📈 Monthly Trend")
             
-            # Group by month
             monthly_data = {}
             for e in expenses:
                 if e.expense_date:
@@ -633,7 +647,6 @@ def render(gym_id, role, current_user):
                     monthly_data[month_key] = monthly_data.get(month_key, 0) + e.amount
             
             if monthly_data:
-                # Sort by date
                 sorted_months = sorted(monthly_data.keys(), key=lambda x: datetime.strptime(x, "%b %Y"))
                 sorted_values = [monthly_data[m] for m in sorted_months]
                 

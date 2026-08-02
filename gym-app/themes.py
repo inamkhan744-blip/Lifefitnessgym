@@ -1,8 +1,6 @@
 """
-GymPro Theme System v5.2 - Premium Dark Edition
-
-8 premium dark themes with glass effects
-FIXED: Theme selector text visibility
+GymPro Theme System v6.0 - Premium Dark Edition
+12 Premium Themes with Glass Effects
 """
 
 import streamlit as st
@@ -11,6 +9,7 @@ import random
 
 # ─── THEMES - Premium Dark Dashboard ──────────
 THEMES = {
+    # 🔥 EXISTING THEMES
     "energy_burst": {
         "name": "Energy Burst",
         "emoji": "⚡",
@@ -171,6 +170,148 @@ THEMES = {
         "vibe": "🌌 Galaxy Dreams",
         "motivation": "Reach for the Stars! 🌟",
     },
+
+    # 🆕 NEW THEMES
+    "sunset_orange": {
+        "name": "Sunset Orange",
+        "emoji": "🌅",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#F97316",
+        "primary_gradient": "linear-gradient(135deg, #F97316, #F59E0B)",
+        "primary_dim": "rgba(249, 115, 22, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(249, 115, 22, 0.2)",
+        "glow": "0 0 60px rgba(249, 115, 22, 0.15)",
+        "vibe": "🌅 Warm Sunset",
+        "motivation": "End the Day Strong! 💪",
+    },
+    "ice_blue": {
+        "name": "Ice Blue",
+        "emoji": "❄️",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#38BDF8",
+        "primary_gradient": "linear-gradient(135deg, #38BDF8, #818CF8)",
+        "primary_dim": "rgba(56, 189, 248, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(56, 189, 248, 0.2)",
+        "glow": "0 0 60px rgba(56, 189, 248, 0.15)",
+        "vibe": "❄️ Cool Ice",
+        "motivation": "Stay Frosty! ❄️",
+    },
+    "forest_green": {
+        "name": "Forest Green",
+        "emoji": "🌲",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#22C55E",
+        "primary_gradient": "linear-gradient(135deg, #22C55E, #16A34A)",
+        "primary_dim": "rgba(34, 197, 94, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(34, 197, 94, 0.2)",
+        "glow": "0 0 60px rgba(34, 197, 94, 0.15)",
+        "vibe": "🌲 Forest Fresh",
+        "motivation": "Grow Like a Tree! 🌳",
+    },
+    "cherry_blossom": {
+        "name": "Cherry Blossom",
+        "emoji": "🌸",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#F472B6",
+        "primary_gradient": "linear-gradient(135deg, #F472B6, #EC4899)",
+        "primary_dim": "rgba(244, 114, 182, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(244, 114, 182, 0.2)",
+        "glow": "0 0 60px rgba(244, 114, 182, 0.15)",
+        "vibe": "🌸 Spring Vibes",
+        "motivation": "Bloom Where You Are! 🌸",
+    },
+    "golden_hour": {
+        "name": "Golden Hour",
+        "emoji": "🌇",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#FBBF24",
+        "primary_gradient": "linear-gradient(135deg, #FBBF24, #F59E0B)",
+        "primary_dim": "rgba(251, 191, 36, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(251, 191, 36, 0.2)",
+        "glow": "0 0 60px rgba(251, 191, 36, 0.15)",
+        "vibe": "🌇 Golden Hour",
+        "motivation": "Make It Golden! ✨",
+    },
+    "dark_knight": {
+        "name": "Dark Knight",
+        "emoji": "🦇",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#94A3B8",
+        "primary_gradient": "linear-gradient(135deg, #94A3B8, #64748B)",
+        "primary_dim": "rgba(148, 163, 184, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(148, 163, 184, 0.2)",
+        "glow": "0 0 60px rgba(148, 163, 184, 0.15)",
+        "vibe": "🦇 Dark Knight",
+        "motivation": "Be the Hero! 🦸",
+    },
+    "tropical_sunset": {
+        "name": "Tropical Sunset",
+        "emoji": "🏝️",
+        "bg": "#0A0A0A",
+        "sidebar_bg": "rgba(10, 10, 10, 0.95)",
+        "card_bg": "rgba(20, 20, 20, 0.85)",
+        "border": "#2A2A2A",
+        "primary": "#F472B6",
+        "primary_gradient": "linear-gradient(135deg, #F472B6, #F97316)",
+        "primary_dim": "rgba(244, 114, 182, 0.15)",
+        "success": "#1EB980",
+        "danger": "#FF5A5A",
+        "text": "#FFFFFF",
+        "text_muted": "#8A8A8A",
+        "text_dim": "#5A5A5A",
+        "shadow": "rgba(244, 114, 182, 0.2)",
+        "glow": "0 0 60px rgba(244, 114, 182, 0.15)",
+        "vibe": "🏝️ Tropical Vibes",
+        "motivation": "Paradise Workout! 🌴",
+    },
 }
 
 THEME_KEYS = list(THEMES.keys())
@@ -211,7 +352,7 @@ td, th, li, a, small, caption {{
     font-family: 'Inter', sans-serif !important;
 }}
 
-/* ── Fix mobile double-text: hide native HTML disclosure marker ── */
+/* ── 🔥 FIX: Expander arrow - Complete fix for "arrwEditMember D" leak ── */
 details > summary {{
     list-style: none !important;
     -webkit-appearance: none !important;
@@ -221,14 +362,36 @@ details > summary::marker {{
     display: none !important;
     content: '' !important;
 }}
-/* Hide _arr helper span that leaks as visible text on some browsers */
+
+/* 🔥 FIX: Hide _arr class completely */
 [data-testid="stExpander"] summary ._arr,
-[data-testid="stExpander"] summary span[class*="_arr"] {{
+[data-testid="stExpander"] summary span[class*="_arr"],
+[data-testid="stExpander"] summary .stExpanderArrow {{
+    display: none !important;
     font-size: 0 !important;
     color: transparent !important;
     width: 0 !important;
+    height: 0 !important;
     overflow: hidden !important;
     position: absolute !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}}
+
+/* 🔥 Force proper text rendering in expanders */
+[data-testid="stExpander"] summary {{
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}}
+[data-testid="stExpander"] summary span {{
+    font-size: inherit !important;
+    color: inherit !important;
+    display: inline !important;
+}}
+[data-testid="stExpander"] summary span:empty {{
+    display: none !important;
 }}
 
 .stApp {{
@@ -472,6 +635,14 @@ section[data-testid="stSidebar"] .stCheckbox label {{
 
 section[data-testid="stSidebar"] .stCheckbox label span {{
     color: {text}!important;
+}}
+
+/* ── Scoped fix for any remaining stray text ──────────────── */
+.stMarkdown:empty {{
+    display: none !important;
+}}
+.stMarkdown:has(>:empty:only-child) {{
+    display: none !important;
 }}
 </style>
 """

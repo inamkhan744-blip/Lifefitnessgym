@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 import database as db
 import styles
 import io
+import base64
 
 # ============================================
 # SESSION STATE INITIALIZATION
@@ -153,11 +154,970 @@ st.markdown("""
         font-weight: 600;
         margin-top: 0.3rem;
     }
+    
+    /* Tab Navigation */
+    .report-tab {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .report-tab.active {
+        background: #7C3AED;
+        color: white;
+    }
+    
+    .report-tab:hover {
+        background: rgba(124,58,237,0.2);
+    }
 </style>
 """, unsafe_allow_html=True)
 
+
 # ============================================
-# HELPERS
+# 🆕 MONTHLY GYM SUMMARY REPORT
+# ============================================
+
+def render_monthly_gym_summary(gym_id, date_from, date_to):
+    """Render monthly gym-wise summary report"""
+    st.subheader("🏋️ Monthly Gym Summary")
+    st.caption("Har gym ka month-wise collection, expenses aur profit")
+    
+    gyms = db.get_all_gyms()
+    if not gyms:
+        st.info("No gyms found")
+        return
+    
+    # ── Get all months in range ──────────────────────────────────────────
+    months = []
+    current = date_from
+    while current <= date_to:
+        months.append(current.strftime("%Y-%m"))
+        current = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+    
+    # ── Collect data for each gym ──────────────────────────────────────
+    all_data = []
+    
+    for gym in gyms:
+        # Filter if specific gym selected
+        if gym_id and gym.id != gym_id:
+            continue
+            
+        gym_total_collection = 0
+        gym_total_expenses = 0
+        gym_total_profit = 0
+        gym_total_members = 0
+        
+        for month in months:
+            month_start = datetime.strptime(month, "%Y-%m").date()
+            month_end = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+            
+            # Collection
+            fees = db.get_fee_records(
+                gym_id=gym.id,
+                date_from=month_start,
+                date_to=month_end
+            )
+            collection = sum(f.amount for f in fees) if fees else 0
+            payments = len(fees) if fees else 0
+            members = len(set(f.member_id for f in fees)) if fees else 0
+            
+            # Expenses
+            expenses = db.get_expenses(
+                gym_id=gym.id,
+                date_from=month_start,
+                date_to=month_end
+            )
+            total_expenses = sum(e.amount for e in expenses) if expenses else 0
+            
+            profit = collection - total_expenses
+            
+            all_data.append({
+                "Gym": gym.name,
+                "Month": month,
+                "Collection": collection,
+                "Expenses": total_expenses,
+                "Profit": profit,
+                "Members": members,
+                "Payments": payments,
+            })
+            
+            gym_total_collection += collection
+            gym_total_expenses += total_expenses
+            gym_total_profit += profit
+            gym_total_members += members
+        
+        # ── Gym Summary Card ──────────────────────────────────────────────
+        if gym_id and gym.id == gym_id:
+            st.markdown(f"""
+            <div style="background:linear-gradient(145deg,#1E293B,#0F172A);
+                        border:1px solid #7C3AED;
+                        border-radius:16px;
+                        padding:1.2rem;
+                        margin-bottom:1rem;
+                        box-shadow:0 4px 25px rgba(124,58,237,0.15);">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:1.3rem;font-weight:800;color:#FFFFFF;">🏋️ {gym.name}</div>
+                        <div style="color:#94A3B8;font-size:0.85rem;">{len(months)} months</div>
+                    </div>
+                    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                        <div style="text-align:center;">
+                            <div style="color:#94A3B8;font-size:0.65rem;">Total Collection</div>
+                            <div style="color:#34D399;font-size:1.2rem;font-weight:700;">PKR {gym_total_collection:,.0f}</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="color:#94A3B8;font-size:0.65rem;">Total Expenses</div>
+                            <div style="color:#F87171;font-size:1.2rem;font-weight:700;">PKR {gym_total_expenses:,.0f}</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="color:#94A3B8;font-size:0.65rem;">Net Profit</div>
+                            <div style="color:{"#34D399" if gym_total_profit >= 0 else "#F87171"};font-size:1.2rem;font-weight:700;">
+                                PKR {gym_total_profit:,.0f}
+                            </div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="color:#94A3B8;font-size:0.65rem;">Total Members</div>
+                            <div style="color:#60A5FA;font-size:1.2rem;font-weight:700;">{gym_total_members}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    if not all_data:
+        st.info("No data found for the selected period")
+        return
+    
+    df = pd.DataFrame(all_data)
+    
+    # ── Summary Cards ──────────────────────────────────────────────────────
+    total_collection = df['Collection'].sum()
+    total_expenses = df['Expenses'].sum()
+    total_profit = df['Profit'].sum()
+    total_members = df['Members'].sum()
+    total_payments = df['Payments'].sum()
+    
+    st.markdown("### 📊 Overall Summary")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("💰 Total Collection", f"PKR {total_collection:,.0f}")
+    with col2:
+        st.metric("💸 Total Expenses", f"PKR {total_expenses:,.0f}")
+    with col3:
+        profit_color = "normal" if total_profit >= 0 else "inverse"
+        st.metric("📈 Net Profit", f"PKR {total_profit:,.0f}", delta_color=profit_color)
+    with col4:
+        st.metric("👥 Total Members", f"{total_members}")
+    with col5:
+        st.metric("📋 Total Payments", f"{total_payments}")
+    
+    st.divider()
+    
+    # ── Month Filter ──────────────────────────────────────────────────────
+    months_available = sorted(df['Month'].unique(), reverse=True)
+    selected_month = st.selectbox("📅 Select Month", months_available, key="monthly_gym_month")
+    
+    month_df = df[df['Month'] == selected_month]
+    
+    if not month_df.empty:
+        st.subheader(f"📊 {selected_month} — Gym-wise Breakdown")
+        
+        # Gym comparison chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=month_df['Gym'],
+            y=month_df['Collection'],
+            name='Collection',
+            marker=dict(color='#34D399'),
+            text=[f'PKR {c:,.0f}' for c in month_df['Collection']],
+            textposition='outside'
+        ))
+        
+        fig.add_trace(go.Bar(
+            x=month_df['Gym'],
+            y=month_df['Expenses'],
+            name='Expenses',
+            marker=dict(color='#F87171'),
+            text=[f'PKR {c:,.0f}' for c in month_df['Expenses']],
+            textposition='outside'
+        ))
+        
+        fig.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=350,
+            margin=dict(l=40, r=20, t=30, b=40),
+            xaxis=dict(gridcolor='#1E293B'),
+            yaxis=dict(gridcolor='#1E293B', title='Amount (PKR)'),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            barmode='group',
+        )
+        st.plotly_chart(fig, use_container_width=True, key="monthly_gym_chart_1")  # 🔥 UNIQUE KEY
+    
+    st.divider()
+    
+    # ── Monthly Trend for Selected Gym ──────────────────────────────────
+    if gym_id:
+        gym_name = next((g.name for g in gyms if g.id == gym_id), "Selected Gym")
+        st.subheader(f"📈 Monthly Trend — {gym_name}")
+        gym_df = df[df['Gym'] == gym_name]
+        
+        if not gym_df.empty:
+            fig3 = go.Figure()
+            
+            fig3.add_trace(go.Scatter(
+                x=gym_df['Month'],
+                y=gym_df['Collection'],
+                mode='lines+markers',
+                name='Collection',
+                line=dict(color='#34D399', width=3),
+                marker=dict(size=8, color='#34D399'),
+                fill='tozeroy',
+                fillcolor='rgba(52,211,153,0.15)'
+            ))
+            
+            fig3.add_trace(go.Scatter(
+                x=gym_df['Month'],
+                y=gym_df['Expenses'],
+                mode='lines+markers',
+                name='Expenses',
+                line=dict(color='#F87171', width=3),
+                marker=dict(size=8, color='#F87171'),
+                fill='tozeroy',
+                fillcolor='rgba(248,113,113,0.15)'
+            ))
+            
+            fig3.add_trace(go.Scatter(
+                x=gym_df['Month'],
+                y=gym_df['Profit'],
+                mode='lines+markers',
+                name='Profit',
+                line=dict(color='#FFC947', width=3),
+                marker=dict(size=8, color='#FFC947'),
+            ))
+            
+            fig3.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=350,
+                margin=dict(l=40, r=20, t=30, b=40),
+                xaxis=dict(gridcolor='#1E293B'),
+                yaxis=dict(gridcolor='#1E293B', title='Amount (PKR)'),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig3, use_container_width=True, key="monthly_gym_trend")  # 🔥 UNIQUE KEY
+    
+    # ── All Months Table ──────────────────────────────────────────────────
+    st.divider()
+    st.subheader("📋 All Months Data")
+    
+    all_df = df.copy()
+    all_df['Collection'] = all_df['Collection'].apply(lambda x: f"PKR {x:,.0f}")
+    all_df['Expenses'] = all_df['Expenses'].apply(lambda x: f"PKR {x:,.0f}")
+    all_df['Profit'] = all_df['Profit'].apply(lambda x: f"PKR {x:,.0f}")
+    
+    st.dataframe(
+        all_df[['Gym', 'Month', 'Collection', 'Expenses', 'Profit', 'Members', 'Payments']],
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # ── Export ──────────────────────────────────────────────────────────────
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "📥 Download Monthly Gym Summary CSV",
+        data=csv,
+        file_name=f"monthly_gym_summary_{date.today().strftime('%Y-%m-%d')}.csv",
+        mime="text/csv",
+        key="monthly_gym_csv_download"
+    )
+
+
+# ============================================
+# 🆕 GYM COMPARISON DASHBOARD
+# ============================================
+
+def render_gym_comparison_dashboard(gym_id, date_from, date_to):
+    """Render gym comparison dashboard"""
+    st.subheader("🏋️ Gym Comparison Dashboard")
+    
+    gyms = db.get_all_gyms()
+    if not gyms or len(gyms) < 2:
+        st.info("Need at least 2 gyms for comparison")
+        return
+    
+    # ── Get data for all gyms ────────────────────────────────────────────
+    gym_data = []
+    
+    for gym in gyms:
+        if gym_id and gym.id != gym_id:
+            continue
+            
+        fees = db.get_fee_records(gym_id=gym.id, date_from=date_from, date_to=date_to)
+        expenses = db.get_expenses(gym_id=gym.id, date_from=date_from, date_to=date_to)
+        
+        collection = sum(f.amount for f in fees) if fees else 0
+        total_expenses = sum(e.amount for e in expenses) if expenses else 0
+        profit = collection - total_expenses
+        members = len(set(f.member_id for f in fees)) if fees else 0
+        payments = len(fees) if fees else 0
+        
+        gym_data.append({
+            "Gym": gym.name,
+            "Collection": collection,
+            "Expenses": total_expenses,
+            "Profit": profit,
+            "Members": members,
+            "Payments": payments,
+            "Avg Payment": collection / payments if payments > 0 else 0,
+        })
+    
+    if not gym_data:
+        st.info("No data found")
+        return
+    
+    df = pd.DataFrame(gym_data)
+    df = df.sort_values('Collection', ascending=False)
+    
+    # ── Summary Cards ──────────────────────────────────────────────────────
+    total_collection = df['Collection'].sum()
+    total_expenses = df['Expenses'].sum()
+    total_profit = df['Profit'].sum()
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💰 Total Collection", f"PKR {total_collection:,.0f}")
+    with col2:
+        st.metric("💸 Total Expenses", f"PKR {total_expenses:,.0f}")
+    with col3:
+        profit_color = "normal" if total_profit >= 0 else "inverse"
+        st.metric("📈 Net Profit", f"PKR {total_profit:,.0f}", delta_color=profit_color)
+    
+    st.divider()
+    
+    # ── Comparison Charts ────────────────────────────────────────────────
+    fig1 = go.Figure()
+    
+    fig1.add_trace(go.Bar(
+        x=df['Gym'],
+        y=df['Collection'],
+        name='Collection',
+        marker=dict(color='#34D399'),
+        text=[f'PKR {c:,.0f}' for c in df['Collection']],
+        textposition='outside'
+    ))
+    
+    fig1.add_trace(go.Bar(
+        x=df['Gym'],
+        y=df['Expenses'],
+        name='Expenses',
+        marker=dict(color='#F87171'),
+        text=[f'PKR {c:,.0f}' for c in df['Expenses']],
+        textposition='outside'
+    ))
+    
+    fig1.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=350,
+        margin=dict(l=40, r=20, t=30, b=40),
+        xaxis=dict(gridcolor='#1E293B'),
+        yaxis=dict(gridcolor='#1E293B', title='Amount (PKR)'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        barmode='group',
+    )
+    st.plotly_chart(fig1, use_container_width=True, key="gym_compare_chart_1")  # 🔥 UNIQUE KEY
+    
+    # ── Profit Chart ──────────────────────────────────────────────────────
+    fig2 = go.Figure()
+    
+    colors = ['#34D399' if p >= 0 else '#F87171' for p in df['Profit']]
+    
+    fig2.add_trace(go.Bar(
+        x=df['Gym'],
+        y=df['Profit'],
+        name='Profit/Loss',
+        marker=dict(color=colors),
+        text=[f'PKR {p:,.0f}' for p in df['Profit']],
+        textposition='outside'
+    ))
+    
+    fig2.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=250,
+        margin=dict(l=40, r=20, t=30, b=40),
+        xaxis=dict(gridcolor='#1E293B'),
+        yaxis=dict(gridcolor='#1E293B', title='Profit/Loss (PKR)'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig2, use_container_width=True, key="gym_compare_chart_2")  # 🔥 UNIQUE KEY
+    
+    # ── Ranking ──────────────────────────────────────────────────────────
+    st.subheader("🏆 Gym Ranking")
+    
+    for i, row in df.iterrows():
+        medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
+        profit_color = "#34D399" if row['Profit'] >= 0 else "#F87171"
+        
+        st.markdown(f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    background:#0F172A;border:1px solid #1E293B;
+                    border-radius:12px;padding:0.8rem 1.2rem;
+                    margin-bottom:0.5rem;">
+            <div style="display:flex;align-items:center;gap:1rem;">
+                <span style="font-size:1.5rem;">{medal}</span>
+                <div>
+                    <div style="font-weight:700;color:#FFFFFF;font-size:1.1rem;">{row['Gym']}</div>
+                    <div style="color:#94A3B8;font-size:0.8rem;">{row['Members']} members · {row['Payments']} payments</div>
+                </div>
+            </div>
+            <div style="text-align:right;">
+                <div style="color:#FFC947;font-weight:700;">PKR {row['Collection']:,.0f}</div>
+                <div style="color:{profit_color};font-weight:600;">Profit: PKR {row['Profit']:,.0f}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ── Export ──────────────────────────────────────────────────────────────
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "📥 Download Gym Comparison CSV",
+        data=csv,
+        file_name=f"gym_comparison_{date.today().strftime('%Y-%m-%d')}.csv",
+        mime="text/csv",
+        key="gym_compare_csv_download"
+    )
+
+
+# ============================================
+# MEMBER REPORTS
+# ============================================
+
+def render_member_reports(gym_id, date_from, date_to):
+    """Render member analytics reports"""
+    st.subheader("👥 Member Reports")
+    
+    members = db.get_members(gym_id=gym_id)
+    
+    if not members:
+        st.info("No members found")
+        return
+    
+    # Member stats
+    total_members = len(members)
+    active_members = sum(1 for m in members if m.status == "Active")
+    inactive_members = sum(1 for m in members if m.status == "Inactive")
+    expired_members = sum(1 for m in members if m.status == "Expired")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("👥 Total Members", total_members)
+    with col2:
+        st.metric("✅ Active", active_members)
+    with col3:
+        st.metric("❌ Inactive", inactive_members)
+    with col4:
+        st.metric("⏰ Expired", expired_members)
+    
+    st.divider()
+    
+    # Membership type distribution
+    st.markdown("#### 📊 Membership Type Distribution")
+    types = {}
+    for m in members:
+        mtype = m.membership_type or "Unknown"
+        types[mtype] = types.get(mtype, 0) + 1
+    
+    if types:
+        df_types = pd.DataFrame({
+            "Type": list(types.keys()),
+            "Count": list(types.values())
+        })
+        
+        fig = px.pie(df_types, values="Count", names="Type", title="Membership Types",
+                     color_discrete_sequence=px.colors.qualitative.Set3)
+        fig.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=350,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True, key="member_types_pie")  # 🔥 UNIQUE KEY
+    
+    # Member growth trend
+    st.markdown("#### 📈 Member Growth Trend")
+    join_dates = []
+    for m in members:
+        if m.join_date:
+            try:
+                join_dates.append(datetime.strptime(m.join_date, "%Y-%m-%d").date())
+            except:
+                pass
+    
+    if join_dates:
+        df_join = pd.DataFrame({"Date": join_dates})
+        df_join["Count"] = 1
+        df_join = df_join.groupby("Date").sum().reset_index()
+        df_join["Cumulative"] = df_join["Count"].cumsum()
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_join["Date"],
+            y=df_join["Cumulative"],
+            mode='lines+markers',
+            name='Total Members',
+            line=dict(color='#7C3AED', width=3),
+            marker=dict(size=8, color='#A78BFA'),
+            fill='tozeroy',
+            fillcolor='rgba(124,58,237,0.15)'
+        ))
+        fig.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=300,
+            margin=dict(l=40, r=20, t=40, b=40),
+            xaxis=dict(gridcolor='#1E293B'),
+            yaxis=dict(gridcolor='#1E293B', title="Members")
+        )
+        st.plotly_chart(fig, use_container_width=True, key="member_growth_chart")  # 🔥 UNIQUE KEY
+    
+    # Latest members
+    st.markdown("#### 🆕 Latest 10 Members")
+    latest = sorted(join_dates, reverse=True)[:10] if join_dates else []
+    if latest:
+        latest_members = []
+        for d in latest:
+            for m in members:
+                if m.join_date == str(d):
+                    latest_members.append({
+                        "Name": m.full_name,
+                        "Serial": m.serial_number,
+                        "Join Date": m.join_date,
+                        "Type": m.membership_type or "-",
+                        "Status": m.status
+                    })
+                    break
+        df_latest = pd.DataFrame(latest_members[:10])
+        st.dataframe(df_latest, use_container_width=True, hide_index=True)
+
+
+# ============================================
+# REVENUE REPORTS
+# ============================================
+
+def render_revenue_reports(gym_id, date_from, date_to):
+    """Render revenue analytics reports"""
+    st.subheader("💰 Revenue Reports")
+    
+    # Get fee records
+    fees = db.get_fee_records(gym_id=gym_id, date_from=date_from, date_to=date_to)
+    
+    if not fees:
+        st.info("No revenue data found")
+        return
+    
+    # Revenue stats
+    total_revenue = sum(f.amount for f in fees)
+    total_transactions = len(fees)
+    avg_transaction = total_revenue / total_transactions if total_transactions > 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💰 Total Revenue", f"PKR {total_revenue:,.0f}")
+    with col2:
+        st.metric("📊 Transactions", total_transactions)
+    with col3:
+        st.metric("📈 Avg Transaction", f"PKR {avg_transaction:,.0f}")
+    
+    st.divider()
+    
+    # Daily revenue trend
+    st.markdown("#### 📈 Daily Revenue Trend")
+    df = pd.DataFrame([{
+        "Date": f.payment_date,
+        "Amount": f.amount
+    } for f in fees])
+    df["Date"] = pd.to_datetime(df["Date"])
+    daily = df.groupby("Date")["Amount"].sum().reset_index()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=daily["Date"],
+        y=daily["Amount"],
+        marker=dict(color='#10B981'),
+        text=[f'PKR {a:,.0f}' for a in daily["Amount"]],
+        textposition='outside',
+        textfont=dict(color='white', size=10)
+    ))
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=300,
+        margin=dict(l=40, r=20, t=40, b=40),
+        xaxis=dict(gridcolor='#1E293B'),
+        yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
+    )
+    st.plotly_chart(fig, use_container_width=True, key="revenue_daily_chart")  # 🔥 UNIQUE KEY
+    
+    # Payment method distribution
+    st.markdown("#### 💳 Payment Method Distribution")
+    methods = {}
+    for f in fees:
+        method = f.payment_method or "Cash"
+        methods[method] = methods.get(method, 0) + f.amount
+    
+    if methods:
+        df_methods = pd.DataFrame({
+            "Method": list(methods.keys()),
+            "Amount": list(methods.values())
+        })
+        
+        fig = px.pie(df_methods, values="Amount", names="Method", title="Payment Methods",
+                     color_discrete_sequence=['#7C3AED', '#34D399', '#FBBF24', '#F87171', '#60A5FA'])
+        fig.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=300,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True, key="revenue_method_pie")  # 🔥 UNIQUE KEY
+
+
+# ============================================
+# EXPENSE REPORTS
+# ============================================
+
+def render_expense_reports(gym_id, date_from, date_to):
+    """Render expense analytics reports"""
+    st.subheader("💳 Expense Reports")
+    
+    expenses = db.get_expenses(gym_id=gym_id, date_from=date_from, date_to=date_to)
+    
+    if not expenses:
+        st.info("No expense data found")
+        return
+    
+    # Expense stats
+    total_expenses = sum(e.amount for e in expenses)
+    total_entries = len(expenses)
+    avg_expense = total_expenses / total_entries if total_entries > 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💳 Total Expenses", f"PKR {total_expenses:,.0f}")
+    with col2:
+        st.metric("📊 Entries", total_entries)
+    with col3:
+        st.metric("📈 Avg Expense", f"PKR {avg_expense:,.0f}")
+    
+    st.divider()
+    
+    # Category breakdown
+    st.markdown("#### 📊 Expense by Category")
+    categories = {}
+    for e in expenses:
+        cat = e.category or "Other"
+        categories[cat] = categories.get(cat, 0) + e.amount
+    
+    if categories:
+        df_cat = pd.DataFrame({
+            "Category": list(categories.keys()),
+            "Amount": list(categories.values())
+        })
+        
+        fig = px.pie(df_cat, values="Amount", names="Category", title="Expense Categories",
+                     color_discrete_sequence=px.colors.qualitative.Set2)
+        fig.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=300,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True, key="expense_category_pie")  # 🔥 UNIQUE KEY
+    
+    # Daily expense trend
+    st.markdown("#### 📉 Daily Expense Trend")
+    df = pd.DataFrame([{
+        "Date": e.expense_date,
+        "Amount": e.amount
+    } for e in expenses])
+    df["Date"] = pd.to_datetime(df["Date"])
+    daily = df.groupby("Date")["Amount"].sum().reset_index()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=daily["Date"],
+        y=daily["Amount"],
+        mode='lines+markers',
+        name='Expenses',
+        line=dict(color='#EF4444', width=3),
+        marker=dict(size=8, color='#F87171'),
+        fill='tozeroy',
+        fillcolor='rgba(239,68,68,0.15)'
+    ))
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=300,
+        margin=dict(l=40, r=20, t=40, b=40),
+        xaxis=dict(gridcolor='#1E293B'),
+        yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
+    )
+    st.plotly_chart(fig, use_container_width=True, key="expense_daily_chart")  # 🔥 UNIQUE KEY
+
+
+# ============================================
+# ATTENDANCE REPORTS
+# ============================================
+
+def render_attendance_reports(gym_id, date_from, date_to):
+    """Render attendance analytics reports"""
+    st.subheader("📅 Attendance Reports")
+    
+    attendance = db.get_attendance_range(gym_id=gym_id, from_date=date_from, to_date=date_to)
+    
+    if not attendance:
+        st.info("No attendance data found")
+        return
+    
+    # Attendance stats
+    total = len(attendance)
+    present = sum(1 for a in attendance if a.status == "Present")
+    absent = sum(1 for a in attendance if a.status == "Absent")
+    late = sum(1 for a in attendance if a.status == "Late")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📊 Total Records", total)
+    with col2:
+        st.metric("✅ Present", present)
+    with col3:
+        st.metric("❌ Absent", absent)
+    with col4:
+        st.metric("🕐 Late", late)
+    
+    # Attendance rate
+    rate = (present / total * 100) if total > 0 else 0
+    st.metric("📈 Attendance Rate", f"{rate:.1f}%")
+    
+    st.divider()
+    
+    # Daily attendance trend
+    st.markdown("#### 📈 Daily Attendance Trend")
+    df = pd.DataFrame([{
+        "Date": a.check_date,
+        "Status": a.status
+    } for a in attendance])
+    df["Date"] = pd.to_datetime(df["Date"])
+    
+    # Count by date and status
+    pivot = df.groupby(["Date", "Status"]).size().unstack(fill_value=0)
+    
+    fig = go.Figure()
+    for status in ["Present", "Late", "Absent"]:
+        if status in pivot.columns:
+            color = {"Present": "#10B981", "Late": "#FBBF24", "Absent": "#EF4444"}
+            fig.add_trace(go.Bar(
+                x=pivot.index,
+                y=pivot[status],
+                name=status,
+                marker_color=color.get(status, "#94A3B8")
+            ))
+    
+    fig.update_layout(
+        barmode="stack",
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=300,
+        margin=dict(l=40, r=20, t=40, b=40),
+        xaxis=dict(gridcolor='#1E293B'),
+        yaxis=dict(gridcolor='#1E293B', title="Count"),
+        legend=dict(orientation="h", y=1.02, x=0.5)
+    )
+    st.plotly_chart(fig, use_container_width=True, key="attendance_daily_chart")  # 🔥 UNIQUE KEY
+
+
+# ============================================
+# FINANCIAL SUMMARY
+# ============================================
+
+def render_financial_summary(gym_id, date_from, date_to):
+    """Render financial summary report"""
+    st.subheader("📊 Financial Summary")
+    
+    # Get data
+    fees = db.get_fee_records(gym_id=gym_id, date_from=date_from, date_to=date_to)
+    expenses = db.get_expenses(gym_id=gym_id, date_from=date_from, date_to=date_to)
+    
+    total_revenue = sum(f.amount for f in fees) if fees else 0
+    total_expenses = sum(e.amount for e in expenses) if expenses else 0
+    net_profit = total_revenue - total_expenses
+    
+    # Summary cards
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        color = "#34D399" if net_profit >= 0 else "#EF4444"
+        st.markdown(f"""
+        <div class="card-3d glow-{'green' if net_profit >= 0 else 'red'}" style="text-align:center;padding:0.8rem;">
+            <span class="icon">{'📈' if net_profit >= 0 else '📉'}</span>
+            <div class="value" style="color:{color};">PKR {net_profit:,.0f}</div>
+            <div class="label">Net Profit / Loss</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class="card-3d glow-green" style="text-align:center;padding:0.8rem;">
+            <span class="icon">💰</span>
+            <div class="value">PKR {total_revenue:,.0f}</div>
+            <div class="label">Total Revenue</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown(f"""
+        <div class="card-3d glow-red" style="text-align:center;padding:0.8rem;">
+            <span class="icon">💳</span>
+            <div class="value">PKR {total_expenses:,.0f}</div>
+            <div class="label">Total Expenses</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col4:
+        margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
+        st.markdown(f"""
+        <div class="card-3d glow-yellow" style="text-align:center;padding:0.8rem;">
+            <span class="icon">📊</span>
+            <div class="value">{margin:.1f}%</div>
+            <div class="label">Profit Margin</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Revenue vs Expenses chart
+    st.markdown("#### 📊 Revenue vs Expenses")
+    
+    # Get monthly data
+    monthly_data = {}
+    for f in fees:
+        if f.payment_date:
+            month = f.payment_date[:7]
+            monthly_data[month] = monthly_data.get(month, {"revenue": 0, "expenses": 0})
+            monthly_data[month]["revenue"] += f.amount
+    
+    for e in expenses:
+        if e.expense_date:
+            month = e.expense_date[:7]
+            if month not in monthly_data:
+                monthly_data[month] = {"revenue": 0, "expenses": 0}
+            monthly_data[month]["expenses"] += e.amount
+    
+    if monthly_data:
+        months = sorted(monthly_data.keys())
+        revenue_data = [monthly_data[m]["revenue"] for m in months]
+        expense_data = [monthly_data[m]["expenses"] for m in months]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=months,
+            y=revenue_data,
+            name='Revenue',
+            marker_color='#10B981'
+        ))
+        fig.add_trace(go.Bar(
+            x=months,
+            y=expense_data,
+            name='Expenses',
+            marker_color='#EF4444'
+        ))
+        fig.update_layout(
+            barmode='group',
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=300,
+            margin=dict(l=40, r=20, t=40, b=40),
+            xaxis=dict(gridcolor='#1E293B'),
+            yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
+        )
+        st.plotly_chart(fig, use_container_width=True, key="financial_rev_exp_chart")  # 🔥 UNIQUE KEY
+
+
+# ============================================
+# TOP MEMBERS REPORT
+# ============================================
+
+def render_top_members_report(gym_id, date_from, date_to):
+    """Render top paying members report"""
+    st.subheader("🏆 Top Paying Members")
+    
+    fees = db.get_fee_records(gym_id=gym_id, date_from=date_from, date_to=date_to)
+    
+    if not fees:
+        st.info("No payment data found")
+        return
+    
+    # Aggregate by member
+    member_data = {}
+    for f in fees:
+        mid = f.member_id
+        if mid not in member_data:
+            member_data[mid] = {"total": 0, "count": 0, "name": "", "serial": ""}
+        member_data[mid]["total"] += f.amount
+        member_data[mid]["count"] += 1
+    
+    # Get member names
+    for mid in member_data:
+        member = db.get_member(mid)
+        if member:
+            member_data[mid]["name"] = member.full_name
+            member_data[mid]["serial"] = member.serial_number
+    
+    # Sort by total
+    sorted_members = sorted(member_data.items(), key=lambda x: x[1]["total"], reverse=True)
+    
+    if sorted_members:
+        data = []
+        for idx, (mid, info) in enumerate(sorted_members[:20], 1):
+            data.append({
+                "Rank": idx,
+                "Member": info["name"] or "Unknown",
+                "Serial": info["serial"] or "-",
+                "Total Paid": f"PKR {info['total']:,.0f}",
+                "Transactions": info["count"],
+                "Avg": f"PKR {info['total']/info['count']:,.0f}" if info["count"] > 0 else "0"
+            })
+        
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Export
+        csv = df.to_csv(index=False)
+        st.download_button(
+            "📥 Download Top Members Report",
+            data=csv,
+            file_name=f"top_members_{date.today()}.csv",
+            mime="text/csv",
+            key="top_members_csv_download"
+        )
+    else:
+        st.info("No member data available")
+
+
+# ============================================
+# HELPER FUNCTIONS
 # ============================================
 
 def get_staff_reports(gym_id=None, staff_name=None, date_from=None, date_to=None):
@@ -203,7 +1163,6 @@ def get_staff_reports(gym_id=None, staff_name=None, date_from=None, date_to=None
         
         # Attendance
         try:
-            # Get all attendance marked by this staff
             db_session = db.get_db()
             att_records = db_session.query(db.Attendance).filter(
                 db.Attendance.marked_by == user.username
@@ -267,14 +1226,15 @@ def get_staff_reports(gym_id=None, staff_name=None, date_from=None, date_to=None
     
     return reports
 
+
 # ============================================
-# MAIN RENDER FUNCTION - FIXED
+# MAIN RENDER FUNCTION
 # ============================================
 
 def render(gym_id, role, username):
     
     styles.page_header("📊", "Reports & Analytics",
-                       "Comprehensive reports for staff, finances, and performance")
+                       "Comprehensive reports for staff, finances, members, and performance")
     
     gyms = db.get_all_gyms()
     if not gyms:
@@ -320,101 +1280,94 @@ def render(gym_id, role, username):
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================
-    # GET REPORTS DATA
+    # TABS - UPDATED WITH NEW REPORTS
     # ============================================
     
-    reports_data = get_staff_reports(gym_id=sel_gid, date_from=date_from, date_to=date_to)
-    staff_list = list(reports_data['staff_info'].values())
+    tab_staff, tab_members, tab_revenue, tab_expenses, tab_attendance, tab_financial, tab_top, tab_monthly, tab_gym_compare = st.tabs([
+        "👥 Staff", "👤 Members", "💰 Revenue", "💳 Expenses", 
+        "📅 Attendance", "📊 Financial", "🏆 Top Members",
+        "📆 Monthly Gym", "🏋️ Gym Compare"
+    ])
     
-    # ============================================
-    # OVERVIEW STATS
-    # ============================================
-    
-    if staff_list:
-        total_staff = len(staff_list)
-        total_fees = sum(s['fee_amount'] for s in staff_list)
-        total_expenses = sum(s['expense_amount'] for s in staff_list)
-        total_sales = sum(s['sale_amount'] for s in staff_list)
-        total_attendance = sum(s['attendance_count'] for s in staff_list)
+    # ── TAB 1: STAFF REPORTS ──────────────────────────────────────────────
+    with tab_staff:
+        reports_data = get_staff_reports(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+        staff_list = list(reports_data['staff_info'].values())
         
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
+        if staff_list:
+            total_staff = len(staff_list)
+            total_fees = sum(s['fee_amount'] for s in staff_list)
+            total_expenses = sum(s['expense_amount'] for s in staff_list)
+            total_sales = sum(s['sale_amount'] for s in staff_list)
+            total_attendance = sum(s['attendance_count'] for s in staff_list)
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                st.markdown(f"""
+                <div class="card-3d glow-purple" style="text-align:center;padding:0.8rem;">
+                    <span class="icon">👥</span>
+                    <div class="value">{total_staff}</div>
+                    <div class="label">Total Staff</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="card-3d glow-green" style="text-align:center;padding:0.8rem;">
+                    <span class="icon">💰</span>
+                    <div class="value">PKR {total_fees:,.0f}</div>
+                    <div class="label">Total Fees Collected</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="card-3d glow-red" style="text-align:center;padding:0.8rem;">
+                    <span class="icon">💳</span>
+                    <div class="value">PKR {total_expenses:,.0f}</div>
+                    <div class="label">Total Expenses</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div class="card-3d glow-yellow" style="text-align:center;padding:0.8rem;">
+                    <span class="icon">📦</span>
+                    <div class="value">PKR {total_sales:,.0f}</div>
+                    <div class="label">Inventory Sales</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col5:
+                st.markdown(f"""
+                <div class="card-3d glow-blue" style="text-align:center;padding:0.8rem;">
+                    <span class="icon">✅</span>
+                    <div class="value">{total_attendance}</div>
+                    <div class="label">Total Attendances</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Net Profit/Loss
+            net = total_fees + total_sales - total_expenses
+            net_color = "positive" if net >= 0 else "negative"
+            net_icon = "📈" if net >= 0 else "📉"
+            
             st.markdown(f"""
-            <div class="card-3d glow-purple" style="text-align:center;padding:0.8rem;">
-                <span class="icon">👥</span>
-                <div class="value">{total_staff}</div>
-                <div class="label">Total Staff</div>
+            <div style="margin-top:0.5rem;text-align:center;">
+                <div class="card-3d glow-{'green' if net >= 0 else 'red'}" style="padding:0.8rem;display:inline-block;width:auto;min-width:300px;">
+                    <span class="icon">{net_icon}</span>
+                    <div class="value" style="color:{'#34D399' if net >= 0 else '#F87171'};">PKR {net:,.0f}</div>
+                    <div class="label">Net Profit / Loss</div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-            <div class="card-3d glow-green" style="text-align:center;padding:0.8rem;">
-                <span class="icon">💰</span>
-                <div class="value">PKR {total_fees:,.0f}</div>
-                <div class="label">Total Fees Collected</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div class="card-3d glow-red" style="text-align:center;padding:0.8rem;">
-                <span class="icon">💳</span>
-                <div class="value">PKR {total_expenses:,.0f}</div>
-                <div class="label">Total Expenses</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f"""
-            <div class="card-3d glow-yellow" style="text-align:center;padding:0.8rem;">
-                <span class="icon">📦</span>
-                <div class="value">PKR {total_sales:,.0f}</div>
-                <div class="label">Inventory Sales</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col5:
-            st.markdown(f"""
-            <div class="card-3d glow-blue" style="text-align:center;padding:0.8rem;">
-                <span class="icon">✅</span>
-                <div class="value">{total_attendance}</div>
-                <div class="label">Total Attendances</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Net Profit/Loss
-        net = total_fees + total_sales - total_expenses
-        net_color = "positive" if net >= 0 else "negative"
-        net_icon = "📈" if net >= 0 else "📉"
-        
-        st.markdown(f"""
-        <div style="margin-top:0.5rem;text-align:center;">
-            <div class="card-3d glow-{'green' if net >= 0 else 'red'}" style="padding:0.8rem;display:inline-block;width:auto;min-width:300px;">
-                <span class="icon">{net_icon}</span>
-                <div class="value" style="color:{'#34D399' if net >= 0 else '#F87171'};">PKR {net:,.0f}</div>
-                <div class="label">Net Profit / Loss</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.divider()
-    
-    # ============================================
-    # STAFF REPORTS
-    # ============================================
-    
-    st.subheader("👥 Staff Performance Reports")
-    st.caption("Each staff member's detailed performance metrics")
-    
-    if staff_list:
-        # Create tabs for each staff or show all
-        staff_names = [s['name'] for s in staff_list]
-        selected_staff_tab = st.selectbox("Select Staff Member to View Details", ["All Staff"] + staff_names)
-        
-        if selected_staff_tab == "All Staff":
-            # Show all staff in grid
+            
+            st.divider()
+            
+            # Staff grid
+            st.subheader("👥 Staff Performance")
+            
             cols = st.columns(3)
             for idx, staff in enumerate(staff_list):
                 with cols[idx % 3]:
@@ -433,293 +1386,68 @@ def render(gym_id, role, username):
                     </div>
                     """, unsafe_allow_html=True)
         else:
-            # Show selected staff detailed report
-            selected_staff = next((s for s in staff_list if s['name'] == selected_staff_tab), None)
-            if selected_staff:
-                st.markdown("---")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.markdown(f"""
-                    <div class="card-3d glow-green" style="text-align:center;padding:0.8rem;">
-                        <div class="value">PKR {selected_staff['fee_amount']:,.0f}</div>
-                        <div class="label">💰 Fees Collected</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"""
-                    <div class="card-3d glow-blue" style="text-align:center;padding:0.8rem;">
-                        <div class="value">{selected_staff['attendance_count']}</div>
-                        <div class="label">✅ Attendances</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col3:
-                    st.markdown(f"""
-                    <div class="card-3d glow-yellow" style="text-align:center;padding:0.8rem;">
-                        <div class="value">PKR {selected_staff['sale_amount']:,.0f}</div>
-                        <div class="label">📦 Inventory Sales</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col4:
-                    st.markdown(f"""
-                    <div class="card-3d glow-red" style="text-align:center;padding:0.8rem;">
-                        <div class="value">PKR {selected_staff['expense_amount']:,.0f}</div>
-                        <div class="label">💳 Expenses</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Staff details table
-                st.divider()
-                st.markdown(f"#### 📋 {selected_staff['name']} - Detailed Report")
-                
-                detail_data = {
-                    "Metric": [
-                        "Staff Name",
-                        "Role",
-                        "Status",
-                        "Fees Collected (Count)",
-                        "Fees Collected (Amount)",
-                        "Attendance Marked",
-                        "Inventory Sales (Count)",
-                        "Inventory Sales (Amount)",
-                        "Expenses (Count)",
-                        "Expenses (Amount)"
-                    ],
-                    "Value": [
-                        selected_staff['name'],
-                        selected_staff['role'],
-                        "✅ Active" if selected_staff.get('is_active', True) else "❌ Inactive",
-                        selected_staff['fee_count'],
-                        f"PKR {selected_staff['fee_amount']:,.2f}",
-                        selected_staff['attendance_count'],
-                        selected_staff['sale_count'],
-                        f"PKR {selected_staff['sale_amount']:,.2f}",
-                        selected_staff['expense_count'],
-                        f"PKR {selected_staff['expense_amount']:,.2f}"
-                    ]
-                }
-                
-                st.dataframe(pd.DataFrame(detail_data), use_container_width=True, hide_index=True)
-    else:
-        st.info("📭 No staff members found for the selected filters.")
+            st.info("📭 No staff members found for the selected filters.")
     
-    st.divider()
+    # ── TAB 2: MEMBER REPORTS ─────────────────────────────────────────────
+    with tab_members:
+        render_member_reports(sel_gid, date_from, date_to)
     
-    # ============================================
-    # CHARTS
-    # ============================================
+    # ── TAB 3: REVENUE REPORTS ────────────────────────────────────────────
+    with tab_revenue:
+        render_revenue_reports(sel_gid, date_from, date_to)
     
-    st.subheader("📊 Visual Analytics")
+    # ── TAB 4: EXPENSE REPORTS ────────────────────────────────────────────
+    with tab_expenses:
+        render_expense_reports(sel_gid, date_from, date_to)
     
-    if staff_list:
-        col_c1, col_c2 = st.columns(2)
-        
-        with col_c1:
-            # Fee Collection Chart
-            st.markdown("#### 💰 Fee Collection by Staff")
-            
-            staff_names = [s['name'] for s in staff_list if s['fee_amount'] > 0]
-            staff_fees = [s['fee_amount'] for s in staff_list if s['fee_amount'] > 0]
-            
-            if staff_names and staff_fees:
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=staff_names,
-                        y=staff_fees,
-                        marker_color='#7C3AED',
-                        marker_line_color='#A78BFA',
-                        marker_line_width=1,
-                        hovertemplate='%{x}<br>PKR %{y:,.2f}<extra></extra>'
-                    )
-                ])
-                
-                fig.update_layout(
-                    template='plotly_dark',
-                    title=dict(text="Fees Collected", font=dict(color='#F8FAFC', size=16)),
-                    xaxis=dict(title="Staff", gridcolor='#1E293B'),
-                    yaxis=dict(title="Amount (PKR)", gridcolor='#1E293B'),
-                    plot_bgcolor='#0F172A',
-                    paper_bgcolor='#0F172A',
-                    height=300,
-                    margin=dict(l=40, r=20, t=40, b=40),
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No fee collection data available.")
-        
-        with col_c2:
-            # Attendance Chart
-            st.markdown("#### ✅ Attendance Marked by Staff")
-            
-            staff_att = [s['name'] for s in staff_list if s['attendance_count'] > 0]
-            att_counts = [s['attendance_count'] for s in staff_list if s['attendance_count'] > 0]
-            
-            if staff_att and att_counts:
-                fig = go.Figure(data=[
-                    go.Pie(
-                        labels=staff_att,
-                        values=att_counts,
-                        marker=dict(colors=['#7C3AED', '#34D399', '#FBBF24', '#F87171', '#60A5FA']),
-                        textinfo='label+percent',
-                        textposition='auto',
-                        hole=0.3,
-                    )
-                ])
-                
-                fig.update_layout(
-                    template='plotly_dark',
-                    title=dict(text="Attendance Distribution", font=dict(color='#F8FAFC', size=16)),
-                    plot_bgcolor='#0F172A',
-                    paper_bgcolor='#0F172A',
-                    height=300,
-                    margin=dict(l=20, r=20, t=40, b=20),
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No attendance data available.")
-        
-        # Additional charts
-        col_c3, col_c4 = st.columns(2)
-        
-        with col_c3:
-            # Inventory Sales Chart
-            st.markdown("#### 📦 Inventory Sales by Staff")
-            
-            staff_sales = [s['name'] for s in staff_list if s['sale_amount'] > 0]
-            sales_amounts = [s['sale_amount'] for s in staff_list if s['sale_amount'] > 0]
-            
-            if staff_sales and sales_amounts:
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=staff_sales,
-                        y=sales_amounts,
-                        marker_color='#F59E0B',
-                        marker_line_color='#FBBF24',
-                        marker_line_width=1,
-                        hovertemplate='%{x}<br>PKR %{y:,.2f}<extra></extra>'
-                    )
-                ])
-                
-                fig.update_layout(
-                    template='plotly_dark',
-                    title=dict(text="Inventory Sales", font=dict(color='#F8FAFC', size=16)),
-                    xaxis=dict(title="Staff", gridcolor='#1E293B'),
-                    yaxis=dict(title="Amount (PKR)", gridcolor='#1E293B'),
-                    plot_bgcolor='#0F172A',
-                    paper_bgcolor='#0F172A',
-                    height=300,
-                    margin=dict(l=40, r=20, t=40, b=40),
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No inventory sales data available.")
-        
-        with col_c4:
-            # Expenses Chart
-            st.markdown("#### 💳 Expenses by Staff")
-            
-            staff_exp = [s['name'] for s in staff_list if s['expense_amount'] > 0]
-            exp_amounts = [s['expense_amount'] for s in staff_list if s['expense_amount'] > 0]
-            
-            if staff_exp and exp_amounts:
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=staff_exp,
-                        y=exp_amounts,
-                        marker_color='#EF4444',
-                        marker_line_color='#F87171',
-                        marker_line_width=1,
-                        hovertemplate='%{x}<br>PKR %{y:,.2f}<extra></extra>'
-                    )
-                ])
-                
-                fig.update_layout(
-                    template='plotly_dark',
-                    title=dict(text="Expenses", font=dict(color='#F8FAFC', size=16)),
-                    xaxis=dict(title="Staff", gridcolor='#1E293B'),
-                    yaxis=dict(title="Amount (PKR)", gridcolor='#1E293B'),
-                    plot_bgcolor='#0F172A',
-                    paper_bgcolor='#0F172A',
-                    height=300,
-                    margin=dict(l=40, r=20, t=40, b=40),
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No expense data available.")
-    else:
-        st.info("📊 No data available for charts.")
+    # ── TAB 5: ATTENDANCE REPORTS ─────────────────────────────────────────
+    with tab_attendance:
+        render_attendance_reports(sel_gid, date_from, date_to)
+    
+    # ── TAB 6: FINANCIAL SUMMARY ─────────────────────────────────────────
+    with tab_financial:
+        render_financial_summary(sel_gid, date_from, date_to)
+    
+    # ── TAB 7: TOP MEMBERS ────────────────────────────────────────────────
+    with tab_top:
+        render_top_members_report(sel_gid, date_from, date_to)
+    
+    # ── 🆕 TAB 8: MONTHLY GYM SUMMARY ────────────────────────────────────
+    with tab_monthly:
+        render_monthly_gym_summary(sel_gid, date_from, date_to)
+    
+    # ── 🆕 TAB 9: GYM COMPARISON ──────────────────────────────────────────
+    with tab_gym_compare:
+        render_gym_comparison_dashboard(sel_gid, date_from, date_to)
 
     # ============================================
-    # EXPORT REPORTS
+    # EXPORT ALL REPORTS
     # ============================================
     
     st.divider()
-    st.subheader("📥 Export Reports")
+    st.subheader("📥 Export All Reports")
     
-    col_exp1, col_exp2, col_exp3 = st.columns(3)
+    col_exp1, col_exp2 = st.columns(2)
     
     with col_exp1:
-        if st.button("📋 Export Staff Report (CSV)", use_container_width=True):
+        if st.button("📋 Export All Reports (CSV)", use_container_width=True):
+            # Get all data
+            staff_data = get_staff_reports(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+            staff_list = list(staff_data['staff_info'].values())
+            
             if staff_list:
                 df = pd.DataFrame(staff_list)
                 csv = df.to_csv(index=False)
                 st.download_button(
                     "📥 Download CSV",
                     data=csv,
-                    file_name=f"staff_report_{date.today()}.csv",
+                    file_name=f"all_reports_{date.today()}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    key="all_reports_csv_download"
                 )
             else:
                 st.warning("No data to export.")
     
     with col_exp2:
-        if st.button("📄 Generate Summary Report", use_container_width=True):
-            if staff_list:
-                total_fees = sum(s['fee_amount'] for s in staff_list)
-                total_expenses = sum(s['expense_amount'] for s in staff_list)
-                total_sales = sum(s['sale_amount'] for s in staff_list)
-                net = total_fees + total_sales - total_expenses
-                
-                report = f"""
-📊 GYMPRO - STAFF PERFORMANCE REPORT
-📅 Date: {date.today().strftime('%B %d, %Y')}
-{'='*60}
-
-📈 OVERVIEW
-• Total Staff: {len(staff_list)}
-• Total Fees Collected: PKR {total_fees:,.2f}
-• Total Expenses: PKR {total_expenses:,.2f}
-• Total Inventory Sales: PKR {total_sales:,.2f}
-• Net Profit/Loss: PKR {net:,.2f}
-
-{'='*60}
-👥 STAFF DETAILS
-"""
-                for s in staff_list:
-                    report += f"""
-{'-'*40}
-• Name: {s['name']}
-• Role: {s['role']}
-• Fees Collected: PKR {s['fee_amount']:,.2f} ({s['fee_count']} transactions)
-• Attendance Marked: {s['attendance_count']}
-• Inventory Sales: PKR {s['sale_amount']:,.2f} ({s['sale_count']} sales)
-• Expenses: PKR {s['expense_amount']:,.2f} ({s['expense_count']} entries)
-"""
-                
-                st.code(report, language="text")
-                st.success("✅ Report generated! Copy it from above.")
-            else:
-                st.warning("No data to generate report.")
-    
-    with col_exp3:
         if st.button("🔄 Refresh All Data", use_container_width=True):
             st.rerun()

@@ -71,6 +71,12 @@ def add_floating_music_player():
 
 add_floating_music_player()
 
+# ── Member Portal route (no staff login needed) ───────────────────────────────
+if st.query_params.get("portal") == "1":
+    from gym_pages import member_portal
+    member_portal.render()
+    st.stop()
+
 # ── Auth gate ──────────────────────────────────────────────────────────────────
 if not auth.require_login():
     auth.login_page()
@@ -263,6 +269,9 @@ with st.sidebar:
             "Audit":             ("🔍", "Audit"),
             "User Management":   ("🔐", "User Management"),
         },
+        "Member Portal": {
+            "Member Portal":     ("📱", "Member Portal"),
+        },
     }
 
     current_page = st.session_state.get("page", "Dashboard")
@@ -342,57 +351,93 @@ if not auth.can_access(page):
 
 gid = st.session_state.get("selected_gym_id")
 
+# ── Import all pages ──────────────────────────────────────────────────────────
+# Dashboard
 if page == "Dashboard":
     from gym_pages import admin_dashboard
     admin_dashboard.render(gid, role, username)
+
+# General Management
 elif page == "Gym Setup":
     from gym_pages import setup
     setup.render()
+
+# Member & Identity
 elif page == "Members":
     from gym_pages import members
     members.render(gid, role)
+
 elif page == "Membership Cards":
     from gym_pages import membership_card
     membership_card.render(gid, role)
+
 elif page == "Bulk ID Cards":
     from gym_pages import bulk_id_cards
     bulk_id_cards.render(gid, role)
+
 elif page == "Attendance":
     from gym_pages import attendance
     attendance.render(gid, role, username)
+
 elif page == "Progress Tracker":
     from gym_pages import progress
     progress.render(gid, role)
+
+# Fees & Finance
 elif page == "Fee Collection":
     from gym_pages import fee_collection
     fee_collection.render(gid, role, username)
+
 elif page == "Expenses":
     from gym_pages import expenses
     expenses.render(gid, role, username)
+
 elif page == "Inventory":
     from gym_pages import inventory
     inventory.render(gid, role)
+
 elif page == "Reports":
     from gym_pages import reports
     reports.render(gid, role, username)
+
+# Communication
 elif page == "Message Center":
     from gym_pages import message_center
     message_center.render(gid, role)
+
 elif page == "WhatsApp":
     from gym_pages import whatsapp
     whatsapp.render(gid, role)
+
 elif page == "Complaints":
     from gym_pages import complaints
     complaints.render(gid, role)
-elif page == "Audit":
-    from gym_pages import auditor
-    auditor.render(gid, role, username)
-elif page == "User Management":
-    from gym_pages import user_management
-    user_management.render(user_id)
-elif page == "AI Assistant":
-    from gym_pages import ai_assistant
-    ai_assistant.render(gid, role, username)
+
+# Staff Management
 elif page == "Staff Targets":
     from gym_pages import staff_targets
     staff_targets.render(gid, role, username)
+
+# Audit & Access
+elif page == "Audit":
+    from gym_pages import auditor
+    auditor.render(gid, role, username)
+
+elif page == "User Management":
+    from gym_pages import user_management
+    user_management.render(user_id)
+
+# AI
+elif page == "AI Assistant":
+    from gym_pages import ai_assistant
+    ai_assistant.render(gid, role, username)
+
+# Member Portal (staff/admin view)
+elif page == "Member Portal":
+    from gym_pages import member_portal
+    member_portal.render()
+
+# ── Unknown page fallback ──────────────────────────────────────────────────────
+else:
+    st.error(f"❌ Page '{page}' not found.")
+    st.info("Please select a page from the sidebar.")

@@ -13,9 +13,10 @@ Receipt timestamps come from FeeRecord.created_at (the moment staff hit
 import os
 import streamlit as st
 import urllib.parse
-from datetime import date
+from datetime import date, datetime
 import database as db
 import styles
+import threading
 
 
 def _public_base_url() -> str:
@@ -106,20 +107,29 @@ def _wa_link(phone: str, message: str) -> str:
     return f"https://wa.me/{_format_pk_phone(phone)}?text={urllib.parse.quote(message)}"
 
 
-def _wa_action(phone: str, message: str, on_mark, key: str):
+def _wa_action(phone: str, message: str, on_mark, key: str, auto_send: bool = False):
     """Render WhatsApp link button + 'Mark as Sent' button side-by-side.
-
-    • `st.link_button` opens WhatsApp directly in a new tab (real anchor —
-      no popup blocking on mobile or desktop).
-    • `st.button("Mark as Sent")` runs `on_mark()` to flip whatsapp_sent=True
-      in the DB and triggers a rerun so the row drops off the Pending list.
-
-    Suppresses both buttons when the phone is invalid.
+    
+    If auto_send is True, automatically mark as sent without showing buttons.
     """
     normalized = _format_pk_phone(phone)
     if not normalized:
         st.caption("⚠️ Invalid phone")
         return
+    
+    # ── AUTO-SEND MODE ──
+    if auto_send:
+        try:
+            ok = on_mark()
+            if ok:
+                st.success("✅ Auto-sent!")
+            else:
+                st.info("ℹ️ Already marked as sent")
+        except Exception as e:
+            st.warning(f"⚠️ Auto-send error: {e}")
+        return
+    
+    # ── MANUAL MODE ──
     link = f"https://wa.me/{normalized}?text={urllib.parse.quote(message)}"
     a, b = st.columns([1, 1])
     with a:
@@ -135,6 +145,22 @@ def _wa_action(phone: str, message: str, on_mark, key: str):
             if not ok:
                 st.toast("Already marked as sent.", icon="ℹ️")
             st.rerun()
+
+
+# ── AUTO-SEND FUNCTION FOR BACKGROUND ──────────────────────────────────────
+def auto_send_welcome_message(phone: str, message: str):
+    """Background thread for auto-sending WhatsApp messages."""
+    try:
+        import pywhatkit as kit
+        now = datetime.now()
+        clean_phone = _format_pk_phone(phone)
+        if clean_phone:
+            kit.sendwhatmsg(clean_phone, message, now.hour, now.minute + 1)
+            print(f"✅ Auto-sent to {phone}")
+    except ImportError:
+        print(f"⚠️ pywhatkit not installed. Run: pip install pywhatkit")
+    except Exception as e:
+        print(f"⚠️ Auto-send error: {e}")
 
 
 # ── Page ──────────────────────────────────────────────────────────────────────
@@ -156,6 +182,31 @@ def render(gym_id, role):
     today = date.today()
     today_str = str(today)
     gyms_by_id = {g.id: g for g in gyms}
+
+    # ── AUTO-SEND TOGGLE ──────────────────────────────────────────────────────
+    st.markdown("---")
+    col_auto1, col_auto2, col_auto3 = st.columns([2, 1, 1])
+    
+    with col_auto1:
+        auto_send_enabled = st.checkbox(
+            "🤖 Enable Auto-Send", 
+            value=False,
+            help="ON: Messages auto-send ho jayenge. OFF: Aap manually send karein ge."
+        )
+    
+    with col_auto2:
+        if auto_send_enabled:
+            st.success("🟢 Auto-Send is ON")
+        else:
+            st.warning("🔴 Auto-Send is OFF")
+    
+    with col_auto3:
+        if auto_send_enabled:
+            st.caption("⏰ Messages send automatically")
+        else:
+            st.caption("👆 Manual send required")
+    
+    st.markdown("---")
 
     # ── Filter ────────────────────────────────────────────────────────────────
     f1, f2 = st.columns([2, 1])
@@ -229,9 +280,25 @@ def render(gym_id, role):
                         expiry=r.period_end or mem.expiry_date or "—",
                         profile_url=_profile_url(mem.id),
                     )
-                    _wa_action(mem.phone, msg,
-                               on_mark=lambda fid=r.id: db.mark_fee_whatsapp_sent(fid),
-                               key=f"mc_fee_{r.id}")
+                    
+                    # ── AUTO-SEND or MANUAL ──
+                    if auto_send_enabled:
+                        # Auto-mark as sent
+                        try:
+                            db.mark_fee_whatsapp_sent(r.id)
+                            st.success("✅ Auto-sent!")
+                            # Background thread for actual WhatsApp message
+                            threading.Thread(
+                                target=auto_send_welcome_message,
+                                args=(mem.phone, msg)
+                            ).start()
+                        except Exception as e:
+                            st.warning(f"⚠️ Auto-send error: {e}")
+                    else:
+                        _wa_action(mem.phone, msg,
+                                   on_mark=lambda fid=r.id: db.mark_fee_whatsapp_sent(fid),
+                                   key=f"mc_fee_{r.id}",
+                                   auto_send=False)
                 else:
                     st.caption("⚠️ No phone")
             st.divider()
@@ -266,9 +333,24 @@ def render(gym_id, role):
                         gym_name=gym_name,
                         profile_url=_profile_url(m.id),
                     )
-                    _wa_action(m.phone, msg,
-                               on_mark=lambda mid=m.id: db.mark_member_whatsapp_sent(mid),
-                               key=f"mc_mem_{m.id}")
+                    
+                    # ── AUTO-SEND or MANUAL ──
+                    if auto_send_enabled:
+                        try:
+                            db.mark_member_whatsapp_sent(m.id)
+                            st.success("✅ Auto-sent!")
+                            # Background thread for actual WhatsApp message
+                            threading.Thread(
+                                target=auto_send_welcome_message,
+                                args=(m.phone, msg)
+                            ).start()
+                        except Exception as e:
+                            st.warning(f"⚠️ Auto-send error: {e}")
+                    else:
+                        _wa_action(m.phone, msg,
+                                   on_mark=lambda mid=m.id: db.mark_member_whatsapp_sent(mid),
+                                   key=f"mc_mem_{m.id}",
+                                   auto_send=False)
                 else:
                     st.caption("⚠️ No phone")
             st.divider()

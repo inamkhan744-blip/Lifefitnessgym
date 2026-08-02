@@ -6,15 +6,29 @@ import database as db
 def render(gym_id, role, username):
     
     # ============================================
-    # SIMPLE HEADER (No CSS)
+    # HEADER
     # ============================================
     
-    st.title("🎯 Staff Target Management")
-    st.caption("Set monthly targets for staff and track their performance")
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0F172A,#1E1B4B);
+                border:1px solid #7C3AED;border-radius:16px;
+                padding:1.2rem 1.5rem;margin-bottom:1.2rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:1.8rem;font-weight:800;color:#FFFFFF;">🎯 Staff Target Management</div>
+                <div style="color:#94A3B8;font-size:0.85rem;">Set monthly targets and track staff performance</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="color:#7C3AED;font-size:0.7rem;font-weight:600;">📅 """ + datetime.now().strftime('%A, %d %B %Y') + """</div>
+                <div style="color:#64748B;font-size:0.7rem;">🕐 """ + datetime.now().strftime('%I:%M %p') + """</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     gyms = db.get_all_gyms()
     if not gyms:
-        st.info("Add a gym first.")
+        st.info("🏋️ Add a gym first to start tracking staff targets.")
         return
     
     if role.lower() not in ["admin", "owner"]:
@@ -24,6 +38,15 @@ def render(gym_id, role, username):
     # ============================================
     # FILTERS
     # ============================================
+    
+    st.markdown("""
+    <div style="background:linear-gradient(145deg,#1E293B,#0F172A);
+                border:1px solid #334155;
+                border-radius:12px;
+                padding:1rem;
+                margin-bottom:1rem;
+                box-shadow:0 4px 15px rgba(0,0,0,0.3);">
+    """, unsafe_allow_html=True)
     
     col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
     
@@ -49,6 +72,21 @@ def render(gym_id, role, username):
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun()
     
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # ============================================
+    # UPDATE ACHIEVEMENTS AUTOMATICALLY
+    # ============================================
+    
+    # Auto-update achievements for all staff
+    if sel_gid:
+        all_users = db.get_all_users()
+        staff_users = [u for u in all_users if u.gym_id == sel_gid and u.role.lower() != "admin"]
+        
+        for user in staff_users:
+            if hasattr(db, 'update_staff_achievements'):
+                db.update_staff_achievements(user.username, target_month)
+    
     # ============================================
     # STAFF PROGRESS CARDS
     # ============================================
@@ -60,6 +98,21 @@ def render(gym_id, role, username):
     if not all_staff:
         st.info("📭 No staff found for this gym.")
         return
+    
+    # Show stats at top
+    total_staff = len(all_staff)
+    active_targets = sum(1 for s in all_staff if s['progress'] is not None)
+    completed_targets = sum(1 for s in all_staff if s['progress'] and s['progress']['status'] == "Completed")
+    
+    col_s1, col_s2, col_s3 = st.columns(3)
+    with col_s1:
+        st.metric("👥 Total Staff", total_staff)
+    with col_s2:
+        st.metric("🎯 Active Targets", active_targets)
+    with col_s3:
+        st.metric("✅ Completed", completed_targets)
+    
+    st.markdown("---")
     
     for staff in all_staff:
         name = staff['full_name']
@@ -78,15 +131,15 @@ def render(gym_id, role, username):
                 # Show staff name and progress
                 col1, col2 = st.columns([2, 1])
                 with col1:
-                    st.markdown(f"**{name}**")
-                    st.caption(f"👤 {role_name}")
+                    st.markdown(f"**👤 {name}**")
+                    st.caption(f"📋 {role_name}")
                 with col2:
                     if overall_pct >= 80:
-                        st.success(f"🏆 {overall_pct:.0f}%")
+                        st.success(f"🏆 {overall_pct:.0f}% Complete")
                     elif overall_pct >= 50:
-                        st.warning(f"💪 {overall_pct:.0f}%")
+                        st.warning(f"💪 {overall_pct:.0f}% Complete")
                     else:
-                        st.error(f"🎯 {overall_pct:.0f}%")
+                        st.error(f"🎯 {overall_pct:.0f}% Complete")
                     st.caption(f"Status: {status}")
                 
                 # Progress bars
@@ -94,18 +147,21 @@ def render(gym_id, role, username):
                 
                 with col_a:
                     st.markdown("**👤 New Members**")
-                    st.progress(progress['new_members']['percentage'] / 100)
-                    st.caption(f"{progress['new_members']['achieved']:.0f}/{progress['new_members']['target']:.0f}")
+                    pct = min(100, progress['new_members']['percentage'])
+                    st.progress(pct / 100)
+                    st.caption(f"{progress['new_members']['achieved']:.0f}/{progress['new_members']['target']:.0f} ({pct:.0f}%)")
                 
                 with col_b:
                     st.markdown("**💰 Fee Collection**")
-                    st.progress(progress['fee_collection']['percentage'] / 100)
-                    st.caption(f"PKR {progress['fee_collection']['achieved']:,.0f}/{progress['fee_collection']['target']:,.0f}")
+                    pct = min(100, progress['fee_collection']['percentage'])
+                    st.progress(pct / 100)
+                    st.caption(f"PKR {progress['fee_collection']['achieved']:,.0f}/{progress['fee_collection']['target']:,.0f} ({pct:.0f}%)")
                 
                 with col_c:
                     st.markdown("**✅ Attendance**")
-                    st.progress(progress['attendance']['percentage'] / 100)
-                    st.caption(f"{progress['attendance']['achieved']:.0f}/{progress['attendance']['target']:.0f}")
+                    pct = min(100, progress['attendance']['percentage'])
+                    st.progress(pct / 100)
+                    st.caption(f"{progress['attendance']['achieved']:.0f}/{progress['attendance']['target']:.0f} ({pct:.0f}%)")
                 
                 # Prize info
                 col_p1, col_p2 = st.columns(2)
@@ -118,10 +174,14 @@ def render(gym_id, role, username):
                         st.warning(f"⏳ {prize_status}")
                     else:
                         st.info(f"📌 {prize_status}")
+                
+                # Overall score
+                st.caption(f"📊 Overall Score: {overall_pct:.0f}%")
+                
             else:
-                st.markdown(f"**{name}**")
-                st.caption(f"👤 {role_name}")
-                st.info("⏳ No targets set")
+                st.markdown(f"**👤 {name}**")
+                st.caption(f"📋 {role_name}")
+                st.info("⏳ No targets set for this month")
     
     st.markdown("---")
     
@@ -148,7 +208,6 @@ def render(gym_id, role, username):
             staff_username = staff_opts[selected_staff_label]
     
     with col_t2:
-        # Show existing targets if any
         existing = db.get_staff_target(staff_username, target_month) if staff_list else None
         if existing:
             st.info(f"📋 Existing targets for this month:")
@@ -190,7 +249,6 @@ def render(gym_id, role, username):
                 help="Percentage of total active members to mark attendance daily"
             )
             
-            # Show calculated target count
             total_members = len(db.get_members(gym_id=sel_gid, status="Active")) if sel_gid else 0
             if total_members > 0:
                 target_count = (attendance_percentage / 100) * total_members
@@ -243,11 +301,9 @@ def render(gym_id, role, username):
         for t in all_targets:
             staff = db.get_user_by_username(t.staff_username)
             
-            # Calculate overall
             new_pct = (t.new_members_achieved / t.new_members_target * 100) if t.new_members_target > 0 else 0
             fee_pct = (t.fee_collection_achieved / t.fee_collection_target * 100) if t.fee_collection_target > 0 else 0
             
-            # Get total members for attendance
             total_members = len(db.get_members(gym_id=sel_gid, status="Active")) if sel_gid else 0
             attendance_target_count = (t.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
             att_pct = (t.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
@@ -273,13 +329,14 @@ def render(gym_id, role, username):
         if all_targets:
             st.caption("🗑️ Select a target to delete")
             del_opts = {f"{r['Staff']} - {r['Month']}": r['ID'] for r in rows}
-            del_sel = st.selectbox("Select Target to Delete", list(del_opts.keys()))
-            if st.button("🗑️ Delete Target", use_container_width=True):
-                ok, msg = db.delete_staff_target(del_opts[del_sel])
-                if ok:
-                    st.success("✅ Target deleted!")
-                    st.rerun()
-                else:
-                    st.error(msg)
+            if del_opts:
+                del_sel = st.selectbox("Select Target to Delete", list(del_opts.keys()))
+                if st.button("🗑️ Delete Target", use_container_width=True):
+                    ok, msg = db.delete_staff_target(del_opts[del_sel])
+                    if ok:
+                        st.success("✅ Target deleted!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
     else:
-        st.info("No targets set yet.")
+        st.info("📭 No targets set yet.")

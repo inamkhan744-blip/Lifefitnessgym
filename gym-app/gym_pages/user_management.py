@@ -13,6 +13,22 @@ def render(current_user_id):
     gyms = db.get_all_gyms()
     gym_opts = {"All Gyms (Admin)": None} | {g.name: g.id for g in gyms}
 
+    # ============================================
+    # USER STATS
+    # ============================================
+    
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    with col_s1:
+        st.metric("👥 Total Users", len(users))
+    with col_s2:
+        st.metric("👑 Admins", len([u for u in users if u.role == "admin"]))
+    with col_s3:
+        st.metric("🧑‍💼 Staff", len([u for u in users if u.role == "staff"]))
+    with col_s4:
+        st.metric("🔍 Auditors", len([u for u in users if u.role == "auditor"]))
+    
+    st.divider()
+
     # ── Add User ───────────────────────────────────────────────────────────────
     with st.expander("➕ Add New User", expanded=False):
         with st.form("add_user_form", clear_on_submit=True):
@@ -59,7 +75,26 @@ def render(current_user_id):
             "Active": "✅" if u.is_active else "❌",
             "Created": u.created_at.strftime("%Y-%m-%d") if u.created_at else "—",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    
+    # Search and Filter
+    col_search1, col_search2 = st.columns([2, 1])
+    with col_search1:
+        search_user = st.text_input("🔍 Search Users", placeholder="Search by username or name...", key="user_search")
+    with col_search2:
+        role_filter = st.selectbox("Filter by Role", ["All"] + ROLES, key="role_filter")
+    
+    # Apply filters
+    filtered_rows = rows
+    if search_user:
+        filtered_rows = [r for r in filtered_rows if search_user.lower() in r["Username"].lower() or search_user.lower() in r["Full Name"].lower()]
+    if role_filter != "All":
+        filtered_rows = [r for r in filtered_rows if role_filter in r["Role"].lower()]
+    
+    if filtered_rows:
+        st.dataframe(pd.DataFrame(filtered_rows), use_container_width=True, hide_index=True)
+        st.caption(f"📋 Showing {len(filtered_rows)} of {len(rows)} users")
+    else:
+        st.info("No users found matching your search.")
 
     st.divider()
 
@@ -117,13 +152,13 @@ def render(current_user_id):
             st.session_state["confirm_del_user"] = sel_uid
 
     if st.session_state.get("confirm_del_user") == sel_uid:
-        st.warning(f"Permanently delete **{sel_user.username}**?")
+        st.warning(f"⚠️ Permanently delete **{sel_user.username}**? This cannot be undone!")
         cc, cx = st.columns(2)
         if cc.button("✅ Yes, Delete", type="primary", key=f"cdu_yes_{sel_uid}"):
             db.delete_user(sel_uid)
-            st.success("User deleted.")
+            st.success("✅ User deleted.")
             st.session_state.pop("confirm_del_user", None)
             st.rerun()
-        if cx.button("Cancel", key=f"cdu_no_{sel_uid}"):
+        if cx.button("❌ Cancel", key=f"cdu_no_{sel_uid}"):
             st.session_state.pop("confirm_del_user", None)
             st.rerun()

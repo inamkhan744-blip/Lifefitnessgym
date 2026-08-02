@@ -5,17 +5,33 @@ import urllib.parse
 import database as db
 import styles
 
-
 PRIORITY_COLORS = {"Low": "blue", "Medium": "amber", "High": "red", "Urgent": "red"}
 STATUS_ICONS = {"Open": "🟡", "In Progress": "🔵", "Resolved": "✅"}
 
+# ============================================
+# WHATSAPP LINK HELPER - FIXED
+# ============================================
 
 def make_wa_link(phone: str, message: str) -> str:
-    clean = "".join(c for c in phone if c.isdigit() or c == "+")
-    if clean.startswith("0"):
-        clean = "+92" + clean[1:]
+    """Generate WhatsApp link with proper phone number"""
+    if not phone:
+        return "#"
+    # Remove spaces, dashes, parentheses, plus sign
+    clean = "".join(c for c in str(phone) if c.isdigit())
+    if not clean:
+        return "#"
+    # Add Pakistan country code if not present
+    if len(clean) == 10:  # 03xx-xxxxxxx
+        clean = "92" + clean[1:]
+    elif len(clean) == 11 and clean.startswith("0"):
+        clean = "92" + clean[1:]
+    elif not clean.startswith("92") and len(clean) == 11:
+        clean = "92" + clean
     return f"https://wa.me/{clean}?text={urllib.parse.quote(message)}"
 
+# ============================================
+# MAIN RENDER FUNCTION
+# ============================================
 
 def render(gym_id, role):
     styles.page_header("📣", "Complaints & Feedback",

@@ -109,12 +109,36 @@ section[data-testid="stSidebar"] { background: #0F172A; border-right: 1px solid 
 /* ── Divider ─────────────────────────────────────────────────── */
 hr { border-color: #1E293B !important; }
 
-/* ── Expander base fix (overflow hidden was causing _arr truncation) ── */
+/* ── 🔥 FIX: Expander arrow + hide stray text ───────────────── */
 [data-testid="stExpander"] details > summary {
     list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 [data-testid="stExpander"] details > summary::-webkit-details-marker {
     display: none;
+}
+[data-testid="stExpander"] details > summary::before {
+    content: '▶';
+    font-size: 0.7rem;
+    color: #94A3B8;
+    transition: transform 0.2s;
+    margin-right: 6px;
+}
+[data-testid="stExpander"] details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+/* ── 🔥 Hide empty elements ──────────────────────────────────── */
+.stMarkdown:empty {
+    display: none !important;
+}
+.stMarkdown:has(>:empty) {
+    display: none !important;
+}
+.stMarkdown:has(>:empty:only-child) {
+    display: none !important;
 }
 
 /* ── Responsive shrink ───────────────────────────────────────── */
@@ -177,4 +201,3 @@ def page_header(icon, title, sub=""):
 
 def badge(text, color="gray"):
     return f'<span class="badge badge-{color}">{text}</span>'
-
