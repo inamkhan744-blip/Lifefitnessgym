@@ -40,9 +40,22 @@ def _profile_url(member_id: int) -> str:
     return f"{_public_base_url()}/?profile={make_token(member_id)}"
 
 
+def _portal_url() -> str:
+    """Direct link to the Member Portal login page."""
+    return f"{_public_base_url()}/?portal=1"
+
+
+def _phone_last4(phone: str) -> str:
+    """Extract last 4 digits of phone for portal login hint."""
+    digits = "".join(c for c in str(phone or "") if c.isdigit())
+    return digits[-4:] if len(digits) >= 4 else "****"
+
+
 def _build_receipt_message(member, gym_name: str, amount: float,
                            paid_at_str: str, expiry: str, profile_url: str) -> str:
     """Professional receipt template (used by 'Send Receipt' on fee rows)."""
+    portal = _portal_url()
+    last4  = _phone_last4(member.phone)
     return (
         "--- 🧾 OFFICIAL GYM RECEIPT ---\n"
         f"Hello {member.full_name}!\n"
@@ -51,6 +64,10 @@ def _build_receipt_message(member, gym_name: str, amount: float,
         f"📅 Date/Time: {paid_at_str}\n"
         f"⏳ Expiry Date: {expiry}\n\n"
         f"🔗 View Digital Member Card: {profile_url}\n\n"
+        "📱 *MEMBER PORTAL — Apna Dashboard*\n"
+        f"Profile, attendance, diet plan & AI coach:\n"
+        f"{portal}\n"
+        f"🔑 Login: Serial *{member.serial_number}* + Phone last 4 digits (*{last4}*)\n\n"
         "Stay fit and keep grinding! 💪\n"
         "----------------------------------"
     )
@@ -61,6 +78,8 @@ def _build_welcome_message(member, gym_name: str, profile_url: str) -> str:
     fee captured at registration (Member.fee_amount)."""
     fee = float(getattr(member, "fee_amount", 0) or 0)
     amount_str = f"PKR {fee:,.2f}" if fee > 0 else "—"
+    portal = _portal_url()
+    last4  = _phone_last4(member.phone)
     return (
         "--- 🏋️ WELCOME TO THE GYM ---\n"
         f"Hello {member.full_name}!\n"
@@ -70,6 +89,10 @@ def _build_welcome_message(member, gym_name: str, profile_url: str) -> str:
         f"💰 Amount Paid: {amount_str}\n"
         f"⏳ Expiry Date: {member.expiry_date or '—'}\n\n"
         f"🔗 View Digital Member Card: {profile_url}\n\n"
+        "📱 *MEMBER PORTAL — Apna Dashboard*\n"
+        f"Profile, attendance, diet plan & AI coach:\n"
+        f"{portal}\n"
+        f"🔑 Login: Serial *{member.serial_number}* + Phone last 4 digits (*{last4}*)\n\n"
         "Stay fit and keep grinding! 💪\n"
         "----------------------------------"
     )
