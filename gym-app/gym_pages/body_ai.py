@@ -435,7 +435,8 @@ def render_body_coach(m, records):
         with cc3:
             st.session_state["bc_height"] = st.number_input(
                 "📏 Height (cm)", 100, 250,
-                st.session_state["bc_height"]
+                st.session_state["bc_height"],
+                key="bc_height_input"
             )
 
     ctx = _build_member_context(m, records, st.session_state["bc_goal"], st.session_state["bc_level"])
