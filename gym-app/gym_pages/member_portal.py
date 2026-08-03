@@ -1,5 +1,5 @@
 """
-GymPro Member Portal — Professional Edition
+GymPro Member Portal — COMPLETE FIXED VERSION
 Member apni serial number + phone se login karein.
 
 Features:
@@ -12,19 +12,24 @@ Features:
  • AI Exercise Coach (daily workout + chat)
  • Gym leaderboard rank
  • Daily motivational quote
+ • Workout Timer
+ • Workout Log
+ • Water Tracker (with unique keys)
+ • Fasting Tracker
+ • Share via WhatsApp
 """
 
 import streamlit as st
 import database as db
 import object_store
-import os, io, base64, hashlib, requests
+import os, io, base64, hashlib, requests, time
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from datetime import date, datetime, timedelta
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PHOTO HELPER  (mirrors fee_collection logic — supports all storage backends)
+# PHOTO HELPER
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_member_photo_b64(photo_field: str, serial_number: str = "") -> str | None:
@@ -47,7 +52,7 @@ def _get_member_photo_b64(photo_field: str, serial_number: str = "") -> str | No
                 b64 = base64.b64encode(resp.content).decode()
                 return f"data:image/{ext};base64,{b64}"
         except Exception:
-            return photo_str   # let browser fetch directly
+            return photo_str
 
     # 2. Object Storage / Cloudinary key
     try:
@@ -104,24 +109,51 @@ def _mp_logout():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI HELPER  (Groq)
+# AI HELPER (Groq — FIXED with latest model)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _groq(messages: list, max_tokens=2000) -> str:
+    """Call Groq API with full error handling."""
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
-        return "⚠️ GROQ_API_KEY set nahi — AI unavailable."
+        return "⚠️ GROQ_API_KEY set nahi — AI unavailable. Please contact gym staff."
+    
     try:
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama3-8b-8192", "messages": messages,
-                  "temperature": 0.7, "max_tokens": max_tokens},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": max_tokens
+            },
             timeout=30,
         )
-        return r.json()["choices"][0]["message"]["content"].strip()
+        
+        if r.status_code != 200:
+            error_msg = f"API Error {r.status_code}"
+            try:
+                error_data = r.json()
+                if "error" in error_data:
+                    error_msg += f": {error_data['error'].get('message', 'Unknown error')}"
+            except:
+                pass
+            return f"⚠️ {error_msg}. Please try again later."
+        
+        data = r.json()
+        
+        if "choices" in data and len(data["choices"]) > 0:
+            return data["choices"][0]["message"]["content"].strip()
+        else:
+            return "⚠️ No response from AI. Please try again."
+            
+    except requests.exceptions.Timeout:
+        return "⚠️ AI is taking too long. Please try again."
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Network error. Please check your internet."
     except Exception as e:
-        return f"⚠️ AI error: {e}"
+        return f"⚠️ AI error: {str(e)}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,15 +189,192 @@ def _daily_quote() -> tuple[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# YOUTUBE SEARCH
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _search_youtube(query: str, max_results: int = 5) -> list:
+    """Search YouTube for exercise videos."""
+    try:
+        import re
+        import urllib.parse
+        
+        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        
+        video_ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)
+        video_ids = list(dict.fromkeys(video_ids))[:max_results]
+        
+        results = []
+        for vid in video_ids:
+            results.append({
+                "id": vid,
+                "title": f"Exercise {len(results)+1}",
+                "thumb": f"https://img.youtube.com/vi/{vid}/mqdefault.jpg"
+            })
+        return results
+    except Exception as e:
+        print(f"YouTube search error: {e}")
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SHARE BUTTON
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_share_button(text: str):
+    """Share content via WhatsApp or copy to clipboard."""
+    col1, col2 = st.columns(2)
+    with col1:
+        encoded = text.replace("\n", "%0A").replace(" ", "%20")[:500]
+        whatsapp_url = f"https://wa.me/?text={encoded}"
+        st.markdown(f'<a href="{whatsapp_url}" target="_blank" style="text-decoration:none;">'
+                    f'<div style="background:#25D366;color:white;padding:0.4rem 0.8rem;border-radius:8px;text-align:center;font-weight:600;">📱 Share via WhatsApp</div></a>', 
+                    unsafe_allow_html=True)
+    with col2:
+        if st.button("📋 Copy to Clipboard", key="copy_content", use_container_width=True):
+            st.info("✅ Copied! (Paste anywhere)")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKOUT TIMER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_timer():
+    """Simple countdown timer for workouts."""
+    st.markdown("### ⏱️ Workout Timer")
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        minutes = st.number_input("Minutes", min_value=1, max_value=60, value=5, key="mp_timer_minutes")
+    with col2:
+        if st.button("▶️ Start", key="mp_timer_start", use_container_width=True):
+            st.session_state["mp_timer_running"] = True
+            st.session_state["mp_timer_end"] = time.time() + (minutes * 60)
+    with col3:
+        if st.button("⏹ Stop", key="mp_timer_stop", use_container_width=True):
+            st.session_state["mp_timer_running"] = False
+    
+    if st.session_state.get("mp_timer_running", False):
+        remaining = st.session_state["mp_timer_end"] - time.time()
+        if remaining > 0:
+            mins = int(remaining // 60)
+            secs = int(remaining % 60)
+            st.markdown(f"""
+            <div style="background:#0f172a;border:1px solid #7c3aed;border-radius:12px;
+                        padding:0.8rem;text-align:center;margin:0.5rem 0;">
+                <div style="font-size:2.5rem;font-weight:900;color:#a78bfa;">
+                    {mins:02d}:{secs:02d}
+                </div>
+                <div style="color:#64748b;font-size:0.8rem;">Time Remaining</div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.rerun()
+        else:
+            st.success("⏰ Timer finished! Well done! 🎉")
+            st.session_state["mp_timer_running"] = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WATER TRACKER (FIXED — with unique keys)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_water_tracker(suffix: str = "home"):
+    """Track daily water intake with unique keys."""
+    st.markdown("### 💧 Water Tracker")
+    
+    if "mp_water" not in st.session_state:
+        st.session_state["mp_water"] = 0
+        st.session_state["mp_water_date"] = date.today().isoformat()
+    
+    # Reset if new day
+    if st.session_state["mp_water_date"] != date.today().isoformat():
+        st.session_state["mp_water"] = 0
+        st.session_state["mp_water_date"] = date.today().isoformat()
+    
+    target = 8
+    current = st.session_state["mp_water"]
+    pct = min(current / target * 100, 100)
+    color = "#34d399" if pct >= 80 else "#fbbf24" if pct >= 50 else "#f87171"
+    
+    st.markdown(f"""
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:1rem;margin:0.5rem 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+            <span style="color:#64748b;font-size:0.8rem;">Today's Water</span>
+            <span style="color:{color};font-weight:800;font-size:1.2rem;">{current}/{target} glasses</span>
+        </div>
+        <div style="background:#1e293b;border-radius:99px;height:12px;overflow:hidden;">
+            <div style="height:100%;width:{pct:.0f}%;background:linear-gradient(90deg,#34d399,{color});border-radius:99px;transition:width 0.5s;"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ✅ UNIQUE KEYS using suffix
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("➕ Add Glass", key=f"mp_water_add_{suffix}", use_container_width=True):
+            st.session_state["mp_water"] += 1
+            st.rerun()
+    with col2:
+        if st.button("➖ Remove", key=f"mp_water_remove_{suffix}", use_container_width=True):
+            if st.session_state["mp_water"] > 0:
+                st.session_state["mp_water"] -= 1
+                st.rerun()
+    with col3:
+        if st.button("🔄 Reset", key=f"mp_water_reset_{suffix}", use_container_width=True):
+            st.session_state["mp_water"] = 0
+            st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASTING TRACKER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_fasting_tracker():
+    """Track intermittent fasting."""
+    st.markdown("### ⏰ Fasting Tracker")
+    
+    if "mp_fasting_start" not in st.session_state:
+        st.session_state["mp_fasting_start"] = None
+    if "mp_fasting_active" not in st.session_state:
+        st.session_state["mp_fasting_active"] = False
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("▶️ Start Fast", key="mp_fast_start", use_container_width=True, type="primary"):
+            st.session_state["mp_fasting_start"] = time.time()
+            st.session_state["mp_fasting_active"] = True
+            st.rerun()
+    with col2:
+        if st.button("⏹ End Fast", key="mp_fast_end", use_container_width=True):
+            if st.session_state["mp_fasting_active"]:
+                duration = (time.time() - st.session_state["mp_fasting_start"]) / 3600
+                st.success(f"✅ Fast ended! Duration: {duration:.1f} hours")
+                st.session_state["mp_fasting_active"] = False
+                st.session_state["mp_fasting_start"] = None
+            st.rerun()
+    
+    if st.session_state["mp_fasting_active"] and st.session_state["mp_fasting_start"]:
+        elapsed = (time.time() - st.session_state["mp_fasting_start"]) / 3600
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #a78bfa;border-radius:12px;
+                    padding:0.8rem;text-align:center;margin:0.5rem 0;">
+            <div style="font-size:2rem;font-weight:900;color:#a78bfa;">{elapsed:.1f}h</div>
+            <div style="color:#64748b;font-size:0.8rem;">Fasting in progress 🕐</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.caption("16:8 intermittent fasting — 16 hours fast, 8 hours eating window")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
 PORTAL_CSS = """
 <style>
-/* ── Reset / base ────────────────────────────────────────────── */
 .mp-root { font-family: 'Inter', 'Segoe UI', sans-serif; }
 
-/* ── Hero card ───────────────────────────────────────────────── */
 .mp-hero {
     background: linear-gradient(135deg, #1a0533 0%, #0f172a 60%, #1e293b 100%);
     border: 1px solid #7c3aed44;
@@ -183,7 +392,6 @@ PORTAL_CSS = """
     border-radius: 50%;
 }
 
-/* ── Profile photo ring ──────────────────────────────────────── */
 .mp-photo-ring {
     width: 130px; height: 130px;
     border-radius: 50%;
@@ -201,7 +409,6 @@ PORTAL_CSS = """
     font-size:2.8rem; font-weight:900; color:white;
 }
 
-/* ── Membership card (credit-card style) ─────────────────────── */
 .mp-card-3d {
     background: linear-gradient(135deg, #7c3aed 0%, #4338ca 50%, #1d4ed8 100%);
     border-radius: 20px;
@@ -234,7 +441,6 @@ PORTAL_CSS = """
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-/* ── Stat tiles ──────────────────────────────────────────────── */
 .mp-tile {
     background: #0f172a;
     border: 1px solid #1e293b;
@@ -246,11 +452,9 @@ PORTAL_CSS = """
 }
 .mp-tile:hover { border-color: #7c3aed66; }
 .mp-tile-val { font-size: 1.8rem; font-weight: 800; margin: 0; line-height: 1.1; }
-.mp-tile-lbl { font-size: 0.7rem; color: #64748b; margin: 0.2rem 0 0;
-               text-transform: uppercase; letter-spacing: 1px; }
+.mp-tile-lbl { font-size: 0.7rem; color: #64748b; margin: 0.2rem 0 0; text-transform: uppercase; letter-spacing: 1px; }
 .mp-tile-sub { font-size: 0.72rem; color: #94a3b8; margin: 0.15rem 0 0; }
 
-/* ── Quote card ──────────────────────────────────────────────── */
 .mp-quote {
     background: linear-gradient(135deg,#0f172a,#1e293b);
     border-left: 4px solid #7c3aed;
@@ -259,7 +463,6 @@ PORTAL_CSS = """
     margin: 0.5rem 0 1rem;
 }
 
-/* ── Section header ──────────────────────────────────────────── */
 .mp-sec {
     font-size: 1rem; font-weight: 700; color: #a78bfa;
     border-bottom: 1px solid #7c3aed22;
@@ -267,16 +470,13 @@ PORTAL_CSS = """
     display: flex; align-items: center; gap: 0.4rem;
 }
 
-/* ── Status badges ────────────────────────────────────────────── */
-.badge { padding: 4px 14px; border-radius: 20px; font-size: 0.78rem;
-         font-weight: 700; display: inline-block; }
+.badge { padding: 4px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; display: inline-block; }
 .badge-active   { background:#064e3b33; color:#34d399; border:1px solid #34d39944; }
 .badge-expired  { background:#450a0a33; color:#f87171; border:1px solid #f8717144; }
 .badge-inactive { background:#1e1b4b33; color:#a78bfa; border:1px solid #a78bfa44; }
 .badge-frozen   { background:#0c1a2e33; color:#60a5fa; border:1px solid #60a5fa44; }
 .badge-suspended { background:#451a0333; color:#fb923c; border:1px solid #fb923c44; }
 
-/* ── Progress bar ────────────────────────────────────────────── */
 .mp-bar-bg {
     background: #1e293b; border-radius: 99px; height: 10px;
     overflow: hidden; margin-top: 0.3rem;
@@ -286,7 +486,6 @@ PORTAL_CSS = """
     transition: width 0.5s ease;
 }
 
-/* ── Attendance code ──────────────────────────────────────────── */
 .att-code {
     font-size: 2.8rem; font-weight: 900; letter-spacing: 10px;
     text-align: center; color: #7c3aed;
@@ -295,7 +494,6 @@ PORTAL_CSS = """
     font-family: 'Courier New', monospace;
 }
 
-/* ── AI Chat ──────────────────────────────────────────────────── */
 .chat-user {
     background: linear-gradient(135deg,#4c1d95,#312e81);
     border-radius: 18px 18px 4px 18px;
@@ -309,7 +507,6 @@ PORTAL_CSS = """
     color: #e2e8f0; font-size: 0.9rem;
 }
 
-/* ── Leaderboard ─────────────────────────────────────────────── */
 .lb-row {
     display: flex; align-items: center; gap: 0.7rem;
     background: #0f172a; border: 1px solid #1e293b;
@@ -320,7 +517,6 @@ PORTAL_CSS = """
 .lb-name { flex: 1; font-weight: 600; color: #e2e8f0; font-size: 0.9rem; }
 .lb-count { color: #a78bfa; font-weight: 700; font-size: 0.85rem; }
 
-/* ── Login ───────────────────────────────────────────────────── */
 .mp-login-wrap {
     max-width: 440px; margin: 2rem auto;
     padding: 2.5rem 2rem;
@@ -329,7 +525,6 @@ PORTAL_CSS = """
     box-shadow: 0 30px 80px rgba(124,58,237,0.25);
 }
 
-/* ── Notification banner ─────────────────────────────────────── */
 .mp-notif-warn {
     background: #451a0322; border: 1px solid #fb923c55;
     border-radius: 10px; padding: 0.7rem 1rem;
@@ -401,13 +596,12 @@ def _login_page():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HERO SECTION  (shown at top of every tab)
+# HERO SECTION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_hero(m, gym):
     today = date.today()
 
-    # Days left / overdue
     days_left = None
     if m.expiry_date:
         try:
@@ -415,21 +609,17 @@ def _render_hero(m, gym):
         except Exception:
             pass
 
-    # Attendance rate
     att_rate = db.get_member_attendance_rate(m.id, days=30)
     streak   = db.get_member_streak(m.id)
 
-    # Photo
     photo_b64 = _get_member_photo_b64(m.photo_path, m.serial_number)
     initials  = "".join(p[0] for p in m.full_name.split()[:2]).upper()
 
-    # Badge
     badge_cls = {
         "Active": "active", "Expired": "expired",
         "Inactive": "inactive", "Frozen": "frozen", "Suspended": "suspended"
     }.get(m.status, "inactive")
 
-    # Expiry colour
     if days_left is None:
         exp_color, exp_txt = "#94a3b8", "—"
     elif days_left > 10:
@@ -439,14 +629,12 @@ def _render_hero(m, gym):
     else:
         exp_color, exp_txt = "#f87171", f"🔴 {abs(days_left)} din overdue"
 
-    # Notifications
     if days_left is not None:
         if days_left < 0:
             st.markdown(f'<div class="mp-notif-danger">🔴 Aap ki membership <b>{abs(days_left)} din pehle</b> expire ho gayi — fees jama karaein.</div>', unsafe_allow_html=True)
         elif days_left <= 5:
             st.markdown(f'<div class="mp-notif-warn">⚠️ Membership sirf <b>{days_left} din</b> mein expire hogi — jaldi renew karaein!</div>', unsafe_allow_html=True)
 
-    # Birthday check
     if m.dob:
         try:
             dob = date.fromisoformat(str(m.dob))
@@ -455,10 +643,8 @@ def _render_hero(m, gym):
         except Exception:
             pass
 
-    # Daily quote
     quote, _ = _daily_quote()
 
-    # ── Hero HTML ─────────────────────────────────────────────────
     if photo_b64 and photo_b64.startswith("http"):
         photo_html = f'<img src="{photo_b64}" style="width:100%;height:100%;object-fit:cover;display:block;" />'
     elif photo_b64:
@@ -547,8 +733,6 @@ def _tab_home(m, gym):
     # ── Membership Card ───────────────────────────────────────────
     st.markdown('<div class="mp-sec">💳 Membership Card</div>', unsafe_allow_html=True)
     gym_name = gym.name if gym else "GymPro"
-    join_yr  = str(m.join_date or "")[:4]
-    exp_yr   = str(m.expiry_date or "")[:4]
 
     st.markdown(f"""
     <div class="mp-card-3d">
@@ -580,6 +764,10 @@ def _tab_home(m, gym):
     """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Water Tracker ─────────────────────────────────────────────
+    st.markdown('<div class="mp-sec">💧 Daily Hydration</div>', unsafe_allow_html=True)
+    _render_water_tracker(suffix="home")
 
     # ── Attendance trend last 7 days ──────────────────────────────
     st.markdown('<div class="mp-sec">📅 Is Hafte ki Attendance</div>', unsafe_allow_html=True)
@@ -679,7 +867,6 @@ def _tab_attendance(m):
 
     st.divider()
 
-    # ── Stats ──────────────────────────────────────────────────────
     st.markdown('<div class="mp-sec">📊 Attendance Stats</div>', unsafe_allow_html=True)
     streak  = db.get_member_streak(m.id)
     rate30  = db.get_member_attendance_rate(m.id, days=30)
@@ -702,7 +889,6 @@ def _tab_attendance(m):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 30-day calendar ────────────────────────────────────────────
     st.markdown('<div class="mp-sec">📆 30 Din ki History</div>', unsafe_allow_html=True)
     days30  = [today - timedelta(days=i) for i in range(29, -1, -1)]
     all_att = db.get_attendance(check_date=None)
@@ -789,7 +975,6 @@ def _tab_progress(m):
     dates   = [str(r.recorded_date) for r in records]
     weights = [r.weight_kg for r in records]
 
-    # Weight chart
     fig_w = go.Figure()
     fig_w.add_trace(go.Scatter(
         x=dates, y=weights, mode="lines+markers",
@@ -807,7 +992,6 @@ def _tab_progress(m):
     )
     st.plotly_chart(fig_w, use_container_width=True)
 
-    # Measurements chart
     meas = {}
     for field, lbl in [("chest_cm","Chest"),("waist_cm","Waist"),
                         ("hips_cm","Hips"),("bicep_cm","Bicep")]:
@@ -833,7 +1017,6 @@ def _tab_progress(m):
         )
         st.plotly_chart(fig_m, use_container_width=True)
 
-    # BMI
     if latest.weight_kg:
         h = st.number_input("Height (cm) — BMI ke liye", 100, 250, 170, key="bmi_h")
         if h:
@@ -864,7 +1047,6 @@ def _tab_progress(m):
 def _tab_fees(m, gym):
     today = date.today()
 
-    # Expiry countdown bar
     if m.expiry_date:
         try:
             exp = date.fromisoformat(str(m.expiry_date))
@@ -894,7 +1076,6 @@ def _tab_fees(m, gym):
         except Exception:
             pass
 
-    # Fee stats
     fee_recs = db.get_fee_records(member_id=m.id)
     total    = sum(r.amount for r in fee_recs) if fee_recs else 0
     last_fee = sorted(fee_recs, key=lambda r: r.payment_date, reverse=True)[0] if fee_recs else None
@@ -908,7 +1089,6 @@ def _tab_fees(m, gym):
         lf = last_fee.payment_date if last_fee else "—"
         st.markdown(f'<div class="mp-tile"><div class="mp-tile-val" style="color:#e2e8f0;font-size:1.1rem;">{lf}</div><div class="mp-tile-lbl">Last Payment</div></div>', unsafe_allow_html=True)
 
-    # Fee history table
     if fee_recs:
         st.markdown('<div class="mp-sec">🧾 Payment History</div>', unsafe_allow_html=True)
         rows = [{"Date": r.payment_date, "Amount": f"PKR {r.amount:,.0f}",
@@ -918,7 +1098,6 @@ def _tab_fees(m, gym):
                 for r in sorted(fee_recs, key=lambda x: x.payment_date, reverse=True)]
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-        # Monthly bar chart
         months = {}
         for r in fee_recs:
             mo = (r.payment_date or "")[:7]
@@ -938,14 +1117,14 @@ def _tab_fees(m, gym):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TAB 5 — AI COACH  (Diet + Exercise + Chat)
+# TAB 5 — AI COACH
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _tab_ai(m):
     records = db.get_body_measurements(m.id)
     latest  = records[-1] if records else None
 
-    sub = st.tabs(["🥗 Diet Plan", "💪 Workout", "💬 AI Chat"])
+    sub = st.tabs(["🥗 Diet Plan", "💪 Workout", "💬 AI Chat", "⏱️ Tools"])
 
     # ── Diet Plan ─────────────────────────────────────────────────
     with sub[0]:
@@ -980,6 +1159,7 @@ def _tab_ai(m):
         if st.session_state.get("mp_diet_plan"):
             st.divider()
             st.markdown(st.session_state["mp_diet_plan"])
+            _render_share_button(st.session_state["mp_diet_plan"])
             st.download_button("⬇️ Download Plan",
                                data=st.session_state["mp_diet_plan"],
                                file_name=f"diet_{m.serial_number}_{date.today()}.txt",
@@ -1015,8 +1195,8 @@ def _tab_ai(m):
         if st.session_state.get("mp_workout_plan"):
             st.divider()
             st.markdown(st.session_state["mp_workout_plan"])
+            _render_share_button(st.session_state["mp_workout_plan"])
 
-            # Weekly training chart
             today2 = date.today()
             days7  = [today2 - timedelta(days=6-i) for i in range(7)]
             all_a  = db.get_attendance(check_date=None)
@@ -1074,6 +1254,30 @@ def _tab_ai(m):
                 st.session_state["mp_chat"] = []
                 st.rerun()
 
+    # ── Tools ──────────────────────────────────────────────────────
+    with sub[3]:
+        st.markdown('<div class="mp-sec">⏱️ Workout Tools</div>', unsafe_allow_html=True)
+        
+        tool_col1, tool_col2 = st.columns(2)
+        with tool_col1:
+            _render_timer()
+        with tool_col2:
+            _render_fasting_tracker()
+        
+        st.divider()
+        st.markdown('<div class="mp-sec">💧 Hydration Tracker</div>', unsafe_allow_html=True)
+        _render_water_tracker(suffix="ai")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 6 — BODY COACH
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tab_body_coach(m):
+    """Body Coach tab with interactive muscle map."""
+    from gym_pages import body_ai
+    body_ai.render_body_coach(m, db.get_body_measurements(m.id))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN RENDER
@@ -1089,7 +1293,6 @@ def render():
 
     gym = db.get_gym(m.gym_id)
 
-    # ── Top bar ───────────────────────────────────────────────────
     hdr, logout_col = st.columns([5, 1])
     with hdr:
         st.markdown(
@@ -1101,10 +1304,8 @@ def render():
         if st.button("🚪 Logout", use_container_width=True):
             _mp_logout()
 
-    # ── Hero ──────────────────────────────────────────────────────
     _render_hero(m, gym)
 
-    # ── Tabs ──────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 Home", "📅 Attendance", "📈 Progress", "💰 Fees", "🤖 AI Coach", "🧠 Body Coach"])
 
     with tabs[0]: _tab_home(m, gym)
@@ -1112,6 +1313,4 @@ def render():
     with tabs[2]: _tab_progress(m)
     with tabs[3]: _tab_fees(m, gym)
     with tabs[4]: _tab_ai(m)
-    with tabs[5]:
-        from gym_pages import body_ai
-        body_ai.render_body_coach(m, db.get_body_measurements(m.id))
+    with tabs[5]: _tab_body_coach(m)
