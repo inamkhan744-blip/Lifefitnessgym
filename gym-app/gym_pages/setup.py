@@ -1,4 +1,4 @@
-# gym_pages/setup.py - COMPLETE WITH STAFF TIMING
+# gym_pages/setup.py - COMPLETE WITH STAFF TIMING & FIXED SERIAL NUMBER
 
 import streamlit as st
 import database as db
@@ -185,7 +185,7 @@ def get_css():
     """
 
 # ============================================
-# ⏰ STAFF TIMING MANAGER - NEW
+# ⏰ STAFF TIMING MANAGER
 # ============================================
 
 def render_staff_timing_manager(gym_id):
@@ -353,8 +353,9 @@ def render_staff_timing_manager(gym_id):
     - Staff will see AI warnings if they check-in early or late
     """)
 
+
 # ============================================
-# GYM LOGO UPLOAD - FIXED
+# GYM LOGO UPLOAD
 # ============================================
 
 def render_gym_logo(gym_id):
@@ -402,7 +403,7 @@ def render_gym_logo(gym_id):
 
 
 # ============================================
-# GYM WORKING HOURS - FIXED
+# GYM WORKING HOURS
 # ============================================
 
 def render_gym_hours(gym_id):
@@ -486,7 +487,7 @@ def render_gym_hours(gym_id):
 
 
 # ============================================
-# GYM AMENITIES - FIXED
+# GYM AMENITIES
 # ============================================
 
 def render_gym_amenities(gym_id):
@@ -534,7 +535,7 @@ def render_gym_amenities(gym_id):
 
 
 # ============================================
-# MEMBERSHIP PLANS - FIXED
+# MEMBERSHIP PLANS
 # ============================================
 
 def render_membership_plans(gym_id):
@@ -606,7 +607,7 @@ def render_membership_plans(gym_id):
 
 
 # ============================================
-# GYM GALLERY - FIXED
+# GYM GALLERY
 # ============================================
 
 def render_gym_gallery(gym_id):
@@ -652,7 +653,7 @@ def render_gym_gallery(gym_id):
 
 
 # ============================================
-# GYM HOLIDAYS - FIXED
+# GYM HOLIDAYS
 # ============================================
 
 def render_gym_holidays(gym_id):
@@ -672,7 +673,7 @@ def render_gym_holidays(gym_id):
 
 
 # ============================================
-# GYM RULES - FIXED
+# GYM RULES
 # ============================================
 
 def render_gym_rules(gym_id):
@@ -696,7 +697,7 @@ def render_gym_rules(gym_id):
 
 
 # ============================================
-# GYM SOCIAL LINKS - FIXED
+# GYM SOCIAL LINKS
 # ============================================
 
 def render_gym_social(gym_id):
@@ -745,7 +746,7 @@ def render_gym_social(gym_id):
 
 
 # ============================================
-# GYM BANK DETAILS - FIXED
+# GYM BANK DETAILS
 # ============================================
 
 def render_gym_bank_details(gym_id):
@@ -784,7 +785,7 @@ def render_gym_bank_details(gym_id):
 
 
 # ============================================
-# EXPENSE CATEGORIES - FIXED
+# EXPENSE CATEGORIES
 # ============================================
 
 def render_expense_categories(gym_id):
@@ -962,7 +963,7 @@ def render_gym_performance(gym_id):
 
 
 # ============================================
-# GYM DETAILS TAB - FIXED
+# 🔥 GYM DETAILS TAB - FIXED (Serial Number button OUTSIDE form)
 # ============================================
 
 def render_gym_details(gym_id):
@@ -982,6 +983,7 @@ def render_gym_details(gym_id):
     ])
     
     with sub_tabs[0]:  # Basic Info
+        # 🔥 FORM - Only basic info fields
         with st.form(f"edit_gym_{gym.id}"):
             col1, col2 = st.columns(2)
             with col1:
@@ -1027,6 +1029,36 @@ def render_gym_details(gym_id):
                     ok, msg = db.update_gym(gym.id, name, address, phone, email)
                     if ok:
                         st.success("✅ Gym updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
+        
+        # 🔥 SERIAL NUMBER SETTINGS - FORM KE BAHAR (button allowed)
+        st.markdown("---")
+        st.markdown("### 🔢 Serial Number Settings")
+        
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            current_serial = db.get_next_member_serial(gym_id=gym.id)
+            st.info(f"📌 **Current Next Serial Number:** `PF-{str(current_serial).zfill(5)}`")
+            st.caption("New members will get this serial number automatically")
+        
+        with col_s2:
+            reset_serial = st.number_input(
+                "Reset Serial Number to (PF-XXXXX)",
+                min_value=1,
+                max_value=99999,
+                value=current_serial,
+                step=1,
+                key=f"reset_serial_{gym.id}",
+                help="⚠️ Changing this will affect all future member registrations"
+            )
+            # ✅ Button FORM KE BAHAR hai - allowed!
+            if st.button("🔄 Update Serial Number", key=f"update_serial_{gym.id}"):
+                if reset_serial != current_serial:
+                    ok, msg = db.update_gym_next_serial(gym_id=gym.id, new_serial=reset_serial)
+                    if ok:
+                        st.success(f"✅ Serial number updated to PF-{str(reset_serial).zfill(5)}")
                         st.rerun()
                     else:
                         st.error(f"❌ {msg}")
