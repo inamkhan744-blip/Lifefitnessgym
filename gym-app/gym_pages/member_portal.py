@@ -108,6 +108,92 @@ def _mp_logout():
     st.rerun()
 
 
+def _record_portal_activity(member, event="MEMBER_PORTAL_ACTIVE"):
+    """Persist portal usage without creating a log row on every rerun."""
+    now = time.time()
+    last_logged = st.session_state.get("mp_last_activity_log", 0.0)
+    if event == "MEMBER_PORTAL_LOGIN" or now - last_logged >= 300:
+        db.log_activity(
+            user=member.serial_number,
+            action=event,
+            details=f"Member: {member.full_name} | Portal activity",
+            gym_id=member.gym_id,
+            role="member",
+            record_ref=str(member.id),
+        )
+        st.session_state["mp_last_activity_log"] = now
+
+
+def _staff_usage_panel():
+    """Admin/staff view showing which members have used the portal."""
+    gym_id = st.session_state.get("selected_gym_id")
+    gyms = {g.id: g.name for g in db.get_all_gyms()}
+
+    st.markdown(
+        "<div style='font-size:1.6rem;font-weight:900;color:#A78BFA;'>"
+        "📱 Member Portal Usage</div>"
+        "<div style='color:#94A3B8;margin-bottom:1rem;'>"
+        "Yahan aap dekh sakte hain kaun se members portal use kar rahe hain.</div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("🔄 Refresh Usage", key="mp_usage_refresh"):
+        st.rerun()
+
+    usage = db.get_member_portal_usage(gym_id=gym_id)
+    today = date.today()
+    active_now = [u for u in usage if u["is_active"]]
+    used_today = [
+        u for u in usage
+        if u["last_seen"] and u["last_seen"].date() == today
+    ]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("🟢 Active Now", len(active_now), "last 15 minutes")
+    with c2:
+        st.metric("📅 Used Today", len(used_today))
+    with c3:
+        st.metric("👥 Total Members Used", len(usage))
+
+    st.markdown(
+        "<div style='font-size:1.05rem;font-weight:700;color:#A78BFA;"
+        "margin:1.2rem 0 .7rem;'>📊 Member Activity</div>",
+        unsafe_allow_html=True,
+    )
+    if not usage:
+        st.info("Abhi kisi member ne Member Portal login nahi kiya.")
+        st.caption("Member ko fee receipt/WhatsApp message wala portal link bhejein.")
+        return
+
+    rows = []
+    for item in usage:
+        rows.append({
+            "Status": "🟢 Online / Active" if item["is_active"] else "⚪ Not active now",
+            "Member": item["name"] or "Unknown",
+            "Serial": item["serial"],
+            "Gym": gyms.get(item["gym_id"], "—"),
+            "Last Active": item["last_seen_text"],
+            "Portal Visits": item["visits"],
+        })
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Status": st.column_config.TextColumn("Status", width="medium"),
+            "Member": st.column_config.TextColumn("Member", width="medium"),
+            "Serial": st.column_config.TextColumn("Serial", width="small"),
+            "Gym": st.column_config.TextColumn("Gym", width="medium"),
+            "Last Active": st.column_config.TextColumn("Last Active", width="medium"),
+            "Portal Visits": st.column_config.NumberColumn("Visits", format="%d"),
+        },
+    )
+    st.caption(
+        "Online / Active ka matlab hai member ne pichle 15 minutes mein "
+        "portal par koi action kiya hai."
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AI HELPER (Groq — FIXED with latest model)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -584,6 +670,7 @@ def _login_page():
                 st.error("❌ Phone digits galat hain.")
                 return
             st.session_state["portal_member_id"] = member.id
+            _record_portal_activity(member, "MEMBER_PORTAL_LOGIN")
             if "mp_chat" not in st.session_state:
                 st.session_state["mp_chat"] = []
             st.rerun()
@@ -1288,9 +1375,21 @@ def render():
 
     m = _mp_member()
     if not m:
-        _login_page()
+        # Staff/admin opening the sidebar page gets the usage dashboard.
+        # A public ?portal=1 link always remains the member login screen.
+        staff_view = (
+            st.query_params.get("portal") != "1"
+            and st.session_state.get("user_id")
+            and st.session_state.get("role") in ("admin", "staff")
+        )
+        if staff_view:
+            _staff_usage_panel()
+        else:
+            _login_page()
         return
 
+    # Keep last-active status fresh, but limit writes to one heartbeat per 5 min.
+    _record_portal_activity(m)
     gym = db.get_gym(m.gym_id)
 
     hdr, logout_col = st.columns([5, 1])

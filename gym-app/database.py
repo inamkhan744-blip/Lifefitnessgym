@@ -1746,6 +1746,74 @@ def get_activity_logs(gym_id=None, limit=500, date_from=None, date_to=None, user
     finally:
         db.close()
 
+
+def get_member_portal_usage(gym_id=None, active_minutes=15, limit=500):
+    """Return member portal usage aggregated by member.
+
+    Portal activity is stored in ActivityLog so this works with both the
+    PostgreSQL and SQLite database modes without a schema migration.
+    """
+    db = get_db()
+    try:
+        actions = ("MEMBER_PORTAL_LOGIN", "MEMBER_PORTAL_ACTIVE")
+        q = db.query(ActivityLog).filter(ActivityLog.action.in_(actions))
+        if gym_id:
+            q = q.filter(ActivityLog.gym_id == gym_id)
+        logs = q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+
+        grouped = {}
+        for log in logs:
+            serial = str(log.user or "").strip()
+            if not serial:
+                continue
+            item = grouped.setdefault(serial, {
+                "serial": serial,
+                "name": "",
+                "gym_id": log.gym_id,
+                "last_seen": log.created_at,
+                "last_login": None,
+                "visits": 0,
+                "active_events": 0,
+            })
+            item["visits"] += 1
+            if log.action == "MEMBER_PORTAL_ACTIVE":
+                item["active_events"] += 1
+            else:
+                if item["last_login"] is None:
+                    item["last_login"] = log.created_at
+            if log.created_at and (
+                item["last_seen"] is None or log.created_at > item["last_seen"]
+            ):
+                item["last_seen"] = log.created_at
+            if not item["name"] and log.details:
+                details = str(log.details)
+                # Details are written as "Member: Name | ..." by the portal.
+                if details.startswith("Member: "):
+                    item["name"] = details.split("Member: ", 1)[1].split(" | ", 1)[0]
+
+        now = datetime.now()
+        for item in grouped.values():
+            if not item["name"]:
+                member = db.query(Member).filter(Member.serial_number == item["serial"]).first()
+                if member:
+                    item["name"] = member.full_name
+                    item["gym_id"] = member.gym_id
+            last_seen = item["last_seen"]
+            item["is_active"] = bool(
+                last_seen and (now - last_seen).total_seconds() <= active_minutes * 60
+            )
+            item["last_seen_text"] = (
+                last_seen.strftime("%d %b %Y, %I:%M %p") if last_seen else "—"
+            )
+        return sorted(
+            grouped.values(),
+            key=lambda x: x["last_seen"] or datetime.min,
+            reverse=True,
+        )
+    finally:
+        db.close()
+
+
 def get_daily_fee_summary(gym_id=None, target_date=None):
     db = get_db()
     try:
