@@ -1342,13 +1342,23 @@ def _member_detail(m, gyms, role, gym_id=None):
                 st.warning("⚠️ Permanently delete this member? Cannot be undone!")
                 cd1, cd2 = st.columns(2)
                 if cd1.button("✅ Yes, Delete", key=f"cdy_{m.id}", type="primary"):
-                    if m.photo_path:
-                        object_store.delete_photo(m.photo_path)
-                    db.delete_member(m.id)
-                    st.success("✅ Member deleted.")
-                    st.session_state.pop(f"confirm_del_m_{m.id}", None)
-                    _cm.clear()
-                    st.rerun()
+                    ok, msg = db.delete_member(m.id)
+                    if ok:
+                        # Storage cleanup is best-effort after the committed
+                        # database deletion; a photo failure must not make a
+                        # successful record deletion look like a DB failure.
+                        if m.photo_path:
+                            try:
+                                object_store.delete_photo(m.photo_path)
+                            except Exception:
+                                pass
+                        st.success("✅ Member deleted.")
+                        st.session_state.pop(f"confirm_del_m_{m.id}", None)
+                        _cm.clear()
+                        _cf.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
                 if cd2.button("❌ Cancel", key=f"cdn_{m.id}"):
                     st.session_state.pop(f"confirm_del_m_{m.id}", None)
                     st.rerun()

@@ -118,7 +118,7 @@ def _cached_sidebar_alerts(gym_id):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _cached_theme_settings():
-    return db.get_setting("theme_auto", "0"), db.get_setting("theme_key", "dark_slate")
+    return db.get_setting("theme_auto", "0"), db.get_setting("theme_key", "design_1")
 
 # ── Session vars ───────────────────────────────────────────────────────────────
 role        = st.session_state.get("role", "staff")
@@ -234,6 +234,75 @@ with st.sidebar:
 
     st.divider()
 
+    # ── SIDEBAR NAVIGATION BUTTONS FIX - Theme-aware ──────────────────────────
+    st.markdown("""
+    <style>
+        /* Sidebar Navigation Buttons - Force visibility in ALL themes */
+        section[data-testid="stSidebar"] .stButton > button {
+            background: rgba(255, 255, 255, 0.08) !important;
+            color: #FFFFFF !important;
+            border: 1px solid rgba(255, 255, 255, 0.10) !important;
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            padding: 8px 14px !important;
+            min-height: 42px !important;
+            width: 100% !important;
+            border-radius: 10px !important;
+            text-align: left !important;
+            transition: all 0.2s ease !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button:hover {
+            background: rgba(124, 58, 237, 0.25) !important;
+            border-color: #7C3AED !important;
+            transform: translateX(4px) !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button:focus,
+        section[data-testid="stSidebar"] .stButton > button:active {
+            background: linear-gradient(135deg, #7C3AED, #4F46E5) !important;
+            border-color: #7C3AED !important;
+            color: #FFFFFF !important;
+            box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3) !important;
+        }
+        /* Force ALL text white in sidebar buttons */
+        section[data-testid="stSidebar"] .stButton > button span,
+        section[data-testid="stSidebar"] .stButton > button p,
+        section[data-testid="stSidebar"] .stButton > button div,
+        section[data-testid="stSidebar"] .stButton > button label,
+        section[data-testid="stSidebar"] .stButton > button .st-emotion-cache-1wbqy5l {
+            color: #FFFFFF !important;
+        }
+        /* Fix for active/selected state */
+        section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #7C3AED, #4F46E5) !important;
+            border-color: #7C3AED !important;
+            color: #FFFFFF !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button[kind="primary"] span,
+        section[data-testid="stSidebar"] .stButton > button[kind="primary"] p {
+            color: #FFFFFF !important;
+        }
+        /* Fix for nav-btn class */
+        .nav-btn button, .nav-btn-active button {
+            background: rgba(255, 255, 255, 0.08) !important;
+            color: #FFFFFF !important;
+            border: 1px solid rgba(255, 255, 255, 0.10) !important;
+        }
+        .nav-btn-active button {
+            background: linear-gradient(135deg, #7C3AED, #4F46E5) !important;
+            border-color: #7C3AED !important;
+            color: #FFFFFF !important;
+        }
+        .nav-btn button:hover {
+            background: rgba(124, 58, 237, 0.25) !important;
+            border-color: #7C3AED !important;
+        }
+        .nav-btn-active button span,
+        .nav-btn-active button p {
+            color: #FFFFFF !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Navigation
     allowed = auth.allowed_pages()
     nav_sections = {
@@ -242,7 +311,8 @@ with st.sidebar:
         },
         "General Management": {
             "Dashboard":         ("📊", "Dashboard"),
-            "Gym Setup":         ("⚙️", "Gym Setup"),
+         "Gym Setup":         ("⚙️", "Gym Setup"),
+         "Settings":          ("🧩", "Settings"),
         },
         "Member & Identity": {
             "Members":           ("👥", "Members"),
@@ -354,13 +424,17 @@ gid = st.session_state.get("selected_gym_id")
 # ── Import all pages ──────────────────────────────────────────────────────────
 # Dashboard
 if page == "Dashboard":
-    from gym_pages import admin_dashboard
-    admin_dashboard.render(gid, role, username)
+    from gym_pages import design_dashboard
+    design_dashboard.render(gid, role, username)
 
 # General Management
 elif page == "Gym Setup":
     from gym_pages import setup
     setup.render()
+
+elif page == "Settings":
+    from gym_pages import settings
+    settings.render()
 
 # Member & Identity
 elif page == "Members":

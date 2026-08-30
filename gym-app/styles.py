@@ -158,13 +158,14 @@ def inject_css():
 
     # Active theme
     auto  = _db.get_setting("theme_auto", "0") == "1"
-    key   = _th.get_daily_theme() if auto else _db.get_setting("theme_key", "dark_slate")
-    if key not in _th.THEMES:
-        key = "dark_slate"
+    key   = _th.get_daily_theme() if auto else _db.get_setting("theme_key", "design_1")
+    key = _th.normalize_theme_key(key)
+    st.session_state["current_theme"] = key
+    st.session_state["_gympro_theme"] = key
 
-    # Inject theme CSS first, then structural overrides
-    st.markdown(_th.build_css(key), unsafe_allow_html=True)
+    # Structural CSS first; the selected design is the final visual authority.
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+    st.markdown(_th.build_css(key), unsafe_allow_html=True)
     st.markdown(
         """
         <style>

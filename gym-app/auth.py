@@ -6,12 +6,12 @@ ROLE_PAGES = {
     "admin":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
                 "Fee Collection", "Expenses", "Inventory", "Reports",
                 "Message Center", "WhatsApp", "Complaints", "Audit",
-                "Gym Setup", "User Management", "AI Assistant", "Staff Targets",
-                "Member Portal"],
+                 "Gym Setup", "Settings", "User Management", "AI Assistant", "Staff Targets",
+                 "Member Portal", "Settings"],
     "staff":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
                 "Fee Collection", "Expenses", "Inventory", "Complaints", "AI Assistant",
                 "Member Portal"],
-    "auditor": ["Dashboard", "Audit", "Reports", "AI Assistant"],
+    "auditor": ["Dashboard", "Audit", "Reports", "AI Assistant", "Settings"],
 }
 
 ROLE_ICONS = {

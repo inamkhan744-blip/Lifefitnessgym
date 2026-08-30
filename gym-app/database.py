@@ -1134,14 +1134,17 @@ def delete_member(member_id):
     db = get_db()
     try:
         m = db.query(Member).filter_by(id=member_id).first()
-        if m:
-            if m.photo_path:
-                full_path = m.photo_path if os.path.isabs(m.photo_path) else os.path.join(UPLOAD_FOLDER, os.path.basename(m.photo_path))
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-            db.delete(m)
-            db.commit()
+        if not m:
+            return False, "Member not found."
+        # Delete database rows first.  Photo storage is intentionally left
+        # untouched here; deleting a member must never destroy a shared or
+        # remotely stored photo, and the caller can handle a separate cleanup.
+        db.delete(m)
+        db.commit()
         return True, "Member deleted."
+    except Exception as e:
+        db.rollback()
+        return False, f"Member could not be deleted: {e}"
     finally:
         db.close()
 

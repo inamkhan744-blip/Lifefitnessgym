@@ -196,7 +196,8 @@ def render_print_component(data: dict, copies: int = 2):
         import streamlit as st
 
         body_html = _build_receipt_html_body(data, copies)
-        receipt_no = data.get("receipt_no", "")
+        import html as html_lib
+        receipt_no = html_lib.escape(str(data.get("receipt_no", "")))
         line_count = body_html.count("\n") + (copies * 30)
         height = min(max(line_count * 14 + 200, 500), 900)
 
@@ -305,6 +306,9 @@ def render_print_component(data: dict, copies: int = 2):
 </body>
 </html>"""
 
+        # components.v1.html is the only renderer used here.  Do not pass
+        # this string through st.markdown: Streamlit would show the iframe
+        # document source as literal tags in the receipt area.
         st.components.v1.html(full_html, height=height, scrolling=True)
 
     except Exception as e:
