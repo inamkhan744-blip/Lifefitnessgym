@@ -141,11 +141,79 @@ hr { border-color: #1E293B !important; }
     display: none !important;
 }
 
-/* ── Responsive shrink ───────────────────────────────────────── */
-@media (max-width: 768px) {
-    .main .block-container { padding: 0.75rem 0.5rem; }
-    .metric-card .value { font-size: 1.4rem; }
-    .page-header h1 { font-size: 1.3rem; }
+/* ── ★★★ TOAST NOTIFICATIONS ★★★ ────────────────────────────── */
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 380px;
+    width: 100%;
+    pointer-events: none;
+}
+.toast {
+    padding: 14px 20px;
+    border-radius: 12px;
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    animation: slideInRight 0.4s ease-out forwards;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: auto;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.toast-success {
+    background: linear-gradient(135deg, #065F46, #047857);
+    border-left: 4px solid #34D399;
+}
+.toast-error {
+    background: linear-gradient(135deg, #7F1D1D, #991B1B);
+    border-left: 4px solid #F87171;
+}
+.toast-warning {
+    background: linear-gradient(135deg, #78350F, #92400E);
+    border-left: 4px solid #FBBF24;
+}
+.toast-info {
+    background: linear-gradient(135deg, #1E3A5F, #1E40AF);
+    border-left: 4px solid #60A5FA;
+}
+.toast .toast-icon { font-size: 20px; flex-shrink: 0; }
+.toast .toast-close {
+    margin-left: auto;
+    cursor: pointer;
+    opacity: 0.6;
+    font-size: 18px;
+    transition: opacity 0.2s;
+    background: none;
+    border: none;
+    color: #FFFFFF;
+}
+.toast .toast-close:hover { opacity: 1; }
+.toast-fade-out {
+    animation: fadeOut 0.4s ease-in forwards;
+}
+@media (max-width: 600px) {
+    .toast-container {
+        top: 10px;
+        right: 10px;
+        max-width: calc(100% - 20px);
+    }
 }
 </style>
 """
@@ -202,3 +270,113 @@ def page_header(icon, title, sub=""):
 
 def badge(text, color="gray"):
     return f'<span class="badge badge-{color}">{text}</span>'
+
+
+# ── ★★★ TOAST NOTIFICATIONS FUNCTIONS ★★★ ──────────────────────
+
+def show_toast(message, type="success", duration=4000):
+    """
+    Show a toast notification.
+    
+    Parameters:
+    - message: str - The message to display
+    - type: str - 'success', 'error', 'warning', 'info'
+    - duration: int - Time in milliseconds to show the toast (default: 4000)
+    """
+    if "toasts" not in st.session_state:
+        st.session_state.toasts = []
+    
+    # Create toast object
+    toast = {
+        "message": message,
+        "type": type,
+        "duration": duration,
+        "timestamp": datetime.now().timestamp()
+    }
+    
+    # Add to toasts list
+    st.session_state.toasts.append(toast)
+    
+    # Keep only last 50 toasts
+    if len(st.session_state.toasts) > 50:
+        st.session_state.toasts = st.session_state.toasts[-50:]
+    
+    # Render toasts
+    render_toasts()
+
+
+def render_toasts():
+    """Render all pending toast notifications"""
+    if "toasts" not in st.session_state or not st.session_state.toasts:
+        return
+    
+    import streamlit as st
+    import time
+    
+    # Get current toasts
+    toasts = st.session_state.toasts
+    
+    # Build toast HTML
+    toast_html = '<div class="toast-container">'
+    
+    # Icons for each type
+    icons = {
+        "success": "✅",
+        "error": "❌",
+        "warning": "⚠️",
+        "info": "ℹ️"
+    }
+    
+    for toast in toasts[-5:]:  # Show last 5 toasts
+        toast_type = toast.get("type", "info")
+        icon = icons.get(toast_type, "ℹ️")
+        message = toast.get("message", "")
+        
+        toast_html += f"""
+        <div class="toast toast-{toast_type}">
+            <span class="toast-icon">{icon}</span>
+            <span>{message}</span>
+            <button class="toast-close" onclick="this.parentElement.remove()">✕</button>
+        </div>
+        """
+    
+    toast_html += '</div>'
+    
+    # Inject toast HTML
+    st.markdown(toast_html, unsafe_allow_html=True)
+    
+    # Auto-clear toasts after duration
+    # Note: This is handled by the CSS animation
+
+
+def toast_success(message, duration=4000):
+    """Show success toast"""
+    show_toast(message, "success", duration)
+
+
+def toast_error(message, duration=4000):
+    """Show error toast"""
+    show_toast(message, "error", duration)
+
+
+def toast_warning(message, duration=4000):
+    """Show warning toast"""
+    show_toast(message, "warning", duration)
+
+
+def toast_info(message, duration=4000):
+    """Show info toast"""
+    show_toast(message, "info", duration)
+
+
+def clear_toasts():
+    """Clear all toasts"""
+    if "toasts" in st.session_state:
+        st.session_state.toasts = []
+
+
+# ── AUTO-RENDER TOASTS (call this at the end of each page) ──
+def render_toasts_auto():
+    """Auto-render toasts if any exist"""
+    if "toasts" in st.session_state and st.session_state.toasts:
+        render_toasts()

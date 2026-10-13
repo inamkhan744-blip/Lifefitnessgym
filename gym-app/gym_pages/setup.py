@@ -232,7 +232,7 @@ def render_staff_timing_manager(gym_id):
         with col3:
             bulk_grace = st.number_input("Grace Minutes", min_value=0, max_value=60, value=15, step=5, key="bulk_grace")
         
-        if st.button("📌 Apply to All Staff", use_container_width=True, type="primary"):
+        if st.button("📌 Apply to All Staff", width="stretch", type="primary"):
             count = 0
             for staff in gym_staff:
                 ok, msg = db.set_staff_timing(
@@ -305,7 +305,7 @@ def render_staff_timing_manager(gym_id):
                 )
             
             with col5:
-                if st.button("💾 Save", key=f"save_time_{staff.username}", use_container_width=True):
+                if st.button("💾 Save", key=f"save_time_{staff.username}", width="stretch"):
                     ok, msg = db.set_staff_timing(
                         gym_id=gym_id,
                         staff_username=staff.username,
@@ -341,7 +341,7 @@ def render_staff_timing_manager(gym_id):
         })
     
     df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
     
     # ── Quick Tips ──────────────────────────────────────────────────
     st.divider()
@@ -1181,7 +1181,7 @@ def render_daily_performance_chart(gym_id):
             xaxis=dict(gridcolor='#1E293B', tickangle=45),
             yaxis=dict(gridcolor='#1E293B')
         )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
     else:
         st.info("No fee data for this month")
 
@@ -1210,7 +1210,7 @@ def render_attendance_chart(gym_id):
                 xaxis=dict(gridcolor='#1E293B'),
                 yaxis=dict(gridcolor='#1E293B')
             )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
         else:
             st.info("No attendance data available")
     except Exception as e:
@@ -1250,7 +1250,7 @@ def render_fee_chart(gym_id):
                 xaxis=dict(gridcolor='#1E293B'),
                 yaxis=dict(gridcolor='#1E293B')
             )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
         else:
             st.info("No fee data available")
     except Exception as e:
@@ -1285,7 +1285,7 @@ def render_membership_pie_chart(gym_id):
                 height=280,
                 margin=dict(l=0, r=0, t=10, b=10)
             )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
         else:
             st.info("No members found")
     except Exception as e:
@@ -1381,7 +1381,7 @@ def render_gym_staff_tab(gym_id):
             })
         
         df = pd.DataFrame(staff_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         
         for person in gym_staff:
             if st.button(
@@ -1413,7 +1413,7 @@ def render_gym_activity_tab(gym_id):
                 "Details": log.details or "-"
             })
         df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("No recent activity")
     
@@ -1432,7 +1432,7 @@ def render_gym_activity_tab(gym_id):
                     "Marked By": s.get("marked_by", "-")
                 })
             df = pd.DataFrame(scan_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width="stretch", hide_index=True)
         else:
             st.caption("No check-ins yet today.")
     except:
@@ -1508,7 +1508,7 @@ def render_add_gym_form():
                     key="add_gym_address"
                 )
             
-            submitted = st.form_submit_button("🏋️ Add Gym", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("🏋️ Add Gym", type="primary", width="stretch")
             if submitted:
                 if not name.strip():
                     st.error("❌ Gym name is required.")

@@ -1,41 +1,61 @@
 import os
+import sys
 import subprocess
 import time
-import sys
+import signal
 
-SERVER_PORT = 8080
-STREAMLIT_PORT = 8081
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-print(f"[GymPro] Starting Streamlit on port {STREAMLIT_PORT}...")
+port = os.environ.get("PORT", "5000")
 
-subprocess.Popen([
+def free_port(p):
+    for _ in range(3):
+        try:
+            subprocess.run(["fuser", "-k", f"{p}/tcp"], capture_output=True, timeout=5)
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(["lsof", "-ti", f":{p}"], capture_output=True, text=True, timeout=5)
+            for pid in result.stdout.strip().split():
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        time.sleep(1)
+
+# Check if streamlit is installed
+try:
+    import streamlit
+    print(f"✅ Streamlit version: {streamlit.__version__}")
+except ImportError:
+    print("⚠️ Streamlit not found! Installing...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit", "--quiet"])
+
+# Install other dependencies
+try:
+    print("📦 Installing dependencies...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"])
+    print("✅ Dependencies installed successfully!")
+except Exception as e:
+    print(f"⚠️ Error installing dependencies: {e}")
+
+# Kill any existing process on port
+free_port(port)
+
+# Start Streamlit directly - NO LOOP, NO DELAY
+cmd = [
     sys.executable, "-m", "streamlit", "run", "app.py",
-    "--server.port", str(STREAMLIT_PORT),
-    "--server.address", "127.0.0.1",
+    "--server.port", port,
+    "--server.address", "0.0.0.0",
     "--server.headless", "true",
     "--server.enableCORS", "false",
-    "--server.enableXsrfProtection", "false"
-])
+    "--server.enableXsrfProtection", "false",
+]
 
-print(f"[GymPro] Waiting for Streamlit...")
-time.sleep(5)
+print(f"🚀 Starting GymPro on port {port}...")
+print(f"🔗 App will be available at: https://gympro.inamkhan4.repl.co")
 
-print(f"[GymPro] Streamlit ready on port {STREAMLIT_PORT}")
-print(f"[GymPro] Starting proxy on port {SERVER_PORT}")
-
-import uvicorn
-from starlette.applications import Starlette
-from starlette.responses import Response
-from starlette.routing import Route
-import httpx
-
-async def proxy(request):
-    async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{STREAMLIT_PORT}", timeout=60.0) as client:
-        path = str(request.url.path)
-        if request.url.query:
-            path = f"{path}?{request.url.query}"
-        resp = await client.request(request.method, path, headers=dict(request.headers), content=await request.body())
-        return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
-
-app = Starlette(routes=[Route("/{path:path}", proxy, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])])
-uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT, log_level="warning")
+# Direct run - NO while loop, NO sleep
+subprocess.run(cmd)

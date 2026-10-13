@@ -72,11 +72,11 @@ def render(gym_id, role):
 
     col_sa, col_sn = st.columns([1, 4])
     with col_sa:
-        if st.button("✅ Select All", use_container_width=True):
+        if st.button("✅ Select All", width="stretch"):
             for m in filtered:
                 st.session_state[f"bulk_sel_{m.id}"] = True
     with col_sn:
-        if st.button("❌ Deselect All", use_container_width=True):
+        if st.button("❌ Deselect All", width="stretch"):
             for m in filtered:
                 st.session_state[f"bulk_sel_{m.id}"] = False
 
@@ -104,12 +104,12 @@ def render(gym_id, role):
 
     with g1:
         if st.button(f"📄 Generate Multi-Page PDF ({len(selected)} cards)",
-                     type="primary", use_container_width=True):
+                     type="primary", width="stretch"):
             _generate_pdf(selected, selected_gym_name)
 
     with g2:
         if st.button(f"🗜️ Generate ZIP of PNGs ({len(selected)} cards)",
-                     use_container_width=True):
+                     width="stretch"):
             _generate_zip(selected, selected_gym_name)
 
 
@@ -178,7 +178,7 @@ def _generate_pdf(members_list, gym_name: str):
             mime="application/pdf",
             key="bulk_pdf_dl",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     except Exception as e:
@@ -213,7 +213,7 @@ def _generate_zip(members_list, gym_name: str):
             file_name=f"{gym_name}_id_cards_bulk.zip",
             mime="application/zip",
             key="bulk_zip_dl",
-            use_container_width=True,
+            width="stretch",
         )
 
     except Exception as e:

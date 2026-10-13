@@ -202,7 +202,7 @@ def render_member_analytics(members):
                 "Type": list(membership_types.keys()),
                 "Count": list(membership_types.values())
             })
-            st.dataframe(df_types, use_container_width=True, hide_index=True)
+            st.dataframe(df_types, width="stretch", hide_index=True)
         else:
             st.info("No membership data")
     
@@ -212,7 +212,7 @@ def render_member_analytics(members):
                 "Status": list(status_counts.keys()),
                 "Count": list(status_counts.values())
             })
-            st.dataframe(df_status, use_container_width=True, hide_index=True)
+            st.dataframe(df_status, width="stretch", hide_index=True)
         else:
             st.info("No status data")
     
@@ -223,7 +223,7 @@ def render_member_analytics(members):
             "New Members": list(join_months.values())
         })
         df_join = df_join.sort_values("Month")
-        st.dataframe(df_join, use_container_width=True, hide_index=True)
+        st.dataframe(df_join, width="stretch", hide_index=True)
 
 
 # ============================================================
@@ -324,7 +324,7 @@ def render_quick_fee_collection(member, gym_id):
         submitted = st.form_submit_button(
             "💰 Record Payment", 
             type="primary",
-            use_container_width=True
+            width="stretch"
         )
         
         if submitted:
@@ -411,7 +411,6 @@ def render_quick_fee_collection(member, gym_id):
                                 pass
                     
                     st.success(f"✅ Payment recorded! Receipt: {receipt_no}")
-                    st.balloons()
                     st.cache_data.clear()
                     st.rerun()
                 else:
@@ -445,7 +444,7 @@ def render_bulk_actions(members, gym_id, role):
             
             with col1:
                 new_status = st.selectbox("Change Status to", ["Active", "Inactive", "Suspended", "Frozen"])
-                if st.button("🔄 Update Status", use_container_width=True, disabled=not can_update):
+                if st.button("🔄 Update Status", width="stretch", disabled=not can_update):
                     if can_update:
                         for serial in selected_serials:
                             member = next((m for m in members if m.serial_number == serial), None)
@@ -459,7 +458,7 @@ def render_bulk_actions(members, gym_id, role):
             
             with col2:
                 new_expiry = st.date_input("Set Expiry Date", value=date.today() + timedelta(days=30))
-                if st.button("📅 Set Expiry", use_container_width=True, disabled=not can_update):
+                if st.button("📅 Set Expiry", width="stretch", disabled=not can_update):
                     if can_update:
                         for serial in selected_serials:
                             member = next((m for m in members if m.serial_number == serial), None)
@@ -474,7 +473,7 @@ def render_bulk_actions(members, gym_id, role):
             with col3:
                 # ⭐ DELETE BUTTON - ONLY FOR ADMIN/OWNER
                 if can_delete:
-                    if st.button("🗑️ Delete Selected", use_container_width=True, type="primary"):
+                    if st.button("🗑️ Delete Selected", width="stretch", type="primary"):
                         st.warning(f"⚠️ Delete {len(selected_serials)} members? This cannot be undone!")
                         if st.button("✅ Confirm Delete", key="bulk_confirm_delete"):
                             for serial in selected_serials:
@@ -492,7 +491,7 @@ def render_bulk_actions(members, gym_id, role):
                 else:
                     # ⛔ Staff ke liye delete button hide/disable
                     st.info("🔒 Delete members is only available for Admin")
-                    st.button("🗑️ Delete Selected", use_container_width=True, disabled=True)
+                    st.button("🗑️ Delete Selected", width="stretch", disabled=True)
 
 
 # ============================================================
@@ -565,7 +564,7 @@ def render_fast_professional_table(members, gym_id=None):
 
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Serial": st.column_config.TextColumn("Serial #", width="small"),
@@ -675,16 +674,16 @@ def render(gym_id, role):
         with f5:
             st.write("")
             st.write("")
-            st.button("🔄 Refresh", use_container_width=True, key="ml_refresh",
+            st.button("🔄 Refresh", width="stretch", key="ml_refresh",
                       on_click=lambda: _cm.clear())
         with f6:
             st.write("")
             st.write("")
-            export_btn = st.button("⬇️ Export CSV", use_container_width=True, key="ml_export")
+            export_btn = st.button("⬇️ Export CSV", width="stretch", key="ml_export")
         with f7:
             st.write("")
             st.write("")
-            show_bulk = st.button("📦 Bulk Actions", use_container_width=True, key="ml_bulk")
+            show_bulk = st.button("📦 Bulk Actions", width="stretch", key="ml_bulk")
 
         # ── 🔥 GET MEMBERS WITH PAYMENT FILTER ──
         members = _cm(selected_gid, status_f, search)
@@ -926,7 +925,7 @@ def render(gym_id, role):
                     display = [{k: v for k, v in r.items() if k != "_fee"} for r in unpaid_list]
                     st.dataframe(
                         pd.DataFrame(display),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "#":           st.column_config.NumberColumn("#", width="small"),
@@ -946,7 +945,7 @@ def render(gym_id, role):
                     st.markdown(f"**PKR {paid_total:,.0f} total active members' fees** — {len(active_list)} members")
                     st.dataframe(
                         pd.DataFrame(active_list),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "#":         st.column_config.NumberColumn("#", width="small"),
@@ -967,7 +966,7 @@ def render(gym_id, role):
                     st.markdown(f"**PKR {upcoming_total:,.0f} total expiring members' fees** — {len(upcoming_list)} members")
                     st.dataframe(
                         pd.DataFrame(upcoming_list),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "#":         st.column_config.NumberColumn("#", width="small"),
@@ -988,7 +987,7 @@ def render(gym_id, role):
                     st.markdown(f"**PKR {expired_total:,.0f} total expired members' fees** — {len(expired_list)} members")
                     st.dataframe(
                         pd.DataFrame(expired_list),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "#":       st.column_config.NumberColumn("#", width="small"),
@@ -1038,7 +1037,7 @@ def render(gym_id, role):
             if latest_members:
                 latest = sorted(latest_members, key=lambda x: x["Date"], reverse=True)[:10]
                 df_latest = pd.DataFrame(latest)
-                st.dataframe(df_latest, use_container_width=True, hide_index=True)
+                st.dataframe(df_latest, width="stretch", hide_index=True)
             else:
                 st.info("No join date data available")
 
@@ -1171,34 +1170,34 @@ def _member_detail(m, gyms, role, gym_id=None):
         if m.phone:
             clean_phone = m.phone.replace(" ", "").replace("-", "").replace("+", "")
             wa_url = f"https://wa.me/{clean_phone}"
-            st.link_button("📱 WhatsApp", wa_url, use_container_width=True)
+            st.link_button("📱 WhatsApp", wa_url, width="stretch")
         else:
-            st.button("📱 WhatsApp", disabled=True, use_container_width=True, key=f"wa_dis_{m.id}")
+            st.button("📱 WhatsApp", disabled=True, width="stretch", key=f"wa_dis_{m.id}")
 
     with qa2:
-        if st.button("📋 Serial #", use_container_width=True, key=f"copy_{m.id}"):
+        if st.button("📋 Serial #", width="stretch", key=f"copy_{m.id}"):
             st.code(m.serial_number)
 
     with qa3:
         renew_key = f"renew_active_{m.id}"
-        if st.button("📅 Renew", use_container_width=True, key=f"renew_btn_{m.id}"):
+        if st.button("📅 Renew", width="stretch", key=f"renew_btn_{m.id}"):
             st.session_state[renew_key] = not st.session_state.get(renew_key, False)
             st.rerun()
 
     with qa4:
         qs_key = f"qs_toggle_{m.id}"
-        if st.button("🔄 Change Status", use_container_width=True, key=f"qs_btn_{m.id}"):
+        if st.button("🔄 Change Status", width="stretch", key=f"qs_btn_{m.id}"):
             st.session_state[qs_key] = not st.session_state.get(qs_key, False)
             st.rerun()
 
     with qa5:
-        if st.button("📊 Progress", use_container_width=True, key=f"progress_{m.id}"):
+        if st.button("📊 Progress", width="stretch", key=f"progress_{m.id}"):
             st.session_state["page"] = "Progress Tracker"
             st.rerun()
     
     with qa6:
         fee_key = f"show_quick_fee_{m.id}"
-        if st.button("💰 Collect Fee", use_container_width=True, key=f"fee_btn_{m.id}"):
+        if st.button("💰 Collect Fee", width="stretch", key=f"fee_btn_{m.id}"):
             st.session_state[fee_key] = not st.session_state.get(fee_key, False)
             st.rerun()
 
@@ -1223,7 +1222,7 @@ def _member_detail(m, gyms, role, gym_id=None):
                         f"{'✅ ' if is_cur else ''}{s}",
                         key=f"qs_{m.id}_{s}",
                         type="primary" if is_cur else "secondary",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         db.update_member(m.id, status=s)
                         st.session_state[qs_key] = False
@@ -1244,7 +1243,7 @@ def _member_detail(m, gyms, role, gym_id=None):
 
             rc1, rc2, rc3, rc4 = st.columns(4)
             with rc1:
-                if st.button("1 Month", use_container_width=True, key=f"ren1_{m.id}"):
+                if st.button("1 Month", width="stretch", key=f"ren1_{m.id}"):
                     new_exp = base + timedelta(days=30)
                     db.update_member(m.id, expiry_date=str(new_exp), status="Active")
                     st.session_state[renew_key] = False
@@ -1252,7 +1251,7 @@ def _member_detail(m, gyms, role, gym_id=None):
                     st.success(f"✅ Renewed until {new_exp}")
                     st.rerun()
             with rc2:
-                if st.button("3 Months", use_container_width=True, key=f"ren3_{m.id}"):
+                if st.button("3 Months", width="stretch", key=f"ren3_{m.id}"):
                     new_exp = base + timedelta(days=90)
                     db.update_member(m.id, expiry_date=str(new_exp), status="Active")
                     st.session_state[renew_key] = False
@@ -1260,7 +1259,7 @@ def _member_detail(m, gyms, role, gym_id=None):
                     st.success(f"✅ Renewed until {new_exp}")
                     st.rerun()
             with rc3:
-                if st.button("6 Months", use_container_width=True, key=f"ren6_{m.id}"):
+                if st.button("6 Months", width="stretch", key=f"ren6_{m.id}"):
                     new_exp = base + timedelta(days=180)
                     db.update_member(m.id, expiry_date=str(new_exp), status="Active")
                     st.session_state[renew_key] = False
@@ -1268,7 +1267,7 @@ def _member_detail(m, gyms, role, gym_id=None):
                     st.success(f"✅ Renewed until {new_exp}")
                     st.rerun()
             with rc4:
-                if st.button("1 Year", use_container_width=True, key=f"ren12_{m.id}"):
+                if st.button("1 Year", width="stretch", key=f"ren12_{m.id}"):
                     new_exp = base + timedelta(days=365)
                     db.update_member(m.id, expiry_date=str(new_exp), status="Active")
                     st.session_state[renew_key] = False
@@ -1298,26 +1297,26 @@ def _member_detail(m, gyms, role, gym_id=None):
         gname = next((g.name for g in gyms_all if g.id == m.gym_id), "GymPro")
         try:
             card_png = id_card.generate_id_card_png(m, gname)
-            st.image(card_png, caption="Member ID Card Preview", use_container_width=True)
+            st.image(card_png, caption="Member ID Card Preview", width="stretch")
             dl1, dl2, dl3 = st.columns(3)
             with dl1:
                 st.download_button("⬇️ Download PNG", data=card_png,
                                    file_name=f"{m.serial_number}_id_card.png", mime="image/png",
-                                   key=f"card_png_{m.id}", use_container_width=True)
+                                   key=f"card_png_{m.id}", width="stretch")
             with dl2:
                 try:
                     card_pdf = id_card.generate_id_card_pdf(m, gname)
                     st.download_button("⬇️ Download PDF", data=card_pdf,
                                        file_name=f"{m.serial_number}_id_card.pdf",
                                        mime="application/pdf", key=f"card_pdf_{m.id}",
-                                       use_container_width=True)
+                                       width="stretch")
                 except Exception as e:
                     st.warning(f"PDF: {e}")
             with dl3:
                 qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
                 st.download_button("⬇️ QR Code", data=qr_png,
                                    file_name=f"{m.serial_number}_qr.png", mime="image/png",
-                                   key=f"qr_dl_{m.id}", use_container_width=True)
+                                   key=f"qr_dl_{m.id}", width="stretch")
         except Exception as e:
             st.error(f"ID card error: {e}")
             qr_png = member_qr_png(m.serial_number, box_size=8, border=2)
@@ -1411,7 +1410,7 @@ def _register_form(gyms, gym_id, role):
             st.image(photo, width=120, caption="📸 Preview")
 
         st.markdown("---")
-        if st.form_submit_button("✅ Register Member", type="primary", use_container_width=True):
+        if st.form_submit_button("✅ Register Member", type="primary", width="stretch"):
             if not full_name.strip():
                 st.error("❌ Full name is required!")
             else:
@@ -1432,10 +1431,96 @@ def _register_form(gyms, gym_id, role):
                             member = db.get_member_by_serial(serial)
                             if member and not photo_path.startswith("http"):
                                 db.update_member_photo_path(member.id, new_key)
-                    st.success(f"🎉 {msg}")
-                    st.balloons()
+
+                    # 🎉 CONGRATULATIONS — Custom Success Message
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #064E3B 0%, #065F46 100%);
+                        border: 2px solid #10B981;
+                        border-radius: 16px;
+                        padding: 1.5rem;
+                        text-align: center;
+                        margin: 1rem 0;
+                        box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
+                        animation: popIn 0.5s ease-out;
+                    ">
+                        <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
+                        <div style="
+                            color: #34D399;
+                            font-size: 1.5rem;
+                            font-weight: 900;
+                            letter-spacing: 2px;
+                            margin-bottom: 0.5rem;
+                        ">
+                            CONGRATULATIONS!
+                        </div>
+                        <div style="
+                            color: #F8FAFC;
+                            font-size: 1.1rem;
+                            font-weight: 700;
+                            margin-bottom: 0.5rem;
+                        ">
+                            ✅ New Member Successfully Added
+                        </div>
+                        <div style="
+                            color: #94A3B8;
+                            font-size: 0.85rem;
+                            margin-top: 0.5rem;
+                            padding-top: 0.5rem;
+                            border-top: 1px solid rgba(52, 211, 153, 0.3);
+                        ">
+                            {msg}
+                        </div>
+                    </div>
+                    <style>
+                    @keyframes popIn {{
+                        0% {{ transform: scale(0.8); opacity: 0; }}
+                        100% {{ transform: scale(1); opacity: 1; }}
+                    }}
+                    </style>
+                    """, unsafe_allow_html=True)
+
                 else:
-                    st.error(f"❌ {msg}")
+                    # ❌ ERROR — Custom Red Message
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #450A0A 0%, #7F1D1D 100%);
+                        border: 2px solid #EF4444;
+                        border-radius: 16px;
+                        padding: 1.5rem;
+                        text-align: center;
+                        margin: 1rem 0;
+                        box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+                        animation: shakeIn 0.5s ease-out;
+                    ">
+                        <div style="font-size: 3rem; margin-bottom: 0.5rem;">⚠️</div>
+                        <div style="
+                            color: #EF4444;
+                            font-size: 1.3rem;
+                            font-weight: 900;
+                            letter-spacing: 2px;
+                            margin-bottom: 0.5rem;
+                        ">
+                            ERROR!
+                        </div>
+                        <div style="
+                            color: #FCA5A5;
+                            font-size: 1rem;
+                            font-weight: 600;
+                            line-height: 1.5;
+                        ">
+                            {msg}
+                        </div>
+                    </div>
+                    <style>
+                    @keyframes shakeIn {{
+                        0% {{ transform: translateX(-10px); opacity: 0; }}
+                        25% {{ transform: translateX(10px); }}
+                        50% {{ transform: translateX(-5px); }}
+                        100% {{ transform: translateX(0); opacity: 1; }}
+                    }}
+                    </style>
+                    """, unsafe_allow_html=True)
 
 
 # ============================================================

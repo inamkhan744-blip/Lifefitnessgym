@@ -442,7 +442,7 @@ def _face_camera_fragment(face_gym_id, current_user):
                 result = _process_face_image(pil, face_gym_id, current_user)
             st.session_state.face_last_result = result
             st.session_state.face_cam_gen += 1
-            st.image(pil, use_container_width=True)
+            st.image(pil, width="stretch")
             
             if result["kind"] == "success":
                 st.success(f"✅ {result['name']}")
@@ -471,7 +471,7 @@ def render_face_recognition_tab(gym_id, current_user):
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.warning("⚠️ Face Recognition is disabled for faster loading")
-            if st.button("📸 Enable Face Recognition", use_container_width=True, type="primary"):
+            if st.button("📸 Enable Face Recognition", width="stretch", type="primary"):
                 st.session_state.face_enabled = True
                 st.rerun()
         return
@@ -488,7 +488,7 @@ def render_face_recognition_tab(gym_id, current_user):
     else:
         st.caption(f"✅ {enc_count} member faces ready · Threshold: {FACE_THRESHOLD}")
     
-    if st.button("🔴 Disable Face Recognition", use_container_width=True):
+    if st.button("🔴 Disable Face Recognition", width="stretch"):
         st.session_state.face_enabled = False
         st.rerun()
     
@@ -732,7 +732,7 @@ def render_staff_attendance_system(sel_gid, current_user):
     # ── Staff Timing ──────────────────────────────────────────────────────
     if not staff_timing:
         st.warning("⚠️ Staff timing not set. Please ask admin to set your timing.")
-        if st.button("⏰ Set My Timing Now", use_container_width=True):
+        if st.button("⏰ Set My Timing Now", width="stretch"):
             st.session_state['page'] = "Gym Setup"
             st.rerun()
         return
@@ -838,7 +838,7 @@ def render_staff_attendance_system(sel_gid, current_user):
                     warning_msg = f"🟡 You're {early_minutes} minutes early. Check-in anyway?"
             
             if can_checkin:
-                if st.button(f"✅ Check-in {selected_staff.full_name}", use_container_width=True, type="primary"):
+                if st.button(f"✅ Check-in {selected_staff.full_name}", width="stretch", type="primary"):
                     ok, msg = db.log_staff_login(staff_username, ip_address="Manual Check-in")
                     if ok:
                         checkin_status = "on-time"
@@ -868,10 +868,10 @@ def render_staff_attendance_system(sel_gid, current_user):
                     else:
                         st.error(f"❌ {msg}")
             else:
-                st.button(f"⏳ Wait until {check_in_time}", use_container_width=True, disabled=True)
+                st.button(f"⏳ Wait until {check_in_time}", width="stretch", disabled=True)
                 st.warning(warning_msg)
         else:
-            st.button(f"✅ {selected_staff.full_name} is Online", use_container_width=True, disabled=True)
+            st.button(f"✅ {selected_staff.full_name} is Online", width="stretch", disabled=True)
     
     with col_btn2:
         if check_in_record:
@@ -887,7 +887,7 @@ def render_staff_attendance_system(sel_gid, current_user):
                     checkout_warning = f"🟡 {remaining} minutes remaining. Early check-out?"
             
             if can_checkout:
-                if st.button(f"🔴 Check-out {selected_staff.full_name}", use_container_width=True, type="primary"):
+                if st.button(f"🔴 Check-out {selected_staff.full_name}", width="stretch", type="primary"):
                     ok, msg = db.log_staff_logout(staff_username)
                     if ok:
                         duration = datetime.now() - check_in_record.login_time
@@ -911,14 +911,14 @@ def render_staff_attendance_system(sel_gid, current_user):
                     else:
                         st.error(f"❌ {msg}")
             else:
-                st.button(f"⏳ Shift ends at {check_out_time}", use_container_width=True, disabled=True)
+                st.button(f"⏳ Shift ends at {check_out_time}", width="stretch", disabled=True)
                 if checkout_warning:
                     st.warning(checkout_warning)
         else:
-            st.button(f"🔴 {selected_staff.full_name} is Offline", use_container_width=True, disabled=True)
+            st.button(f"🔴 {selected_staff.full_name} is Offline", width="stretch", disabled=True)
     
     with col_btn3:
-        if st.button("🔄 Refresh Status", use_container_width=True):
+        if st.button("🔄 Refresh Status", width="stretch"):
             st.cache_data.clear()
             st.rerun()
     
@@ -993,7 +993,7 @@ def render_staff_attendance_system(sel_gid, current_user):
         with col5:
             st.metric("🟡 Early", early_count)
         
-        st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(data), width="stretch", hide_index=True)
         
         if late_count > total_days * 0.3:
             st.error(f"⚠️ AI Alert: {late_count} late days ({round(late_count/total_days*100)}%) - Staff needs to improve punctuality!")
@@ -1068,7 +1068,7 @@ def render_qr_generator(sel_gid):
         format_func=lambda x: x[1]
     )
     
-    if selected and st.button("🖨️ Generate", use_container_width=True, type="primary"):
+    if selected and st.button("🖨️ Generate", width="stretch", type="primary"):
         cols = st.columns(4)
         for idx, (mid, _) in enumerate(selected[:8]):
             m = db.get_member(mid)
@@ -1107,9 +1107,9 @@ def render_print_attendance(sel_gid):
         })
     
     df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
     
-    if st.button("🖨️ Print", use_container_width=True, type="primary"):
+    if st.button("🖨️ Print", width="stretch", type="primary"):
         st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1139,7 +1139,7 @@ def render_staff_attendance(sel_gid):
                 "Status": s['status'],
                 "Hours": f"{s['total_hours']}h"
             })
-        st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(data), width="stretch", hide_index=True)
     else:
         st.info("No data available")
 
@@ -1174,7 +1174,7 @@ def render(gym_id, role, current_user):
     # Clear Cache Button
     col_clear1, col_clear2 = st.columns([6, 1])
     with col_clear2:
-        if st.button("🔄 Clear Cache", use_container_width=True):
+        if st.button("🔄 Clear Cache", width="stretch"):
             st.cache_data.clear()
             st.session_state.attendance_photo_cache = {}
             st.rerun()
@@ -1227,7 +1227,7 @@ def render(gym_id, role, current_user):
                 placeholder="Scan now — or type a serial and press Enter",
                 autocomplete="off",
             )
-            submitted = st.form_submit_button("✓ Check In", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("✓ Check In", type="primary", width="stretch")
         if submitted:
             raw = st.session_state.get("qr_scan_input", "")
             st.session_state["qr_last_result"] = _process_scan(raw, sel_gid, current_user)
@@ -1261,7 +1261,7 @@ def render(gym_id, role, current_user):
                 {"Time": r["time"], "Serial": r["serial"], "Member": r["name"]}
                 for r in inside_now
             ])
-            st.dataframe(df_live, use_container_width=True, hide_index=True)
+            st.dataframe(df_live, width="stretch", hide_index=True)
 
         st.markdown("##### 📋 Today's Attendance")
         if recent:
@@ -1269,7 +1269,7 @@ def render(gym_id, role, current_user):
                 {"Time": r["time"], "Serial": r["serial"], "Name": r["name"], "Marked By": r["marked_by"]}
                 for r in recent
             ])
-            st.dataframe(df_all, use_container_width=True, hide_index=True, height=min(200, 50 + 35 * len(recent)))
+            st.dataframe(df_all, width="stretch", hide_index=True, height=min(200, 50 + 35 * len(recent)))
         else:
             st.caption("No check-ins yet today.")
 
@@ -1281,7 +1281,7 @@ def render(gym_id, role, current_user):
         with mc2:
             att_date = st.date_input("Date", value=date.today(), key="att_date")
         with mc3:
-            if st.button("🔄 Reset", use_container_width=True):
+            if st.button("🔄 Reset", width="stretch"):
                 st.session_state.pop(f"marked_today_{sel_gid}_{att_date}", None)
                 st.rerun()
 
@@ -1314,13 +1314,13 @@ def render(gym_id, role, current_user):
 
         col_b1, col_b2 = st.columns(2)
         with col_b1:
-            if st.button("✅ Mark ALL Present", use_container_width=True, type="primary"):
+            if st.button("✅ Mark ALL Present", width="stretch", type="primary"):
                 for m in pending:
                     db.mark_attendance(m.id, sel_gid, att_date, "Present", current_user)
                     st.session_state[session_key].add(m.id)
                 st.rerun()
         with col_b2:
-            if st.button("❌ Mark ALL Absent", use_container_width=True):
+            if st.button("❌ Mark ALL Absent", width="stretch"):
                 for m in pending:
                     db.mark_attendance(m.id, sel_gid, att_date, "Absent", current_user)
                     st.session_state[session_key].add(m.id)
@@ -1347,7 +1347,7 @@ def render(gym_id, role, current_user):
                     st.caption(f"🆔 {m.serial_number} · {m.membership_type or '—'}")
 
                 with col_btn:
-                    if st.button("✅ Present", key=f"p_{m.id}", use_container_width=True, type="primary"):
+                    if st.button("✅ Present", key=f"p_{m.id}", width="stretch", type="primary"):
                         db.mark_attendance(m.id, sel_gid, att_date, "Present", current_user)
                         st.session_state[session_key].add(m.id)
                         st.rerun()
@@ -1364,7 +1364,7 @@ def render(gym_id, role, current_user):
                     "Name": m.full_name,
                     "Status": existing.get(m.id, "—")
                 } for m in marked])
-                st.dataframe(df_marked, use_container_width=True, hide_index=True)
+                st.dataframe(df_marked, width="stretch", hide_index=True)
 
     # ── TAB 3: Face Check-in ─────────────────────────────────────────────
     with tab_objs[2]:
@@ -1388,7 +1388,7 @@ def render(gym_id, role, current_user):
                 margin=dict(l=0, r=0, t=30, b=0),
                 height=260,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             
             avg = round(sum(t["present"] for t in trend) / len(trend), 1)
             max_day = max(trend, key=lambda t: t["present"])
@@ -1412,7 +1412,7 @@ def render(gym_id, role, current_user):
                     plot_bgcolor="#0F172A", paper_bgcolor="#0F172A",
                     height=240, margin=dict(l=0, r=0, t=10, b=0),
                 )
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width="stretch")
                 peak = max(hourly, key=hourly.get)
                 st.caption(f"🏆 Peak: **{peak:02d}:00** ({hourly[peak]} check-ins)")
             else:
@@ -1459,7 +1459,7 @@ def render(gym_id, role, current_user):
                     "Status": r.status,
                     "Time": r.created_at.strftime("%H:%M") if r.created_at else "—",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
             
             csv_buf = io.StringIO()
             pd.DataFrame(rows).to_csv(csv_buf, index=False)

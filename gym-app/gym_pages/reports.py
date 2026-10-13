@@ -21,6 +21,118 @@ def init_session_state():
 init_session_state()
 
 # ============================================
+# ── ★★★ EXPORT FUNCTIONS ★★★ ──
+# ============================================
+
+def export_to_csv(df, filename):
+    """Export DataFrame to CSV"""
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        f"📥 Download CSV",
+        data=csv,
+        file_name=filename,
+        mime="text/csv",
+        key=f"csv_export_{filename}_{datetime.now().timestamp()}"
+    )
+
+def export_to_excel(df, filename):
+    """Export DataFrame to Excel"""
+    try:
+        import openpyxl
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Report')
+        excel_data = output.getvalue()
+        st.download_button(
+            f"📥 Download Excel",
+            data=excel_data,
+            file_name=filename.replace('.csv', '.xlsx'),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"excel_export_{filename}_{datetime.now().timestamp()}"
+        )
+    except ImportError:
+        st.warning("⚠️ openpyxl not installed. Install with: pip install openpyxl")
+
+def export_to_pdf(df, filename, title="Report"):
+    """Export DataFrame to PDF"""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        
+        output = io.BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=landscape(letter))
+        elements = []
+        
+        # Title
+        styles_pdf = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles_pdf['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#7C3AED')
+        )
+        elements.append(Paragraph(f"<b>{title}</b>", title_style))
+        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles_pdf['Normal']))
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Table data
+        table_data = [df.columns.tolist()] + df.values.tolist()
+        
+        # Create table
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#7C3AED')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#1E293B')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#334155')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#0F172A'), colors.HexColor('#1E293B')]),
+        ]))
+        
+        elements.append(table)
+        doc.build(elements)
+        
+        pdf_data = output.getvalue()
+        st.download_button(
+            f"📥 Download PDF",
+            data=pdf_data,
+            file_name=filename.replace('.csv', '.pdf'),
+            mime="application/pdf",
+            key=f"pdf_export_{filename}_{datetime.now().timestamp()}"
+        )
+    except ImportError:
+        st.warning("⚠️ reportlab not installed. Install with: pip install reportlab")
+
+def render_export_buttons(df, title="Report", filename=None):
+    """Render all export buttons for a DataFrame"""
+    if filename is None:
+        filename = f"{title}_{date.today().strftime('%Y-%m-%d')}.csv"
+    
+    st.markdown("#### 📤 Export Options")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        export_to_csv(df, filename)
+    
+    with col2:
+        export_to_excel(df, filename)
+    
+    with col3:
+        export_to_pdf(df, filename, title)
+    
+    st.caption(f"📊 {len(df)} rows exported")
+
+
+# ============================================
 # 3D CSS STYLES
 # ============================================
 
@@ -176,7 +288,7 @@ st.markdown("""
 
 
 # ============================================
-# 🆕 MONTHLY GYM SUMMARY REPORT
+# MONTHLY GYM SUMMARY REPORT
 # ============================================
 
 def render_monthly_gym_summary(gym_id, date_from, date_to):
@@ -357,7 +469,7 @@ def render_monthly_gym_summary(gym_id, date_from, date_to):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             barmode='group',
         )
-        st.plotly_chart(fig, use_container_width=True, key="monthly_gym_chart_1")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="monthly_gym_chart_1")
     
     st.divider()
     
@@ -411,7 +523,7 @@ def render_monthly_gym_summary(gym_id, date_from, date_to):
                 yaxis=dict(gridcolor='#1E293B', title='Amount (PKR)'),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
-            st.plotly_chart(fig3, use_container_width=True, key="monthly_gym_trend")  # 🔥 UNIQUE KEY
+            st.plotly_chart(fig3, width="stretch", key="monthly_gym_trend")
     
     # ── All Months Table ──────────────────────────────────────────────────
     st.divider()
@@ -424,7 +536,7 @@ def render_monthly_gym_summary(gym_id, date_from, date_to):
     
     st.dataframe(
         all_df[['Gym', 'Month', 'Collection', 'Expenses', 'Profit', 'Members', 'Payments']],
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
     
@@ -440,7 +552,7 @@ def render_monthly_gym_summary(gym_id, date_from, date_to):
 
 
 # ============================================
-# 🆕 GYM COMPARISON DASHBOARD
+# GYM COMPARISON DASHBOARD
 # ============================================
 
 def render_gym_comparison_dashboard(gym_id, date_from, date_to):
@@ -533,7 +645,7 @@ def render_gym_comparison_dashboard(gym_id, date_from, date_to):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         barmode='group',
     )
-    st.plotly_chart(fig1, use_container_width=True, key="gym_compare_chart_1")  # 🔥 UNIQUE KEY
+    st.plotly_chart(fig1, width="stretch", key="gym_compare_chart_1")
     
     # ── Profit Chart ──────────────────────────────────────────────────────
     fig2 = go.Figure()
@@ -559,7 +671,7 @@ def render_gym_comparison_dashboard(gym_id, date_from, date_to):
         yaxis=dict(gridcolor='#1E293B', title='Profit/Loss (PKR)'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
-    st.plotly_chart(fig2, use_container_width=True, key="gym_compare_chart_2")  # 🔥 UNIQUE KEY
+    st.plotly_chart(fig2, width="stretch", key="gym_compare_chart_2")
     
     # ── Ranking ──────────────────────────────────────────────────────────
     st.subheader("🏆 Gym Ranking")
@@ -652,7 +764,7 @@ def render_member_reports(gym_id, date_from, date_to):
             height=350,
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        st.plotly_chart(fig, use_container_width=True, key="member_types_pie")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="member_types_pie")
     
     # Member growth trend
     st.markdown("#### 📈 Member Growth Trend")
@@ -690,7 +802,7 @@ def render_member_reports(gym_id, date_from, date_to):
             xaxis=dict(gridcolor='#1E293B'),
             yaxis=dict(gridcolor='#1E293B', title="Members")
         )
-        st.plotly_chart(fig, use_container_width=True, key="member_growth_chart")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="member_growth_chart")
     
     # Latest members
     st.markdown("#### 🆕 Latest 10 Members")
@@ -709,7 +821,7 @@ def render_member_reports(gym_id, date_from, date_to):
                     })
                     break
         df_latest = pd.DataFrame(latest_members[:10])
-        st.dataframe(df_latest, use_container_width=True, hide_index=True)
+        st.dataframe(df_latest, width="stretch", hide_index=True)
 
 
 # ============================================
@@ -769,7 +881,7 @@ def render_revenue_reports(gym_id, date_from, date_to):
         xaxis=dict(gridcolor='#1E293B'),
         yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
     )
-    st.plotly_chart(fig, use_container_width=True, key="revenue_daily_chart")  # 🔥 UNIQUE KEY
+    st.plotly_chart(fig, width="stretch", key="revenue_daily_chart")
     
     # Payment method distribution
     st.markdown("#### 💳 Payment Method Distribution")
@@ -793,7 +905,7 @@ def render_revenue_reports(gym_id, date_from, date_to):
             height=300,
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        st.plotly_chart(fig, use_container_width=True, key="revenue_method_pie")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="revenue_method_pie")
 
 
 # ============================================
@@ -847,7 +959,7 @@ def render_expense_reports(gym_id, date_from, date_to):
             height=300,
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        st.plotly_chart(fig, use_container_width=True, key="expense_category_pie")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="expense_category_pie")
     
     # Daily expense trend
     st.markdown("#### 📉 Daily Expense Trend")
@@ -878,7 +990,7 @@ def render_expense_reports(gym_id, date_from, date_to):
         xaxis=dict(gridcolor='#1E293B'),
         yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
     )
-    st.plotly_chart(fig, use_container_width=True, key="expense_daily_chart")  # 🔥 UNIQUE KEY
+    st.plotly_chart(fig, width="stretch", key="expense_daily_chart")
 
 
 # ============================================
@@ -950,7 +1062,7 @@ def render_attendance_reports(gym_id, date_from, date_to):
         yaxis=dict(gridcolor='#1E293B', title="Count"),
         legend=dict(orientation="h", y=1.02, x=0.5)
     )
-    st.plotly_chart(fig, use_container_width=True, key="attendance_daily_chart")  # 🔥 UNIQUE KEY
+    st.plotly_chart(fig, width="stretch", key="attendance_daily_chart")
 
 
 # ============================================
@@ -1052,7 +1164,7 @@ def render_financial_summary(gym_id, date_from, date_to):
             xaxis=dict(gridcolor='#1E293B'),
             yaxis=dict(gridcolor='#1E293B', title="Amount (PKR)")
         )
-        st.plotly_chart(fig, use_container_width=True, key="financial_rev_exp_chart")  # 🔥 UNIQUE KEY
+        st.plotly_chart(fig, width="stretch", key="financial_rev_exp_chart")
 
 
 # ============================================
@@ -1101,7 +1213,7 @@ def render_top_members_report(gym_id, date_from, date_to):
             })
         
         df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         
         # Export
         csv = df.to_csv(index=False)
@@ -1274,13 +1386,13 @@ def render(gym_id, role, username):
     with col_f4:
         st.write("")
         st.write("")
-        if st.button("🔄 Generate Reports", use_container_width=True):
+        if st.button("🔄 Generate Reports", width='stretch'):
             st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================
-    # TABS - UPDATED WITH NEW REPORTS
+    # TABS
     # ============================================
     
     tab_staff, tab_members, tab_revenue, tab_expenses, tab_attendance, tab_financial, tab_top, tab_monthly, tab_gym_compare = st.tabs([
@@ -1385,38 +1497,136 @@ def render(gym_id, role, username):
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+            
+            # ── STAFF EXPORT ──
+            st.divider()
+            df_staff = pd.DataFrame(staff_list)
+            render_export_buttons(df_staff, "Staff Performance Report", f"staff_report_{date.today()}.csv")
+            
         else:
             st.info("📭 No staff members found for the selected filters.")
     
     # ── TAB 2: MEMBER REPORTS ─────────────────────────────────────────────
     with tab_members:
+        # Get member data for export
+        members = db.get_members(gym_id=sel_gid)
+        if members:
+            member_data = []
+            for m in members:
+                member_data.append({
+                    "Name": m.full_name,
+                    "Serial": m.serial_number,
+                    "Phone": m.phone,
+                    "Membership Type": m.membership_type,
+                    "Status": m.status,
+                    "Join Date": m.join_date,
+                    "Expiry Date": m.expiry_date,
+                    "Fee Amount": m.fee_amount,
+                })
+            df_members = pd.DataFrame(member_data)
+            render_export_buttons(df_members, "Members Report", f"members_report_{date.today()}.csv")
+        
         render_member_reports(sel_gid, date_from, date_to)
     
     # ── TAB 3: REVENUE REPORTS ────────────────────────────────────────────
     with tab_revenue:
+        fees = db.get_fee_records(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+        if fees:
+            revenue_data = []
+            for f in fees:
+                member = db.get_member(f.member_id)
+                revenue_data.append({
+                    "Date": f.payment_date,
+                    "Member": member.full_name if member else "Unknown",
+                    "Amount": f.amount,
+                    "Method": f.payment_method or "Cash",
+                    "Collected By": f.collected_by or "-",
+                    "Receipt": f.receipt_number or "-",
+                })
+            df_revenue = pd.DataFrame(revenue_data)
+            render_export_buttons(df_revenue, "Revenue Report", f"revenue_report_{date.today()}.csv")
+        
         render_revenue_reports(sel_gid, date_from, date_to)
     
     # ── TAB 4: EXPENSE REPORTS ────────────────────────────────────────────
     with tab_expenses:
+        expenses = db.get_expenses(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+        if expenses:
+            expense_data = []
+            for e in expenses:
+                expense_data.append({
+                    "Date": e.expense_date,
+                    "Category": e.category,
+                    "Description": e.description,
+                    "Amount": e.amount,
+                    "Staff": e.staff_name or "-",
+                })
+            df_expenses = pd.DataFrame(expense_data)
+            render_export_buttons(df_expenses, "Expense Report", f"expense_report_{date.today()}.csv")
+        
         render_expense_reports(sel_gid, date_from, date_to)
     
     # ── TAB 5: ATTENDANCE REPORTS ─────────────────────────────────────────
     with tab_attendance:
+        attendance = db.get_attendance_range(gym_id=sel_gid, from_date=date_from, to_date=date_to)
+        if attendance:
+            att_data = []
+            for a in attendance:
+                member = db.get_member(a.member_id)
+                # FIXED: check_time error fixed - using hasattr to check attribute exists
+                check_time_value = getattr(a, 'check_time', getattr(a, 'check_in_time', getattr(a, 'time', '-')))
+                att_data.append({
+                    "Date": a.check_date,
+                    "Member": member.full_name if member else "Unknown",
+                    "Status": a.status,
+                    "Time": check_time_value,
+                    "Marked By": a.marked_by or "-",
+                })
+            df_attendance = pd.DataFrame(att_data)
+            render_export_buttons(df_attendance, "Attendance Report", f"attendance_report_{date.today()}.csv")
+        
         render_attendance_reports(sel_gid, date_from, date_to)
     
     # ── TAB 6: FINANCIAL SUMMARY ─────────────────────────────────────────
     with tab_financial:
+        fees = db.get_fee_records(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+        expenses = db.get_expenses(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+        
+        if fees or expenses:
+            fin_data = []
+            total_revenue = sum(f.amount for f in fees) if fees else 0
+            total_expenses = sum(e.amount for e in expenses) if expenses else 0
+            
+            fin_data.append({
+                "Metric": "Total Revenue",
+                "Amount": total_revenue
+            })
+            fin_data.append({
+                "Metric": "Total Expenses",
+                "Amount": total_expenses
+            })
+            fin_data.append({
+                "Metric": "Net Profit/Loss",
+                "Amount": total_revenue - total_expenses
+            })
+            fin_data.append({
+                "Metric": "Profit Margin",
+                "Amount": f"{(total_revenue - total_expenses) / total_revenue * 100:.1f}%" if total_revenue > 0 else "0%"
+            })
+            df_financial = pd.DataFrame(fin_data)
+            render_export_buttons(df_financial, "Financial Summary", f"financial_report_{date.today()}.csv")
+        
         render_financial_summary(sel_gid, date_from, date_to)
     
     # ── TAB 7: TOP MEMBERS ────────────────────────────────────────────────
     with tab_top:
         render_top_members_report(sel_gid, date_from, date_to)
     
-    # ── 🆕 TAB 8: MONTHLY GYM SUMMARY ────────────────────────────────────
+    # ── TAB 8: MONTHLY GYM SUMMARY ────────────────────────────────────────
     with tab_monthly:
         render_monthly_gym_summary(sel_gid, date_from, date_to)
     
-    # ── 🆕 TAB 9: GYM COMPARISON ──────────────────────────────────────────
+    # ── TAB 9: GYM COMPARISON ──────────────────────────────────────────────
     with tab_gym_compare:
         render_gym_comparison_dashboard(sel_gid, date_from, date_to)
 
@@ -1427,11 +1637,10 @@ def render(gym_id, role, username):
     st.divider()
     st.subheader("📥 Export All Reports")
     
-    col_exp1, col_exp2 = st.columns(2)
+    col_exp1, col_exp2, col_exp3 = st.columns(3)
     
     with col_exp1:
-        if st.button("📋 Export All Reports (CSV)", use_container_width=True):
-            # Get all data
+        if st.button("📋 Export All Reports (CSV)", width='stretch'):
             staff_data = get_staff_reports(gym_id=sel_gid, date_from=date_from, date_to=date_to)
             staff_list = list(staff_data['staff_info'].values())
             
@@ -1439,7 +1648,7 @@ def render(gym_id, role, username):
                 df = pd.DataFrame(staff_list)
                 csv = df.to_csv(index=False)
                 st.download_button(
-                    "📥 Download CSV",
+                    "📥 Download All CSV",
                     data=csv,
                     file_name=f"all_reports_{date.today()}.csv",
                     mime="text/csv",
@@ -1449,5 +1658,44 @@ def render(gym_id, role, username):
                 st.warning("No data to export.")
     
     with col_exp2:
-        if st.button("🔄 Refresh All Data", use_container_width=True):
+        if st.button("📊 Export Financial Summary (Excel)", width='stretch'):
+            fees = db.get_fee_records(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+            expenses = db.get_expenses(gym_id=sel_gid, date_from=date_from, date_to=date_to)
+            
+            if fees or expenses:
+                try:
+                    import openpyxl
+                    from openpyxl import Workbook
+                    wb = Workbook()
+                    
+                    ws1 = wb.active
+                    ws1.title = "Revenue"
+                    ws1.append(["Date", "Member", "Amount", "Method"])
+                    for f in fees:
+                        member = db.get_member(f.member_id)
+                        ws1.append([f.payment_date, member.full_name if member else "Unknown", f.amount, f.payment_method or "Cash"])
+                    
+                    ws2 = wb.create_sheet("Expenses")
+                    ws2.append(["Date", "Category", "Description", "Amount"])
+                    for e in expenses:
+                        ws2.append([e.expense_date, e.category, e.description, e.amount])
+                    
+                    output = io.BytesIO()
+                    wb.save(output)
+                    excel_data = output.getvalue()
+                    
+                    st.download_button(
+                        "📥 Download Financial Report",
+                        data=excel_data,
+                        file_name=f"financial_report_{date.today()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="financial_excel_download"
+                    )
+                except ImportError:
+                    st.warning("⚠️ openpyxl not installed. Install with: pip install openpyxl")
+            else:
+                st.warning("No data to export.")
+    
+    with col_exp3:
+        if st.button("🔄 Refresh All Data", width='stretch'):
             st.rerun()

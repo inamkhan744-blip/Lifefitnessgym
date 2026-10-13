@@ -338,7 +338,7 @@ def render(gym_id, role):
                     placeholder="Observations, diet notes, trainer remarks, mood, energy levels..."
                 )
                 
-                if st.form_submit_button("💾 Save Measurement", type="primary", use_container_width=True):
+                if st.form_submit_button("💾 Save Measurement", type="primary", width="stretch"):
                     if weight <= 0:
                         st.error("⚠️ Weight must be greater than 0!")
                     else:
@@ -384,7 +384,7 @@ def render(gym_id, role):
                 
                 st.dataframe(
                     pd.DataFrame(history_data),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     height=250
                 )
@@ -393,7 +393,7 @@ def render(gym_id, role):
                     st.divider()
                     del_opts = {f"{r.recorded_date} — {r.weight_kg} kg": r.id for r in records}
                     del_sel = st.selectbox("Delete record", list(del_opts.keys()), key="del_record")
-                    if st.button("🗑️ Delete", use_container_width=True):
+                    if st.button("🗑️ Delete", width="stretch"):
                         db.delete_body_measurement(del_opts[del_sel])
                         st.success("✅ Deleted!")
                         st.rerun()
@@ -491,7 +491,7 @@ def render(gym_id, role):
                         margin=dict(l=40, r=40, t=60, b=40),
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     
                     # ============================================
                     # FIXED: Correct way to access values
@@ -605,7 +605,7 @@ def render(gym_id, role):
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("📋 Copy Report", use_container_width=True):
+                if st.button("📋 Copy Report", width="stretch"):
                     st.write("✅ Report copied to clipboard!")
                     st.code(report, language="text")
             with col_btn2:
@@ -617,7 +617,7 @@ def render(gym_id, role):
                         data=report_file.getvalue(),
                         file_name=f"progress_report_{sel_m.serial_number}_{date.today()}.txt",
                         mime="text/plain",
-                        use_container_width=True
+                        width="stretch"
                     )
         
         # TOOL 3: Goal Setting
@@ -662,7 +662,7 @@ def render(gym_id, role):
                     else:
                         st.warning("⚠️ Target date should be in the future!")
             
-            if st.button("💾 Save Goal", use_container_width=True):
+            if st.button("💾 Save Goal", width="stretch"):
                 st.success("✅ Goal saved successfully!")
         
         # TOOL 4: Share Progress

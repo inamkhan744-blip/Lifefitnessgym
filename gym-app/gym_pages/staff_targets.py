@@ -69,7 +69,7 @@ def render(gym_id, role, username):
     with col_f3:
         st.write("")
         st.write("")
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width="stretch"):
             st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
@@ -265,7 +265,7 @@ def render(gym_id, role, username):
             help="Prize amount if all targets are completed"
         )
         
-        if st.button("✅ Set Targets", type="primary", use_container_width=True):
+        if st.button("✅ Set Targets", type="primary", width="stretch"):
             if new_members_target <= 0 or fee_collection_target <= 0 or attendance_percentage <= 0:
                 st.error("❌ All targets must be greater than 0!")
             else:
@@ -323,7 +323,7 @@ def render(gym_id, role, username):
             })
         
         df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         
         # Delete target
         if all_targets:
@@ -331,7 +331,7 @@ def render(gym_id, role, username):
             del_opts = {f"{r['Staff']} - {r['Month']}": r['ID'] for r in rows}
             if del_opts:
                 del_sel = st.selectbox("Select Target to Delete", list(del_opts.keys()))
-                if st.button("🗑️ Delete Target", use_container_width=True):
+                if st.button("🗑️ Delete Target", width="stretch"):
                     ok, msg = db.delete_staff_target(del_opts[del_sel])
                     if ok:
                         st.success("✅ Target deleted!")

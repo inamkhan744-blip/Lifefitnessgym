@@ -54,7 +54,7 @@ def render():
                 "Currently active" if key == current else f"Use Design {index}",
                 key=f"settings_design_{key}",
                 type="primary" if key == current else "secondary",
-                use_container_width=True,
+                width="stretch",
                 disabled=key == current,
             ):
                 db.set_setting("theme_key", key)

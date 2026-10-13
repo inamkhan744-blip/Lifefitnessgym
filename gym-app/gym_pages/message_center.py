@@ -13,7 +13,7 @@ Receipt timestamps come from FeeRecord.created_at (the moment staff hit
 import os
 import streamlit as st
 import urllib.parse
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import database as db
 import styles
 import threading
@@ -154,9 +154,9 @@ def _wa_action(phone: str, message: str, on_mark, key: str, auto_send: bool = Fa
     link = f"https://wa.me/{normalized}?text={urllib.parse.quote(message)}"
     a, b = st.columns([1, 1])
     with a:
-        st.link_button("💬 Send WhatsApp", link, use_container_width=True)
+        st.link_button("💬 Send WhatsApp", link, width="stretch")
     with b:
-        if st.button("✓ Mark as Sent", key=key, use_container_width=True,
+        if st.button("✓ Mark as Sent", key=key, width="stretch",
                      type="primary"):
             try:
                 ok = on_mark()
@@ -202,6 +202,9 @@ def render(gym_id, role):
 
     today = date.today()
     today_str = str(today)
+    # NAYA: Last 3 days ka range
+    three_days_ago = today - timedelta(days=3)
+    three_days_ago_str = str(three_days_ago)
     gyms_by_id = {g.id: g for g in gyms}
 
     # ── AUTO-SEND TOGGLE ──────────────────────────────────────────────────────
@@ -246,27 +249,32 @@ def render(gym_id, role):
     # ── Today's data ──────────────────────────────────────────────────────────
     all_members = db.get_members(gym_id=sel_gid)
     # Only Pending rows: registered today AND not yet WhatsApp'd.
+    # NAYA: Last 3 days ke members
     today_members = [
         m for m in all_members
-        if (m.join_date or "") == today_str and not getattr(m, "whatsapp_sent", False)
+        if (m.join_date or "") >= three_days_ago_str 
+        and (m.join_date or "") <= today_str
+        and not getattr(m, "whatsapp_sent", False)
     ]
 
     # Use record-creation timestamp (when staff hit Record Payment) rather
     # than the form's payment_date — keeps backdated entries from hiding
     # from the admin's review window.
-    today_fees = db.get_fee_records_created_today(gym_id=sel_gid)
+    # NAYA: Last 3 days ke fees
+    all_fees = db.get_fee_records(gym_id=sel_gid, date_from=three_days_ago, date_to=today)
+    today_fees = [r for r in all_fees if not getattr(r, "whatsapp_sent", False)]
 
     # ── Summary metrics ───────────────────────────────────────────────────────
     total_collected = sum(r.amount for r in today_fees)
     m1, m2, m3 = st.columns(3)
-    m1.metric("New Members Today", len(today_members))
-    m2.metric("Fees Collected Today", len(today_fees))
-    m3.metric("Total Today", f"PKR {total_collected:,.2f}")
+    m1.metric("New Members (3 Days)", len(today_members))
+    m2.metric("Fees (3 Days)", len(today_fees))
+    m3.metric("Total (3 Days)", f"PKR {total_collected:,.2f}")
 
     st.divider()
 
     # ── Today's Fee Collections ───────────────────────────────────────────────
-    st.subheader("💰 Today's Fee Collections")
+    st.subheader("💰 Fee Collections (Last 3 Days)")
     if not today_fees:
         st.info("No fees collected today yet.")
     else:
@@ -327,7 +335,7 @@ def render(gym_id, role):
     st.divider()
 
     # ── Today's New Members ───────────────────────────────────────────────────
-    st.subheader("👥 Today's New Members")
+    st.subheader("👥 New Members (Last 3 Days)")
     if not today_members:
         st.info("No new members registered today.")
     else:

@@ -444,7 +444,7 @@ def render(gym_id, role):
     with st.expander("🛠️ Photo Tools", expanded=False):
         col_t1, col_t2 = st.columns(2)
         with col_t1:
-            if st.button("🔄 Fix All Image Orientations", use_container_width=True):
+            if st.button("🔄 Fix All Image Orientations", width="stretch"):
                 with st.spinner("Fixing all images..."):
                     count = recompress_all_images()
                     st.session_state.photo_cache = {}
@@ -453,7 +453,7 @@ def render(gym_id, role):
                     st.success(f"✅ Fixed {count} images!")
                     st.rerun()
         with col_t2:
-            if st.button("🗑️ Clear All Cache", use_container_width=True):
+            if st.button("🗑️ Clear All Cache", width="stretch"):
                 try:
                     if os.path.exists(CACHE_FILE):
                         os.remove(CACHE_FILE)
@@ -683,7 +683,7 @@ def render(gym_id, role):
                     if st.button(
                         "✅ Select", 
                         key=f"select_card_{member_id}",
-                        use_container_width=True,
+                        width="stretch",
                         help="Click to view this member's full card"
                     ):
                         cache_data = {

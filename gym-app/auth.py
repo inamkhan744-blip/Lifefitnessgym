@@ -3,15 +3,15 @@ import database as db
 
 
 ROLE_PAGES = {
-    "admin":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
+    "admin":   ["Dashboard", "AI Assistant", "Members", "Membership Cards", "Attendance", "Progress Tracker",
                 "Fee Collection", "Expenses", "Inventory", "Reports",
                 "Message Center", "WhatsApp", "Complaints", "Audit",
-                 "Gym Setup", "Settings", "User Management", "AI Assistant", "Staff Targets",
+                 "Gym Setup", "Settings", "User Management", "Staff Targets",
                  "Member Portal", "Settings"],
-    "staff":   ["Dashboard", "Members", "Membership Cards", "Attendance", "Progress Tracker",
-                "Fee Collection", "Expenses", "Inventory", "Complaints", "AI Assistant",
+    "staff":   ["Dashboard", "AI Assistant", "Members", "Membership Cards", "Attendance", "Progress Tracker",
+                "Fee Collection", "Expenses", "Inventory", "Complaints",
                 "Member Portal"],
-    "auditor": ["Dashboard", "Audit", "Reports", "AI Assistant", "Settings"],
+    "auditor": ["Dashboard", "AI Assistant", "Audit", "Reports", "Settings"],
 }
 
 ROLE_ICONS = {
@@ -61,7 +61,7 @@ def login_page():
         username = st.text_input("Username", placeholder="Enter your username")
         password = st.text_input("Password", type="password", placeholder="Enter your password")
         
-        if st.button("Sign In", type="primary", use_container_width=True):
+        if st.button("Sign In", type="primary", width="stretch"):
             user = db.get_user_by_username(username)
             if user and db.verify_password(password, user.password_hash) and user.is_active:
                 

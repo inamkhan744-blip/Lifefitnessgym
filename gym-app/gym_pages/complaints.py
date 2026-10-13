@@ -178,7 +178,7 @@ def render(gym_id, role):
                                            key="csub_desc")
 
             if st.form_submit_button("📣 Submit Complaint", type="primary",
-                                     use_container_width=True):
+                                     width="stretch"):
                 if not subject.strip():
                     st.error("Subject is required.")
                 else:

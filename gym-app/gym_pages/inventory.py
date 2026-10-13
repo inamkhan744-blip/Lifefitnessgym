@@ -308,7 +308,7 @@ def render(gym_id, role):
             
             st.dataframe(
                 display_df[["Item", "Category", "Qty", "Min", "Purchase", "Sale", "Profit", "Status"]],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=400,
                 column_config={
@@ -355,7 +355,7 @@ def render(gym_id, role):
                                     new_qty = st.number_input("Quantity", value=int(sel_item.quantity), min_value=0, step=1, key=f"es_qty_{sel_item.id}")
                                     new_min = st.number_input("Min Alert Qty", value=int(sel_item.min_quantity), min_value=0, step=1, key=f"es_min_{sel_item.id}")
                                 
-                                if st.form_submit_button("💾 Update Item", type="primary", use_container_width=True):
+                                if st.form_submit_button("💾 Update Item", type="primary", width="stretch"):
                                     db.update_stock_item(sel_item.id, item_name=new_name, category=new_cat,
                                                         purchase_price=new_buy, sale_price=new_sell,
                                                         quantity=new_qty, min_quantity=new_min)
@@ -367,7 +367,7 @@ def render(gym_id, role):
                         with st.expander("🗑️ Delete Item", expanded=False):
                             st.warning(f"⚠️ Delete **{sel_item.item_name}**?")
                             st.caption("This cannot be undone!")
-                            if st.button("🚨 Confirm Delete", type="primary", use_container_width=True):
+                            if st.button("🚨 Confirm Delete", type="primary", width="stretch"):
                                 db.delete_stock_item(sel_item.id)
                                 st.success("✅ Item deleted!")
                                 st.rerun()
@@ -440,7 +440,7 @@ def render(gym_id, role):
                     elif remaining <= sel_pos_item.min_quantity:
                         st.warning(f"⚠️ After sale, only {remaining} items left (Min: {sel_pos_item.min_quantity})")
                 
-                if st.form_submit_button("✅ Process Sale", type="primary", use_container_width=True):
+                if st.form_submit_button("✅ Process Sale", type="primary", width="stretch"):
                     current_user = st.session_state.get("username", "staff")
                     ok, msg = db.sell_stock_item(
                         stock_item_id=sel_pos_id,
@@ -577,7 +577,7 @@ def render(gym_id, role):
             
             st.dataframe(
                 display_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=350,
                 column_config={
@@ -599,7 +599,7 @@ def render(gym_id, role):
             
             col_exp1, col_exp2 = st.columns([1, 5])
             with col_exp1:
-                if st.button("⬇️ Export CSV", use_container_width=True):
+                if st.button("⬇️ Export CSV", width="stretch"):
                     buf = io.StringIO()
                     df_sales.to_csv(buf, index=False)
                     st.download_button(
@@ -607,7 +607,7 @@ def render(gym_id, role):
                         data=buf.getvalue().encode(),
                         file_name=f"inventory_sales_{rep_from}_{rep_to}.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        width="stretch"
                     )
         
         st.markdown("</div>", unsafe_allow_html=True)
@@ -647,7 +647,7 @@ def render(gym_id, role):
                 total_profit = profit_per_unit * quantity
                 st.info(f"💹 **Profit per unit:** PKR {profit_per_unit:,.2f} | **Total potential profit:** PKR {total_profit:,.2f}")
             
-            if st.form_submit_button("✅ Add to Inventory", type="primary", use_container_width=True):
+            if st.form_submit_button("✅ Add to Inventory", type="primary", width="stretch"):
                 if not item_name.strip():
                     st.error("❌ Item name is required!")
                 elif sale_price < purchase_price:

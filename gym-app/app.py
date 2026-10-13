@@ -1,4 +1,6 @@
 import streamlit as st
+from datetime import datetime
+st.write(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 import sys
 import os
 import base64
@@ -26,9 +28,12 @@ else:
     else:
         st.session_state.last_activity = datetime.now()
 
-st.set_page_config(page_title="GymPro", page_icon="🏋️", layout="wide")
+st.set_page_config(page_title="GymPro", page_icon="🏋️", layout="wide", initial_sidebar_state="auto")
 
-# ── Init DB once per server lifetime (not on every render) ────────────────────
+# ═══════════════════════════════════════════════════════════
+
+
+# ── Init DB once per server lifetime ──────────────────────────────────────────
 @st.cache_resource
 def _init_db_once():
     db.init_db()
@@ -36,8 +41,15 @@ def _init_db_once():
 
 _init_db_once()
 styles.inject_css()
+theme_key = st.session_state.get("current_theme", "energy_burst")
+from gym_pages.theme import THEMES
+theme_data = THEMES.get(theme_key, THEMES["energy_burst"])
+st.markdown(
+    f"<style>.stApp {{background-color: {theme_data['bg']};}}</style>",
+    unsafe_allow_html=True,
+)
 
-# ── Music player: encode MP3 once, reuse forever ──────────────────────────────
+# ── Music player ──────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def _get_music_b64() -> str | None:
     music_file = os.path.join(os.path.dirname(__file__), "gym_music.mp3")
@@ -71,7 +83,7 @@ def add_floating_music_player():
 
 add_floating_music_player()
 
-# ── Member Portal route (no staff login needed) ───────────────────────────────
+# ── Member Portal route ────────────────────────────────────────────────────────
 if st.query_params.get("portal") == "1":
     from gym_pages import member_portal
     member_portal.render()
@@ -82,6 +94,26 @@ if not auth.require_login():
     auth.login_page()
     st.stop()
 
+# ═══════════════════════════════════════════════════════════
+# 🎉 WELCOME SCREEN — After Successful Login
+# ═══════════════════════════════════════════════════════════
+if "welcome_shown" not in st.session_state:
+    st.session_state.welcome_shown = False
+
+if not st.session_state.welcome_shown and st.session_state.get("username"):
+    try:
+        from gym_pages.ai_assistant import show_loading_overlay
+        show_loading_overlay("Welcome to Life Fitness Gym 💪")
+        st.session_state.welcome_shown = True
+        import time
+        time.sleep(2)
+        st.rerun()
+    except Exception:
+        st.session_state.welcome_shown = True
+
+# ═══════════════════════════════════════════════════════════
+
+
 # ── Public profile route ───────────────────────────────────────────────────────
 _profile_param = st.query_params.get("profile")
 if _profile_param:
@@ -91,7 +123,7 @@ if _profile_param:
     public_profile.render(_mid if _mid is not None else -1)
     st.stop()
 
-# ── Cached data helpers (avoid repeated DB hits every render) ─────────────────
+# ── Cached data helpers ───────────────────────────────────────────────────────
 @st.cache_data(ttl=60, show_spinner=False)
 def _cached_gyms():
     return db.get_all_gyms()
@@ -129,6 +161,228 @@ gym_id      = st.session_state.get("selected_gym_id")
 user_gym_id = st.session_state.get("user_gym_id")
 
 gyms = _cached_gyms()
+
+# ── ★★★ GLOBAL SEARCH BAR ★★★ ──────────────────────────────────────────────
+def render_global_search():
+    """Render global search bar at top of app"""
+    return
+    return
+    
+    # Search bar CSS
+    st.markdown("""
+    <style>
+        .global-search {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 6px 16px;
+            margin-bottom: 8px;
+            gap: 12px;
+        }
+        .global-search .search-box {
+            display: flex;
+            align-items: center;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 4px 12px;
+            transition: all 0.3s ease;
+            min-width: 220px;
+        }
+        .global-search .search-box:focus-within {
+            border-color: #7C3AED;
+            box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+            background: rgba(255,255,255,0.08);
+        }
+        .global-search .search-box input {
+            background: transparent;
+            border: none;
+            color: #FFFFFF;
+            padding: 8px 8px;
+            font-size: 13px;
+            width: 100%;
+            outline: none;
+        }
+        .global-search .search-box input::placeholder {
+            color: #64748B;
+        }
+        .global-search .search-icon {
+            color: #64748B;
+            font-size: 16px;
+            margin-right: 4px;
+        }
+        .global-search .search-shortcut {
+            color: #475569;
+            font-size: 10px;
+            padding: 2px 8px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.06);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .global-search .user-info {
+            color: #94A3B8;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .global-search .user-info strong {
+            color: #FFFFFF;
+        }
+        @media (max-width: 768px) {
+            .global-search {
+                flex-wrap: wrap;
+                justify-content: center;
+                padding: 4px 8px;
+            }
+            .global-search .search-box {
+                min-width: 160px;
+                flex: 1;
+            }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Search results placeholder
+    if "search_results" not in st.session_state:
+        st.session_state.search_results = []
+    if "search_query" not in st.session_state:
+        st.session_state.search_query = ""
+    
+    # Get current page for search context
+    current_page = st.session_state.get("page", "Dashboard")
+    
+    # Search bar HTML
+    st.markdown(f"""
+    <div class="global-search">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;width:100%;">
+            <div style="flex:1;min-width:150px;">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input 
+                        type="text" 
+                        id="global_search_input" 
+                        placeholder="Search members, fees, attendance..." 
+                        value="{st.session_state.search_query}"
+                        oninput="document.getElementById('search_btn').click()"
+                    />
+                    <span class="search-shortcut">⌘K</span>
+                </div>
+            </div>
+            <div class="user-info">
+                👤 <strong>{username}</strong> · {role.upper()} · <span style="color:#64748B;">{datetime.now().strftime('%I:%M %p')}</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Hidden button to trigger search - FIXED
+    if st.button("🔍", key="search_btn", width='content', type="secondary"):
+        pass
+    
+    # Search logic
+    search_query = st.text_input("", key="search_input_global", label_visibility="collapsed", 
+                                 placeholder="Search members, fees, attendance...",
+                                 value=st.session_state.search_query)
+    
+    if search_query and len(search_query) >= 2:
+        st.session_state.search_query = search_query
+        # Search in members
+        try:
+            all_members = db.get_members(gym_id=gym_id)
+            search_lower = search_query.lower()
+            
+            results = []
+            for m in all_members[:50]:  # Limit to 50 results
+                if (search_lower in (m.full_name or "").lower() or 
+                    search_lower in (m.serial_number or "").lower() or
+                    search_lower in (m.phone or "").lower()):
+                    results.append({
+                        "type": "👤 Member",
+                        "name": m.full_name,
+                        "serial": m.serial_number,
+                        "phone": m.phone,
+                        "id": m.id,
+                        "status": m.status
+                    })
+            
+            # Search in fees (recent)
+            if len(results) < 15:
+                try:
+                    today = date.today()
+                    month_start = today.replace(day=1)
+                    fees = db.get_fee_records(gym_id=gym_id, date_from=month_start, date_to=today)
+                    for f in fees[:30]:
+                        member = db.get_member(f.member_id) if hasattr(db, 'get_member') else None
+                        member_name = member.full_name if member else "Unknown"
+                        if search_lower in member_name.lower() or search_lower in str(f.amount):
+                            results.append({
+                                "type": "💰 Fee",
+                                "name": member_name,
+                                "amount": f"PKR {f.amount:,.0f}",
+                                "date": f.payment_date,
+                                "id": f.id
+                            })
+                except:
+                    pass
+            
+            st.session_state.search_results = results[:20]
+            
+            # Display results
+            if results:
+                st.markdown(f"""
+                <div style="background:rgba(20,20,30,0.8);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px 16px;margin:4px 0 12px 0;backdrop-filter:blur(12px);max-height:300px;overflow-y:auto;">
+                    <div style="font-size:11px;color:#64748B;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">🔍 Search Results ({len(results)} found)</div>
+                """, unsafe_allow_html=True)
+                
+                for r in results[:10]:
+                    if r["type"] == "👤 Member":
+                        st.markdown(f"""
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;transition:all 0.2s;border-bottom:1px solid rgba(255,255,255,0.04);" 
+                             onmouseover="this.style.background='rgba(124,58,237,0.08)'" 
+                             onmouseout="this.style.background='transparent'">
+                            <div>
+                                <span style="font-weight:600;color:#FFFFFF;">{r['name']}</span>
+                                <span style="font-size:11px;color:#94A3B8;margin-left:8px;">{r['serial']}</span>
+                            </div>
+                            <div>
+                                <span style="font-size:11px;color:#64748B;">{r['phone'] or '—'}</span>
+                                <span style="font-size:10px;color:{'#10B981' if r['status'] == 'Active' else '#EF4444'};margin-left:8px;">{r['status']}</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;border-bottom:1px solid rgba(255,255,255,0.04);">
+                            <div>
+                                <span style="color:#94A3B8;font-size:11px;">{r['type']}</span>
+                                <span style="font-weight:600;color:#FFFFFF;margin-left:8px;">{r['name']}</span>
+                            </div>
+                            <div style="font-size:13px;color:#FFC947;font-weight:600;">{r.get('amount', '')}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                if len(results) > 10:
+                    st.markdown(f"""
+                    <div style="text-align:center;font-size:11px;color:#64748B;padding:6px 0;">
+                        + {len(results) - 10} more results
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+            elif search_query and len(search_query) >= 2:
+                st.markdown(f"""
+                <div style="background:rgba(20,20,30,0.6);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:12px 16px;margin:4px 0 12px 0;text-align:center;color:#64748B;font-size:13px;">
+                    🔍 No results found for "<strong style="color:#94A3B8;">{search_query}</strong>"
+                </div>
+                """, unsafe_allow_html=True)
+        except Exception as e:
+            pass
+
+# ── Render Global Search ──
+# Search bar will be shown below the main content area
+# We'll render it at the top of each page via the page router
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -234,10 +488,9 @@ with st.sidebar:
 
     st.divider()
 
-    # ── SIDEBAR NAVIGATION BUTTONS FIX - Theme-aware ──────────────────────────
+    # ── SIDEBAR NAVIGATION BUTTONS FIX ──────────────────────────────────────────
     st.markdown("""
     <style>
-        /* Sidebar Navigation Buttons - Force visibility in ALL themes */
         section[data-testid="stSidebar"] .stButton > button {
             background: rgba(255, 255, 255, 0.08) !important;
             color: #FFFFFF !important;
@@ -263,7 +516,6 @@ with st.sidebar:
             color: #FFFFFF !important;
             box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3) !important;
         }
-        /* Force ALL text white in sidebar buttons */
         section[data-testid="stSidebar"] .stButton > button span,
         section[data-testid="stSidebar"] .stButton > button p,
         section[data-testid="stSidebar"] .stButton > button div,
@@ -271,7 +523,6 @@ with st.sidebar:
         section[data-testid="stSidebar"] .stButton > button .st-emotion-cache-1wbqy5l {
             color: #FFFFFF !important;
         }
-        /* Fix for active/selected state */
         section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
             background: linear-gradient(135deg, #7C3AED, #4F46E5) !important;
             border-color: #7C3AED !important;
@@ -281,7 +532,6 @@ with st.sidebar:
         section[data-testid="stSidebar"] .stButton > button[kind="primary"] p {
             color: #FFFFFF !important;
         }
-        /* Fix for nav-btn class */
         .nav-btn button, .nav-btn-active button {
             background: rgba(255, 255, 255, 0.08) !important;
             color: #FFFFFF !important;
@@ -311,7 +561,7 @@ with st.sidebar:
         },
         "General Management": {
             "Dashboard":         ("📊", "Dashboard"),
-         "Gym Setup":         ("⚙️", "Gym Setup"),
+             "BMI CALCULATOR":    ("📄🏋🏻‍♂️", "BMI CALCULATOR"),         "Gym Setup":         ("⚙️", "Gym Setup"),
          "Settings":          ("🧩", "Settings"),
         },
         "Member & Identity": {
@@ -345,6 +595,27 @@ with st.sidebar:
     }
 
     current_page = st.session_state.get("page", "Dashboard")
+
+    # ═══════════════════════════════════════════════════════════
+    # ⏳ PAGE CHANGE LOADING OVERLAY
+    # ═══════════════════════════════════════════════════════════
+    # ⏳ PAGE CHANGE LOADING (auto-clears when page renders)
+    # ═══════════════════════════════════════════════════════════
+    if "last_page" not in st.session_state:
+        st.session_state.last_page = current_page
+
+    _loading_placeholder = None
+    if st.session_state.last_page != current_page:
+        st.session_state.last_page = current_page
+        try:
+            from gym_pages.ai_assistant import show_loading_overlay
+            _loading_placeholder = st.empty()
+            with _loading_placeholder:
+                show_loading_overlay(f"Loading {current_page}...")
+        except Exception:
+            _loading_placeholder = None
+
+
     for section_label, pages in nav_sections.items():
         visible = [k for k in pages if k in allowed]
         if not visible:
@@ -359,14 +630,15 @@ with st.sidebar:
             is_active   = current_page == page_key
             btn_style   = "nav-btn-active" if is_active else "nav-btn"
             st.markdown(f'<div class="{btn_style}">', unsafe_allow_html=True)
-            if st.button(f"{icon}  {label}", key=f"nav_{page_key}", use_container_width=True):
+            # FIXED: use_container_width changed to width='stretch'
+            if st.button(f"{icon}  {label}", key=f"nav_{page_key}", width='stretch'):
                 st.session_state["page"] = page_key
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # Alert badges — cached, not re-queried every render
+    # Alert badges
     _bdays, _absent, _low_s = _cached_sidebar_alerts(gym_id)
     if _bdays:
         st.markdown(f'<div style="background:#1E3A1E;border-radius:6px;padding:0.4rem 0.6rem;'
@@ -381,7 +653,7 @@ with st.sidebar:
                     f'font-size:0.75rem;color:#FBBF24;margin-bottom:0.3rem;">📦 {len(_low_s)} low stock items</div>',
                     unsafe_allow_html=True)
 
-    # Sidebar stats — cached
+    # Sidebar stats
     stats = _cached_stats(gym_id)
     st.markdown("""<div style="font-size:0.65rem;color:#64748B;text-transform:uppercase;
         letter-spacing:0.08em;margin:0.5rem 0 0.3rem;">Revenue Analytics</div>""",
@@ -409,10 +681,15 @@ with st.sidebar:
     )
 
     st.divider()
-    if st.button("🚪 Sign Out", use_container_width=True):
+    # FIXED: use_container_width changed to width='stretch'
+    if st.button("🚪 Sign Out", width='stretch'):
         auth.logout()
 
-# ── Page router — lazy imports (each module loaded only when first visited) ────
+# ── ★★★ RENDER GLOBAL SEARCH AT TOP OF PAGE ★★★ ────────────────────────────
+# This will render the search bar at the top of the main content area
+render_global_search()
+
+# ── Page router — lazy imports ──────────────────────────────────────────────────
 page = st.session_state.get("page", "Dashboard")
 
 if not auth.can_access(page):
@@ -502,16 +779,27 @@ elif page == "User Management":
     user_management.render(user_id)
 
 # AI
-elif page == "AI Assistant":
-    from gym_pages import ai_assistant
-    ai_assistant.render(gid, role, username)
-
-# Member Portal (staff/admin view)
+# Member Portal
 elif page == "Member Portal":
     from gym_pages import member_portal
     member_portal.render()
+
+elif page == "AI Assistant":
+    from gym_pages import ai_assistant
+    ai_assistant.render(gid, role, username)
 
 # ── Unknown page fallback ──────────────────────────────────────────────────────
 else:
     st.error(f"❌ Page '{page}' not found.")
     st.info("Please select a page from the sidebar.")
+
+# ═══════════════════════════════════════════════════════════
+# ⏳ CLEAR LOADING OVERLAY (runs at end of every render)
+# ═══════════════════════════════════════════════════════════
+if "last_page" in st.session_state:
+    if "_loading_placeholder" in dir():
+        try:
+            _loading_placeholder.empty()
+        except Exception:
+            pass
+

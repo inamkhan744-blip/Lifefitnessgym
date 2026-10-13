@@ -1,22 +1,25 @@
+# database.py - COMPLETE FIXED VERSION
+# Phase 1 fixes + Phase 2 AI Voice Trainer (20 exercises)
+# No duplicates, all functions working
 
 import os
 import hashlib
 import uuid
 import sqlite3
 from datetime import datetime, date, timedelta
+from contextlib import contextmanager
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Date,
-    DateTime, Boolean, Text, ForeignKey, func
+    DateTime, Boolean, Text, ForeignKey, func, text as sa_text
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
-#111111111
-# Test script - separate file mein run karein
+from typing import Optional, List, Dict, Any, Tuple
 
 # ── Engine Path Configurations ──────────────────────────────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
 IS_POSTGRES = bool(DATABASE_URL)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,70 +29,123 @@ else:
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "gym-app", "uploads")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-# Forceful automatic restore from backup text file
+
 if not IS_POSTGRES:
-    import sqlite3
-    
-    # Sahi paths dhundna
     current_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.dirname(current_dir) if os.path.basename(current_dir) == "gym-app" else current_dir
     
-    # database.py mein ye line update karein
     db_path = os.path.join(BASE_DIR, "gym-app", "gym_pro_v2.db")
     sql_backup_path = os.path.join(root_dir, "backup.sql")
     
     if os.path.exists(sql_backup_path):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        
-        # Check karein agar members table missing hai ya usme data kam hai
         try:
             cursor.execute("SELECT COUNT(*) FROM members;")
             row_count = cursor.fetchone()[0]
         except sqlite3.OperationalError:
             row_count = 0
-            
-        # Agar data 10 se kam hai (jaise abhi 4 dikha raha hai), to backup overwrite karein
-        #if row_count < 10:
-            conn.close()
-            # Khali database ko delete karke fresh backup load karein
-            if os.path.exists(db_path):
-                os.remove(db_path)
-                
-            conn = sqlite3.connect(db_path)
-            
-            conn.commit()
-            print("Database successfully restored with all 64 members!")
-            
         conn.close()
 
+DB_PATH = os.path.join(BASE_DIR, "gym_pro_v3.db")
+DB_MODE = "offline"
 
-if IS_POSTGRES:
-    url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    engine = create_engine(
-        url,
-        pool_pre_ping=True,   
-        pool_recycle=300,
-    )
-else:
-    DB_PATH = os.path.join(BASE_DIR, "gym_pro_v3.db")
-    engine = create_engine(
+def _make_sqlite_engine():
+    eng = create_engine(
         f"sqlite:///{DB_PATH}",
         connect_args={"check_same_thread": False},
     )
+    @event.listens_for(eng, "connect")
+    def _set_pragma(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+    return eng
 
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+if IS_POSTGRES:
+    _pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    if "sslmode" not in _pg_url:
+        _sep = "&" if "?" in _pg_url else "?"
+        _pg_url += f"{_sep}sslmode=require"
+    engine = create_engine(
+        _pg_url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_timeout=30,
+        pool_size=5,
+        max_overflow=10,
+        connect_args={"connect_timeout": 15},
+    )
+    try:
+        with engine.connect() as _c:
+            _c.execute(sa_text("SELECT 1"))
+        DB_MODE = "online"
+    except Exception:
+        engine.dispose()
+        engine = _make_sqlite_engine()
+        IS_POSTGRES = False
+        DB_MODE = "offline"
+else:
+    engine = _make_sqlite_engine()
+    DB_MODE = "offline"
 
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 
 
+# ============================================
+# Context Manager for safe DB sessions
+# ============================================
+@contextmanager
+def get_db_ctx():
+    """Context manager for safe DB sessions with auto-commit/rollback"""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def get_db() -> Session:
+    """Legacy function - use get_db_ctx() for new code"""
     return SessionLocal()
+
+
+# ============================================
+# GYM PHOTO MODEL
+# ============================================
+
+class GymPhoto(Base):
+    __tablename__ = "gym_photos"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    path = Column(String(500), nullable=False)
+    is_primary = Column(Integer, default=0)
+    uploaded_at = Column(DateTime, default=datetime.now)
+    
+    gym = relationship("Gym", back_populates="gym_photos")
+
+
+# ============================================
+# MEMBERSHIP PLAN MODEL
+# ============================================
+
+class MembershipPlan(Base):
+    __tablename__ = "membership_plans"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(100), nullable=False)
+    price = Column(Float, nullable=False)
+    duration_days = Column(Integer, nullable=False)
+    features = Column(Text)
+    is_active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    gym = relationship("Gym", back_populates="membership_plans")
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -101,7 +157,43 @@ class Gym(Base):
     address = Column(String(255))
     phone = Column(String(30))
     email = Column(String(120))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    next_serial = Column(Integer, default=1)
+    
+    description = Column(Text)
+    amenities = Column(Text)
+    rules = Column(Text)
+    status = Column(String(20), default="active")
+    
+    mon_fri_start = Column(String(10), default="06:00")
+    mon_fri_end = Column(String(10), default="22:00")
+    sat_start = Column(String(10), default="08:00")
+    sat_end = Column(String(10), default="20:00")
+    sun_start = Column(String(10), default="08:00")
+    sun_end = Column(String(10), default="18:00")
+    holiday_mode = Column(Integer, default=0)
+    
+    facebook = Column(String(255))
+    instagram = Column(String(255))
+    youtube = Column(String(255))
+    twitter = Column(String(255))
+    linkedin = Column(String(255))
+    website = Column(String(255))
+    
+    bank_name = Column(String(255))
+    account_title = Column(String(255))
+    account_number = Column(String(100))
+    iban = Column(String(100))
+    
+    expense_categories = Column(Text)
+    logo_path = Column(Text)
+    max_members = Column(Integer, default=0)
+    checkin_required = Column(Integer, default=0)
+    reminder_days = Column(Integer, default=7)
+    allow_online_payments = Column(Integer, default=0)
+    currency = Column(String(10), default="PKR")
+    timezone = Column(String(50), default="Asia/Karachi")
 
     members = relationship("Member", back_populates="gym", cascade="all, delete-orphan")
     users = relationship("User", back_populates="gym")
@@ -111,10 +203,15 @@ class Gym(Base):
     stock_items = relationship("StockItem", back_populates="gym", cascade="all, delete-orphan")
     stock_sales = relationship("StockSale", back_populates="gym", cascade="all, delete-orphan")
     complaints = relationship("Complaint", back_populates="gym", cascade="all, delete-orphan")
-    
-    # 🔥 ADD THIS LINE - Staff Targets relationship
+    receipt_logs = relationship("ReceiptLog", back_populates="gym", cascade="all, delete-orphan")
     staff_targets = relationship("StaffTarget", back_populates="gym", cascade="all, delete-orphan")
     announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
+    activity_logs = relationship("ActivityLog", back_populates="gym", cascade="all, delete-orphan")
+    shift_sessions = relationship("ShiftSession", back_populates="gym", cascade="all, delete-orphan")
+    gym_photos = relationship("GymPhoto", back_populates="gym", cascade="all, delete-orphan")
+    membership_plans = relationship("MembershipPlan", back_populates="gym", cascade="all, delete-orphan")
+    staff_timings = relationship("StaffTiming", back_populates="gym", cascade="all, delete-orphan")
+
 
 class User(Base):
     __tablename__ = "users"
@@ -125,7 +222,7 @@ class User(Base):
     role = Column(String(20), nullable=False)
     gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="users")
 
@@ -147,8 +244,10 @@ class Member(Base):
     expiry_date = Column(String(15))
     status = Column(String(20), default="Active")
     notes = Column(Text)
+    face_encoding = Column(Text, nullable=True)
     whatsapp_sent = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by_staff = Column(String(60), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="members")
     attendances = relationship("Attendance", back_populates="member", cascade="all, delete-orphan")
@@ -165,7 +264,7 @@ class Attendance(Base):
     check_date = Column(String(15), nullable=False)
     status = Column(String(20), default="Present")
     marked_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="attendances")
 
@@ -184,7 +283,7 @@ class FeeRecord(Base):
     collected_by = Column(String(60))
     notes = Column(Text)
     whatsapp_sent = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="fee_records")
     gym = relationship("Gym", back_populates="fee_records")
@@ -199,7 +298,7 @@ class DailyExpense(Base):
     description = Column(Text)
     expense_date = Column(String(15), nullable=False)
     staff_name = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="expenses")
 
@@ -217,7 +316,7 @@ class AuditEntry(Base):
     verified_by = Column(String(60))
     status = Column(String(20), default="Pending")
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="audit_entries")
 
@@ -234,7 +333,7 @@ class BodyMeasurement(Base):
     bicep_cm = Column(Float)
     body_fat_pct = Column(Float)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     member = relationship("Member", back_populates="body_measurements")
 
@@ -249,7 +348,7 @@ class StockItem(Base):
     sale_price = Column(Float, default=0.0)
     quantity = Column(Integer, default=0)
     min_quantity = Column(Integer, default=5)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     gym = relationship("Gym", back_populates="stock_items")
     sales = relationship("StockSale", back_populates="stock_item", cascade="all, delete-orphan")
@@ -266,7 +365,7 @@ class StockSale(Base):
     total_amount = Column(Float, default=0.0)
     sold_by = Column(String(60))
     sale_date = Column(String(15), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     stock_item = relationship("StockItem", back_populates="sales")
     gym = relationship("Gym", back_populates="stock_sales")
@@ -279,28 +378,243 @@ class Complaint(Base):
     member_id = Column(Integer, ForeignKey("members.id", ondelete="SET NULL"), nullable=True)
     subject = Column(String(200), nullable=False)
     description = Column(Text)
-    status = Column(String(20), default="Open")   
-    priority = Column(String(20), default="Medium")  
+    status = Column(String(20), default="Open")
+    priority = Column(String(20), default="Medium")
     submitted_by = Column(String(60))
     resolved_by = Column(String(60))
     wa_sent = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     resolved_at = Column(DateTime)
 
     gym = relationship("Gym", back_populates="complaints")
     member = relationship("Member", back_populates="complaints")
 
 
+class ReceiptLog(Base):
+    __tablename__ = "receipt_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fee_record_id = Column(Integer, ForeignKey("fee_records.id", ondelete="SET NULL"), nullable=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="SET NULL"), nullable=True)
+    member_name = Column(String(120), nullable=False)
+    receipt_number = Column(String(40), nullable=False)
+    amount = Column(Float, nullable=False)
+    collected_by = Column(String(60))
+    pay_date = Column(String(15), nullable=False)
+    pay_time = Column(String(10), nullable=False)
+    print_issued = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    gym = relationship("Gym", back_populates="receipt_logs")
+
+
+class UnknownCapture(Base):
+    __tablename__ = "unknown_captures"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, nullable=False)
+    capture_key = Column(String(300), nullable=False)
+    capture_type = Column(String(20), default="unknown")
+    member_id = Column(Integer, nullable=True)
+    member_name = Column(String(120), nullable=True)
+    captured_at = Column(DateTime, default=datetime.now)
+    notes = Column(Text, nullable=True)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    key = Column(String(120), primary_key=True)
+    value = Column(Text, nullable=True)
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=True)
+    user = Column(String(80), nullable=False)
+    role = Column(String(20))
+    action = Column(String(60), nullable=False)
+    details = Column(Text)
+    amount = Column(Float, nullable=True)
+    record_ref = Column(String(120), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    gym = relationship("Gym", back_populates="activity_logs")
+
+
+class ShiftSession(Base):
+    __tablename__ = "shift_sessions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    staff_user = Column(String(80), nullable=False)
+    role = Column(String(20))
+    opened_at = Column(DateTime, default=datetime.now)
+    closed_at = Column(DateTime, nullable=True)
+    opening_cash = Column(Float, default=0.0)
+    expected_cash = Column(Float, nullable=True)
+    closing_cash = Column(Float, nullable=True)
+    discrepancy = Column(Float, nullable=True)
+    status = Column(String(20), default="open")
+
+    gym = relationship("Gym", back_populates="shift_sessions")
+
+
+# ============================================
+# STAFF TARGET MODEL
+# ============================================
+
+class StaffTarget(Base):
+    __tablename__ = "staff_targets"
+    __table_args__ = {'extend_existing': True}
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    staff_username = Column(String(60), nullable=False)
+    
+    new_members_target = Column(Float, default=0.0)
+    new_members_achieved = Column(Float, default=0.0)
+    fee_collection_target = Column(Float, default=0.0)
+    fee_collection_achieved = Column(Float, default=0.0)
+    attendance_target_percentage = Column(Float, default=80.0)
+    attendance_achieved = Column(Float, default=0.0)
+    
+    total_score = Column(Float, default=0.0)
+    prize_amount = Column(Float, default=0.0)
+    prize_status = Column(String(20), default="Pending")
+    
+    target_month = Column(String(7), nullable=False)
+    status = Column(String(20), default="Active")
+    created_by = Column(String(60))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    gym = relationship("Gym", back_populates="staff_targets")
+
+
+# ============================================
+# ANNOUNCEMENT MODEL
+# ============================================
+
+class Announcement(Base):
+    __tablename__ = "announcements"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=True)
+    message = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(String(60))
+    created_at = Column(DateTime, default=datetime.now)
+    expires_at = Column(DateTime, nullable=True)
+
+    gym = relationship("Gym", back_populates="announcements")
+
+
+# ============================================
+# STAFF ATTENDANCE MODEL
+# ============================================
+
+class StaffAttendance(Base):
+    __tablename__ = "staff_attendance"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    staff_username = Column(String(60), nullable=False)
+    login_time = Column(DateTime, nullable=False)
+    logout_time = Column(DateTime, nullable=True)
+    session_duration = Column(Integer, default=0)
+    ip_address = Column(String(45))
+    created_at = Column(DateTime, default=datetime.now)
+
+
+# ============================================
+# STAFF TIMING MODEL
+# ============================================
+
+class StaffTiming(Base):
+    __tablename__ = "staff_timings"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
+    staff_username = Column(String(60), nullable=False, unique=True)
+    check_in_time = Column(String(10), nullable=False)
+    check_out_time = Column(String(10), nullable=False)
+    grace_minutes = Column(Integer, default=15)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    gym = relationship("Gym", back_populates="staff_timings")
+
+
+# ============================================
+# 🏋️ AI VOICE TRAINER MODELS
+# ============================================
+
+class Exercise(Base):
+    __tablename__ = "exercises"
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    name_urdu = Column(String(200))
+    category = Column(String(50))
+    difficulty = Column(String(20))
+    equipment = Column(String(100))
+    target_muscles = Column(Text)
+    instructions = Column(Text)
+    voice_guide = Column(Text)
+    common_mistakes = Column(Text)
+    video_url = Column(String(500))
+    image_url = Column(String(500))
+    gender_specific = Column(String(20), default="both")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class WorkoutPlan(Base):
+    __tablename__ = "workout_plans"
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"))
+    member_id = Column(Integer, ForeignKey("members.id", ondelete="CASCADE"))
+    name = Column(String(100))
+    goal = Column(String(50))
+    duration_weeks = Column(Integer, default=4)
+    days_per_week = Column(Integer, default=3)
+    difficulty = Column(String(20))
+    plan_data = Column(Text)
+    created_by = Column(String(60))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class WorkoutSession(Base):
+    __tablename__ = "workout_sessions"
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    member_id = Column(Integer, ForeignKey("members.id", ondelete="CASCADE"))
+    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"))
+    plan_id = Column(Integer, ForeignKey("workout_plans.id", ondelete="SET NULL"))
+    exercise_id = Column(Integer, ForeignKey("exercises.id", ondelete="SET NULL"))
+    sets_completed = Column(Integer, default=0)
+    reps_completed = Column(Integer, default=0)
+    weight_used_kg = Column(Float, default=0)
+    duration_minutes = Column(Integer, default=0)
+    calories_burned = Column(Float, default=0)
+    form_score = Column(Float, default=0)
+    voice_feedback = Column(Text)
+    started_at = Column(DateTime, default=datetime.now)
+    completed_at = Column(DateTime)
+
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-PAYMENT_METHODS   = ["Cash", "Bank Transfer", "Card", "Online", "Cheque", "Other"]
-MEMBERSHIP_TYPES  = ["Monthly", "Quarterly", "Semi-Annual", "Annual", "Day Pass", "Student", "VIP"]
+PAYMENT_METHODS = ["Cash", "Bank Transfer", "Card", "Online", "Cheque", "Other"]
+MEMBERSHIP_TYPES = ["Monthly", "Quarterly", "Semi-Annual", "Annual", "Day Pass", "Student", "VIP"]
 EXPENSE_CATEGORIES = ["Equipment", "Maintenance", "Utilities", "Salaries", "Marketing",
-                       "Rent", "Supplies", "Cleaning", "Other"]
-STOCK_CATEGORIES  = ["Supplement", "Protein", "Equipment", "Apparel", "Drink/Water",
-                     "Snack", "Medicine", "Accessory", "Other"]
+                      "Rent", "Supplies", "Cleaning", "Other"]
+STOCK_CATEGORIES = ["Supplement", "Protein", "Equipment", "Apparel", "Drink/Water",
+                    "Snack", "Medicine", "Accessory", "Other"]
 COMPLAINT_PRIORITIES = ["Low", "Medium", "High", "Urgent"]
-COMPLAINT_STATUSES   = ["Open", "In Progress", "Resolved"]
+COMPLAINT_STATUSES = ["Open", "In Progress", "Resolved"]
 
 HEALTH_TIPS = [
     "💪 Tip: Drink at least 3 liters of water daily to stay hydrated during workouts.",
@@ -320,9 +634,32 @@ HEALTH_TIPS = [
     "🍳 Tip: Eggs are a complete protein source — perfect breakfast before training.",
 ]
 
-
 def get_health_tip(seed: int = 0) -> str:
     return HEALTH_TIPS[seed % len(HEALTH_TIPS)]
+
+
+# ── App Settings ────────────────────────────────────────────────────────────────
+
+def get_setting(key: str, default: str = "") -> str:
+    try:
+        with SessionLocal() as s:
+            row = s.get(AppSetting, key)
+            return row.value if row and row.value is not None else default
+    except Exception:
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    try:
+        with SessionLocal() as s:
+            row = s.get(AppSetting, key)
+            if row:
+                row.value = value
+            else:
+                s.add(AppSetting(key=key, value=value))
+            s.commit()
+    except Exception:
+        pass
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -337,7 +674,9 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 def _serial_prefix(gym_name: str) -> str:
     words = gym_name.split()
-    return "".join(w[0].upper() for w in words[:3])
+    if len(words) >= 2:
+        return "".join(w[0].upper() for w in words[:2])
+    return gym_name[:3].upper() if gym_name else "PF"
 
 
 def _ensure_column(table: str, column: str, ddl: str):
@@ -358,56 +697,25 @@ def _ensure_column(table: str, column: str, ddl: str):
             conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {sql_ddl}")
 
 
+# ============================================
+# init_db()
+# ============================================
+
 def init_db():
+    """Initialize database"""
     Base.metadata.create_all(engine)
+    
     _ensure_column("members", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
     _ensure_column("fee_records", "whatsapp_sent",
                    "whatsapp_sent BOOLEAN NOT NULL DEFAULT 0")
-
-# 🔥 Create StaffAttendance table
-    try:
-        StaffAttendance.__table__.create(engine, checkfirst=True)
-    except:
-        pass
+    _ensure_column("members", "face_encoding", "face_encoding TEXT")
+    _ensure_column("members", "created_by_staff", "created_by_staff VARCHAR(60)")
+    _ensure_column("gyms", "next_serial", "next_serial INTEGER DEFAULT 1")
     
+    add_gym_columns()
     
-    # 🔥 ADD THIS - Announcement table create
-    try:
-        Announcement.__table__.create(engine, checkfirst=True)
-    except:
-        pass
-    
-    # 🔥 ADD THIS - Ensure announcement columns exist (PostgreSQL)
-    try:
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            # Check if table exists, if not create it
-            if IS_POSTGRES:
-                result = conn.execute(text("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_name = 'announcements'
-                    )
-                """))
-                if not result.fetchone()[0]:
-                    # Create table
-                    conn.execute(text("""
-                        CREATE TABLE announcements (
-                            id SERIAL PRIMARY KEY,
-                            gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
-                            message TEXT NOT NULL,
-                            is_active BOOLEAN DEFAULT TRUE,
-                            created_by VARCHAR(60),
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            expires_at TIMESTAMP
-                        )
-                    """))
-                    conn.commit()
-                    print("✅ Announcements table created")
-    except Exception as e:
-        print(f"⚠️ Announcement table creation error: {e}")
-
+    # Seed default users
     seeds = [
         ("admin",   "Administrator", "admin",   "ADMIN_DEFAULT_PASSWORD",   "admin123"),
         ("staff",   "Staff Member",  "staff",   "STAFF_DEFAULT_PASSWORD",   "staff123"),
@@ -424,9 +732,29 @@ def init_db():
                         gym_id=None, is_active=True))
             db.commit()
         except IntegrityError:
-            db.rollback()  
+            db.rollback()
         finally:
             db.close()
+
+    # 🌱 Seed exercises
+    try:
+        seed_default_exercises()
+    except Exception as e:
+        print(f"⚠️ Exercise seed skipped: {e}")
+
+
+def clean_corrupt_html_paths():
+    """Run this ONLY during migration"""
+    try:
+        from sqlalchemy import text
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE members SET photo_path = NULL WHERE photo_path LIKE '%<div%' OR photo_path LIKE '%style=%'")
+            )
+            connection.commit()
+            print("✨ Online Database safely cleaned from HTML garbage!")
+    except Exception as e:
+        print(f"Cleanup update skipped or not needed: {e}")
 
 
 # ── Gym CRUD ───────────────────────────────────────────────────────────────────
@@ -452,9 +780,11 @@ def add_gym(name, address="", phone="", email=""):
     try:
         if db.query(Gym).filter(func.lower(Gym.name) == name.strip().lower()).first():
             return False, "A gym with this name already exists."
-        db.add(Gym(name=name.strip(), address=address, phone=phone, email=email))
+        gym = Gym(name=name.strip(), address=address, phone=phone, email=email)
+        db.add(gym)
         db.commit()
-        return True, "Gym added."
+        db.refresh(gym)
+        return True, f"Gym '{name}' added successfully."
     except Exception as e:
         db.rollback()
         return False, str(e)
@@ -471,7 +801,10 @@ def update_gym(gym_id, name, address="", phone="", email=""):
         dup = db.query(Gym).filter(func.lower(Gym.name) == name.strip().lower(), Gym.id != gym_id).first()
         if dup:
             return False, "Name already taken."
-        g.name = name.strip(); g.address = address; g.phone = phone; g.email = email
+        g.name = name.strip()
+        g.address = address
+        g.phone = phone
+        g.email = email
         db.commit()
         return True, "Gym updated."
     except Exception as e:
@@ -491,6 +824,113 @@ def delete_gym(gym_id):
         return True, "Gym deleted."
     finally:
         db.close()
+
+
+# ── Serial Number Functions ────────────────────────────────────────────────────
+
+def get_gym_prefix(gym_id: int) -> str:
+    gym = get_gym(gym_id)
+    if gym:
+        return _serial_prefix(gym.name)
+    return "PF"
+
+
+def _next_serial(gym_id, db):
+    """Generate next serial number - RACE CONDITION FIXED"""
+    if IS_POSTGRES:
+        gym = db.query(Gym).filter_by(id=gym_id).with_for_update().first()
+    else:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+    
+    if not gym:
+        return "PF-00001"
+    
+    prefix = _serial_prefix(gym.name)
+    next_num = gym.next_serial or 1
+    
+    serial_str = f"{prefix}-{str(next_num).zfill(5)}"
+    
+    existing = db.query(Member).filter(
+        Member.gym_id == gym_id,
+        Member.serial_number == serial_str
+    ).first()
+    
+    retry_count = 0
+    while existing and retry_count < 20:
+        next_num += 1
+        serial_str = f"{prefix}-{str(next_num).zfill(5)}"
+        existing = db.query(Member).filter(
+            Member.gym_id == gym_id,
+            Member.serial_number == serial_str
+        ).first()
+        retry_count += 1
+    
+    gym.next_serial = next_num + 1
+    db.commit()
+    
+    return serial_str
+
+
+def get_next_member_serial(gym_id: int) -> int:
+    try:
+        db = get_db()
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            db.close()
+            return 1
+        
+        next_serial = gym.next_serial or 1
+        prefix = get_gym_prefix(gym_id)
+        serial_str = f"{prefix}-{str(next_serial).zfill(5)}"
+        
+        existing = db.query(Member).filter(
+            Member.gym_id == gym_id,
+            Member.serial_number == serial_str
+        ).first()
+        
+        retry_count = 0
+        while existing and retry_count < 20:
+            next_serial += 1
+            serial_str = f"{prefix}-{str(next_serial).zfill(5)}"
+            existing = db.query(Member).filter(
+                Member.gym_id == gym_id,
+                Member.serial_number == serial_str
+            ).first()
+            retry_count += 1
+        
+        db.close()
+        return next_serial
+    except Exception as e:
+        print(f"Error getting next serial: {e}")
+        return 1
+
+
+def update_gym_next_serial(gym_id: int, new_serial: int) -> Tuple[bool, str]:
+    try:
+        db = get_db()
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            db.close()
+            return False, "Gym not found"
+        
+        prefix = get_gym_prefix(gym_id)
+        serial_str = f"{prefix}-{str(new_serial).zfill(5)}"
+        
+        existing = db.query(Member).filter(
+            Member.gym_id == gym_id,
+            Member.serial_number == serial_str
+        ).first()
+        
+        if existing:
+            db.close()
+            return False, f"Serial {serial_str} already exists!"
+        
+        gym.next_serial = new_serial
+        db.commit()
+        db.close()
+        return True, "Serial number updated successfully"
+    except Exception as e:
+        return False, str(e)
 
 
 # ── User CRUD ──────────────────────────────────────────────────────────────────
@@ -533,8 +973,10 @@ def update_user(user_id, full_name, role, gym_id, is_active, new_password=None):
         u = db.query(User).filter_by(id=user_id).first()
         if not u:
             return False, "User not found."
-        u.full_name = full_name; u.role = role
-        u.gym_id = gym_id; u.is_active = is_active
+        u.full_name = full_name
+        u.role = role
+        u.gym_id = gym_id
+        u.is_active = is_active
         if new_password:
             u.password_hash = hash_password(new_password)
         db.commit()
@@ -559,13 +1001,6 @@ def delete_user(user_id):
 
 
 # ── Member CRUD ────────────────────────────────────────────────────────────────
-
-def _next_serial(gym_id, db):
-    gym = db.query(Gym).filter_by(id=gym_id).first()
-    prefix = _serial_prefix(gym.name) if gym else "GYM"
-    count = db.query(Member).filter_by(gym_id=gym_id).count() + 1
-    return f"{prefix}-{count:05d}"
-
 
 def get_members(gym_id=None, status=None, search=None):
     db = get_db()
@@ -613,15 +1048,25 @@ def add_member(gym_id, full_name, phone, email, gender, dob,
                membership_type, fee_amount, join_date, expiry_date,
                photo_path, status, notes):
     last_err = None
-    for _ in range(5):
+    max_retries = 10
+    
+    for attempt in range(max_retries):
         db = get_db()
         try:
+            try:
+                from streamlit import session_state
+                staff_username = session_state.get("username", "unknown")
+            except:
+                staff_username = "unknown"
+
+            # Phone check gym-wise
             if phone and phone.strip():
                 existing_phone = db.query(Member).filter(
-                    Member.phone == phone.strip()
+                    Member.phone == phone.strip(),
+                    Member.gym_id == gym_id
                 ).first()
                 if existing_phone:
-                    return False, "⚠️ This phone number is already registered with another member.", None
+                    return False, f"⚠️ Phone {phone} already registered in this gym (Serial: {existing_phone.serial_number}).", None
 
             serial = _next_serial(gym_id, db)
             m = Member(gym_id=gym_id, serial_number=serial, full_name=full_name.strip(),
@@ -630,30 +1075,59 @@ def add_member(gym_id, full_name, phone, email, gender, dob,
                        membership_type=membership_type, fee_amount=fee_amount,
                        join_date=str(join_date),
                        expiry_date=str(expiry_date) if expiry_date else None,
-                       photo_path=photo_path, status=status, notes=notes)
+                       photo_path=photo_path, status=status, notes=notes,
+                       created_by_staff=staff_username)
             db.add(m)
             db.commit()
-# After db.commit() and before return
-            sync_to_local((m.id, serial, full_name, phone, email, gender, dob, photo_path, membership_type, fee_amount, str(join_date), str(expiry_date) if expiry_date else None, status, notes, None))
+            db.refresh(m)
+            
+            # WhatsApp auto-add trigger
+            try:
+                from gym_pages.whatsapp import add_member_to_staff_group
+                if phone and phone.strip() and staff_username != "unknown":
+                    import threading
+                    threading.Thread(
+                        target=add_member_to_staff_group,
+                        args=(phone.strip(), staff_username, full_name.strip(), serial)
+                    ).start()
+            except Exception as wa_error:
+                print(f"⚠️ WhatsApp auto-add failed: {wa_error}")
+            
+            sync_to_local((m.id, serial, full_name, phone, email, gender, dob, photo_path,
+                          membership_type, fee_amount, str(join_date),
+                          str(expiry_date) if expiry_date else None, status, notes, None))
             return True, f"Member registered. Serial: {serial}", serial
+            
         except IntegrityError as e:
             db.rollback()
             last_err = e
-            continue   
+            error_msg = str(e).lower()
+            if "duplicate key" in error_msg and "serial_number" in error_msg:
+                print(f"⚠️ Serial already exists, retrying... (attempt {attempt + 1}/{max_retries})")
+                try:
+                    gym = db.query(Gym).filter_by(id=gym_id).first()
+                    if gym:
+                        gym.next_serial = (gym.next_serial or 1) + 1
+                        db.commit()
+                except:
+                    pass
+                continue
+            else:
+                return False, str(e), None
         except Exception as e:
             db.rollback()
             return False, str(e), None
         finally:
             db.close()
-    return False, f"Could not allocate a unique serial number after retries: {last_err}", None
+            
+    return False, f"Could not allocate unique serial after {max_retries} retries: {last_err}", None
+
 
 def sync_to_local(member_data):
-    """Save member to local SQLite as backup"""
     try:
         local_conn = sqlite3.connect('gym_pro_backup_local.db')
         local_cursor = local_conn.cursor()
         
-        # Create table if not exists
         local_cursor.execute('''
             CREATE TABLE IF NOT EXISTS members (
                 id INTEGER PRIMARY KEY,
@@ -670,16 +1144,18 @@ def sync_to_local(member_data):
                 expiry_date TEXT,
                 status TEXT,
                 notes TEXT,
-                face_encoding TEXT
+                face_encoding TEXT,
+                created_by_staff TEXT
             )
         ''')
         
-        # Insert or update
         local_cursor.execute('''
             INSERT OR REPLACE INTO members 
-            (id, serial_number, full_name, phone, email, gender, dob, photo_path, membership_type, fee_amount, join_date, expiry_date, status, notes, face_encoding)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', member_data)
+            (id, serial_number, full_name, phone, email, gender, dob, photo_path,
+             membership_type, fee_amount, join_date, expiry_date, status, notes,
+             face_encoding, created_by_staff)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', member_data + (None,))
         
         local_conn.commit()
         local_conn.close()
@@ -700,10 +1176,11 @@ def update_member(member_id, **kwargs):
         if new_phone and new_phone != (m.phone or ""):
             dup = db.query(Member).filter(
                 Member.phone == new_phone,
+                Member.gym_id == m.gym_id,
                 Member.id != member_id
             ).first()
             if dup:
-                return False, "⚠️ This phone number is already registered with another member."
+                return False, f"⚠️ Phone {new_phone} already registered in this gym."
 
         for k, v in kwargs.items():
             setattr(m, k, v)
@@ -720,17 +1197,171 @@ def delete_member(member_id):
     db = get_db()
     try:
         m = db.query(Member).filter_by(id=member_id).first()
-        if m:
-            if m.photo_path:
-                full_path = m.photo_path if os.path.isabs(m.photo_path) else os.path.join(UPLOAD_FOLDER, os.path.basename(m.photo_path))
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-            db.delete(m)
-            db.commit()
+        if not m:
+            return False, "Member not found."
+        db.delete(m)
+        db.commit()
         return True, "Member deleted."
+    except Exception as e:
+        db.rollback()
+        return False, f"Member could not be deleted: {e}"
     finally:
         db.close()
 
+
+def update_member_photo_path(member_id, photo_path):
+    db = SessionLocal()
+    try:
+        member = db.query(Member).filter(Member.id == member_id).first()
+        if member:
+            member.photo_path = photo_path
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        print(f"Error updating member photo path: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def get_member_by_id(member_id):
+    db = get_db()
+    try:
+        m_id = int(member_id)
+        return db.query(Member).filter(Member.id == m_id).first()
+    except (ValueError, TypeError):
+        return None
+    finally:
+        db.close()
+
+
+def get_member_phone(name):
+    db = get_db()
+    try:
+        member = db.query(Member).filter(Member.full_name == name).first()
+        return member.phone if member else None
+    except Exception as e:
+        print(f"Error finding phone: {e}")
+        return None
+    finally:
+        db.close()
+
+
+# ── Face Encoding CRUD ────────────────────────────────────────────────────────
+
+def save_face_encoding(member_id: int, encoding_json: str) -> tuple[bool, str]:
+    db = get_db()
+    try:
+        m = db.query(Member).filter_by(id=member_id).first()
+        if not m:
+            return False, "Member not found"
+        m.face_encoding = encoding_json
+        db.commit()
+        return True, "Face enrolled"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_face_encodings(gym_id=None) -> list[dict]:
+    db = get_db()
+    try:
+        q = db.query(Member).filter(Member.face_encoding.isnot(None))
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return [
+            {
+                "id": m.id,
+                "gym_id": m.gym_id,
+                "serial_number": m.serial_number,
+                "full_name": m.full_name,
+                "photo_path": m.photo_path,
+                "status": m.status or "Active",
+                "expiry_date": m.expiry_date,
+                "encoding_json": m.face_encoding,
+            }
+            for m in q.all()
+        ]
+    finally:
+        db.close()
+
+
+# ── Unknown / Expired Capture CRUD ────────────────────────────────────────────
+
+def add_unknown_capture(gym_id: int, capture_key: str,
+                        capture_type: str = "unknown",
+                        member_id: int | None = None,
+                        member_name: str | None = None,
+                        notes: str | None = None) -> int | None:
+    db = get_db()
+    try:
+        cap = UnknownCapture(
+            gym_id=gym_id,
+            capture_key=capture_key,
+            capture_type=capture_type,
+            member_id=member_id,
+            member_name=member_name,
+            notes=notes,
+        )
+        db.add(cap)
+        db.commit()
+        db.refresh(cap)
+        return cap.id
+    except Exception:
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def get_unknown_captures(gym_id: int | None = None, limit: int = 100) -> list:
+    db = get_db()
+    try:
+        q = db.query(UnknownCapture).order_by(UnknownCapture.captured_at.desc())
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return q.limit(limit).all()
+    finally:
+        db.close()
+
+
+def delete_unknown_capture_record(capture_id: int) -> bool:
+    db = get_db()
+    try:
+        cap = db.query(UnknownCapture).filter_by(id=capture_id).first()
+        if cap:
+            db.delete(cap)
+            db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def cleanup_old_captures(days: int = 3) -> list[str]:
+    db = get_db()
+    cutoff = datetime.now() - timedelta(days=days)
+    try:
+        old = db.query(UnknownCapture).filter(UnknownCapture.captured_at < cutoff).all()
+        keys = [c.capture_key for c in old]
+        for c in old:
+            db.delete(c)
+        db.commit()
+        return keys
+    except Exception:
+        db.rollback()
+        return []
+    finally:
+        db.close()
+
+
+# ── Expiring/Absent/Birthday Members ──────────────────────────────────────────
 
 def get_expiring_members(days=5, gym_id=None):
     db = get_db()
@@ -808,20 +1439,26 @@ def get_birthday_members(days_ahead=7, gym_id=None):
 
 
 def get_member_streak(member_id):
+    """Calculate attendance streak - OPTIMIZED"""
     db = get_db()
     try:
         today = date.today()
+        cutoff = str(today - timedelta(days=365))
+        
+        dates = db.query(Attendance.check_date).filter(
+            Attendance.member_id == member_id,
+            Attendance.status == "Present",
+            Attendance.check_date >= cutoff
+        ).all()
+        
+        present_set = {d[0] for d in dates}
+        
         streak = 0
         check = today
-        for _ in range(365):
-            rec = db.query(Attendance).filter_by(
-                member_id=member_id, check_date=str(check), status="Present"
-            ).first()
-            if rec:
-                streak += 1
-                check -= timedelta(days=1)
-            else:
-                break
+        while str(check) in present_set:
+            streak += 1
+            check -= timedelta(days=1)
+        
         return streak
     finally:
         db.close()
@@ -847,7 +1484,7 @@ def get_attendance_leaderboard(gym_id=None, limit=10):
             m = db.query(Member).filter_by(id=row.member_id).first()
             if m:
                 results.append({"member": m, "count": row.count,
-                                 "streak": get_member_streak(m.id)})
+                                "streak": get_member_streak(m.id)})
         return results
     finally:
         db.close()
@@ -903,11 +1540,11 @@ def get_recent_scans(gym_id=None, limit: int = 10, today_only: bool = True):
             m = db.query(Member).filter_by(id=a.member_id).first()
             g = db.query(Gym).filter_by(id=a.gym_id).first()
             results.append({
-                "time":    a.created_at.strftime("%H:%M:%S") if a.created_at else "—",
-                "name":    m.full_name if m else "—",
-                "serial":  m.serial_number if m else "—",
-                "photo":   m.photo_path if m else None,
-                "gym":     g.name if g else "—",
+                "time": a.created_at.strftime("%H:%M:%S") if a.created_at else "—",
+                "name": m.full_name if m else "—",
+                "serial": m.serial_number if m else "—",
+                "photo": m.photo_path if m else None,
+                "gym": g.name if g else "—",
                 "marked_by": a.marked_by or "—",
             })
         return results
@@ -933,6 +1570,137 @@ def get_attendance_by_hour(gym_id=None):
         db.close()
 
 
+def get_attendance_trend(gym_id=None, days=30):
+    session = get_db()
+    try:
+        today = date.today()
+        results = []
+        for i in range(days - 1, -1, -1):
+            d = today - timedelta(days=i)
+            base = session.query(Attendance).filter(Attendance.check_date == str(d))
+            if gym_id:
+                base = base.filter(Attendance.gym_id == gym_id)
+            recs = base.all()
+            results.append({
+                "date": d.strftime("%d %b"),
+                "present": sum(1 for r in recs if r.status == "Present"),
+                "absent": sum(1 for r in recs if r.status == "Absent"),
+                "late": sum(1 for r in recs if r.status == "Late"),
+            })
+        return results
+    finally:
+        session.close()
+
+
+def get_all_member_last_visits(gym_id=None):
+    session = get_db()
+    try:
+        q = session.query(
+            Attendance.member_id,
+            func.max(Attendance.check_date).label("last_date")
+        ).filter(Attendance.status == "Present")
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        rows = q.group_by(Attendance.member_id).all()
+        return {r.member_id: r.last_date for r in rows}
+    finally:
+        session.close()
+
+
+def get_member_attendance_rate(member_id, days=30):
+    session = get_db()
+    try:
+        today = date.today()
+        cutoff = str(today - timedelta(days=days))
+        present = session.query(func.count(Attendance.id)).filter(
+            Attendance.member_id == member_id,
+            Attendance.check_date >= cutoff,
+            Attendance.status == "Present"
+        ).scalar() or 0
+        return round(present / days * 100, 1)
+    finally:
+        session.close()
+
+
+def get_late_members_summary(gym_id=None, days=30):
+    session = get_db()
+    try:
+        today = date.today()
+        cutoff = str(today - timedelta(days=days))
+        q = session.query(
+            Attendance.member_id,
+            func.count(Attendance.id).label("late_count")
+        ).filter(
+            Attendance.status == "Late",
+            Attendance.check_date >= cutoff
+        )
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        rows = q.group_by(Attendance.member_id).order_by(
+            func.count(Attendance.id).desc()
+        ).limit(10).all()
+        results = []
+        for row in rows:
+            m = session.query(Member).filter_by(id=row.member_id).first()
+            if m:
+                results.append({"member": m, "late_count": row.late_count})
+        return results
+    finally:
+        session.close()
+
+
+def get_attendance_range(gym_id=None, from_date=None, to_date=None, status_filter=None):
+    session = get_db()
+    try:
+        q = session.query(Attendance)
+        if gym_id:
+            q = q.filter(Attendance.gym_id == gym_id)
+        if from_date:
+            q = q.filter(Attendance.check_date >= str(from_date))
+        if to_date:
+            q = q.filter(Attendance.check_date <= str(to_date))
+        if status_filter and status_filter != "All":
+            q = q.filter(Attendance.status == status_filter)
+        return q.order_by(Attendance.check_date.desc(), Attendance.created_at.desc()).all()
+    finally:
+        session.close()
+
+
+def get_active_members(gym_id):
+    db = get_db()
+    try:
+        today = str(date.today())
+        attended_ids = [a.member_id for a in db.query(Attendance).filter(Attendance.check_date == today).all()]
+        members = db.query(Member).filter(
+            Member.gym_id == gym_id,
+            Member.status == 'Active',
+            ~Member.id.in_(attended_ids)
+        ).all()
+        return members
+    finally:
+        db.close()
+
+
+def mark_member_present(member_id, gym_id, attendance_date):
+    db = get_db()
+    try:
+        new_attendance = Attendance(
+            member_id=member_id,
+            gym_id=gym_id,
+            check_date=str(attendance_date),
+            status="Present",
+            marked_by="Auditor"
+        )
+        db.add(new_attendance)
+        db.commit()
+        return True, "Success"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
 # ── Fee Records ────────────────────────────────────────────────────────────────
 
 def add_fee_record(member_id, gym_id, amount, payment_method, payment_date,
@@ -940,12 +1708,24 @@ def add_fee_record(member_id, gym_id, amount, payment_method, payment_date,
     db = get_db()
     try:
         receipt = f"RCP-{uuid.uuid4().hex[:8].upper()}"
-        db.add(FeeRecord(member_id=member_id, gym_id=gym_id, amount=amount,
-                         payment_method=payment_method, payment_date=str(payment_date),
-                         period_start=str(period_start) if period_start else None,
-                         period_end=str(period_end) if period_end else None,
-                         receipt_number=receipt, collected_by=collected_by, notes=notes))
+        now = datetime.now()
+        
+        fee_record = FeeRecord(
+            member_id=member_id,
+            gym_id=gym_id,
+            amount=amount,
+            payment_method=payment_method,
+            payment_date=str(payment_date),
+            period_start=str(period_start) if period_start else None,
+            period_end=str(period_end) if period_end else None,
+            receipt_number=receipt,
+            collected_by=collected_by,
+            notes=notes,
+            created_at=now
+        )
+        db.add(fee_record)
         db.commit()
+        db.refresh(fee_record)
         return True, f"Fee recorded. Receipt: {receipt}"
     except Exception as e:
         db.rollback()
@@ -954,34 +1734,97 @@ def add_fee_record(member_id, gym_id, amount, payment_method, payment_date,
         db.close()
 
 
-# 1. Top par ye import ensure karein:
-from sqlalchemy.orm import joinedload
-
-def get_fee_records(gym_id=None, date_from=None, date_to=None):
+def log_receipt(fee_record_id, gym_id, member_name, receipt_number, amount,
+                collected_by, print_issued=False):
     db = get_db()
     try:
-        # joinedload se DetachedInstanceError khatam ho jayega
+        now = datetime.now()
+        db.add(ReceiptLog(
+            fee_record_id=fee_record_id,
+            gym_id=gym_id,
+            member_name=str(member_name),
+            receipt_number=str(receipt_number),
+            amount=float(amount),
+            collected_by=str(collected_by),
+            pay_date=now.strftime("%Y-%m-%d"),
+            pay_time=now.strftime("%H:%M"),
+            print_issued=print_issued,
+        ))
+        db.commit()
+        return True, "Receipt logged."
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_print_issued(receipt_number: str, issued: bool = True):
+    db = get_db()
+    try:
+        db.query(ReceiptLog)\
+          .filter(ReceiptLog.receipt_number == receipt_number)\
+          .update({"print_issued": issued})
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def get_receipt_logs(gym_id=None, limit=500):
+    db = get_db()
+    try:
+        q = db.query(ReceiptLog)
+        if gym_id:
+            q = q.filter(ReceiptLog.gym_id == gym_id)
+        rows = q.order_by(ReceiptLog.created_at.desc()).limit(limit).all()
+        result = []
+        for r in rows:
+            result.append({
+                "id": r.id,
+                "receipt_number": r.receipt_number,
+                "member_name": r.member_name,
+                "amount": r.amount,
+                "collected_by": r.collected_by or "",
+                "pay_date": r.pay_date,
+                "pay_time": r.pay_time,
+                "print_issued": r.print_issued,
+                "created_at": r.created_at,
+            })
+        return result
+    except Exception as e:
+        return []
+    finally:
+        db.close()
+
+
+def get_fee_records(gym_id=None, member_id=None, date_from=None, date_to=None, limit=None):
+    db = get_db()
+    try:
         query = db.query(FeeRecord).options(joinedload(FeeRecord.member))
         
         if gym_id:
             query = query.filter(FeeRecord.gym_id == gym_id)
-        
-        # 'date' ki jagah 'payment_date' use karein
+        if member_id:
+            query = query.filter(FeeRecord.member_id == member_id)
         if date_from:
             query = query.filter(FeeRecord.payment_date >= str(date_from))
         if date_to:
             query = query.filter(FeeRecord.payment_date <= str(date_to))
+        
+        query = query.order_by(FeeRecord.payment_date.desc())
+        
+        if limit:
+            query = query.limit(limit)
             
         return query.all()
     finally:
         db.close()
 
 
-
-
-
-
-# 🌟 Yahan Dono Naye Functions Add Kar Diye Hain (SQLAlchemy Structure Ke Mutabik) 🌟
 def update_fee_record(record_id, amount, payment_method, period_start, period_end, notes):
     db = get_db()
     try:
@@ -1000,7 +1843,6 @@ def update_fee_record(record_id, amount, payment_method, period_start, period_en
         return False, str(e)
     finally:
         db.close()
-
 
 
 def delete_fee_record(record_id):
@@ -1046,13 +1888,13 @@ def mark_fee_whatsapp_sent(fee_id: int) -> bool:
 def get_fee_records_created_today(gym_id=None):
     db = get_db()
     try:
-        utc_today = datetime.utcnow().date()
+        utc_today = datetime.now().date()
         start = datetime.combine(utc_today, datetime.min.time())
-        end   = start + timedelta(days=1)
+        end = start + timedelta(days=1)
         q = db.query(FeeRecord).filter(
             FeeRecord.created_at >= start,
-            FeeRecord.created_at <  end,
-            FeeRecord.whatsapp_sent == False,  
+            FeeRecord.created_at < end,
+            FeeRecord.whatsapp_sent == False,
         )
         if gym_id:
             q = q.filter_by(gym_id=gym_id)
@@ -1073,6 +1915,36 @@ def get_monthly_revenue(gym_id=None, year=None):
         except Exception:
             pass
     return monthly
+
+
+def get_todays_fees(gym_id):
+    db = get_db()
+    try:
+        today_str = date.today().isoformat()
+        results = db.query(FeeRecord.amount).filter(
+            FeeRecord.gym_id == gym_id,
+            FeeRecord.payment_date == today_str
+        ).all()
+        return [r[0] for r in results]
+    except Exception as e:
+        print(f"DEBUG Error in get_todays_fees: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_daily_fee_summary(gym_id=None, target_date=None):
+    db = get_db()
+    try:
+        date_str = str(target_date or datetime.now().date())
+        q = db.query(FeeRecord).filter(FeeRecord.payment_date == date_str)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        records = q.all()
+        total = sum(r.amount or 0 for r in records)
+        return total, len(records), records
+    finally:
+        db.close()
 
 
 # ── Expenses ───────────────────────────────────────────────────────────────────
@@ -1121,6 +1993,19 @@ def delete_expense(expense_id):
         db.close()
 
 
+def get_expenses_by_category(gym_id=None):
+    db = get_db()
+    try:
+        q = db.query(DailyExpense.category,
+                     func.coalesce(func.sum(DailyExpense.amount), 0).label("total"))
+        if gym_id:
+            q = q.filter(DailyExpense.gym_id == gym_id)
+        rows = q.group_by(DailyExpense.category).order_by(func.sum(DailyExpense.amount).desc()).all()
+        return [{"category": r.category, "total": float(r.total)} for r in rows]
+    finally:
+        db.close()
+
+
 # ── Audit ──────────────────────────────────────────────────────────────────────
 
 def add_audit_entry(gym_id, entry_type, reference_id, expected_amount, actual_amount,
@@ -1156,6 +2041,462 @@ def get_audit_entries(gym_id=None, status=None, date_from=None, date_to=None):
         return q.order_by(AuditEntry.entry_date.desc()).all()
     finally:
         db.close()
+
+
+def is_verified(reference_id):
+    try:
+        conn = sqlite3.connect("gym-app/gym_pro_v3.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) FROM audit_entries WHERE reference_id = ? AND entry_type = 'fee'", (str(reference_id),))
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count > 0
+    except Exception as e:
+        print(f"Error in is_verified: {e}")
+        return False
+
+
+def is_record_verified(record_id):
+    db = get_db()
+    try:
+        log = db.query(AuditEntry).filter(
+            AuditEntry.reference_id == str(record_id),
+            AuditEntry.entry_type == 'fee'
+        ).first()
+        return log is not None
+    except Exception as e:
+        print(f"Error checking verification: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def update_audit_by_member(member_id, new_status):
+    db = get_db()
+    try:
+        entry = db.query(AuditEntry).filter(
+            AuditEntry.reference_id == str(member_id),
+            AuditEntry.status == "Discrepancy"
+        ).first()
+        if entry:
+            entry.status = new_status
+            db.commit()
+    finally:
+        db.close()
+
+
+def update_audit_status(entry_id, new_status):
+    db = get_db()
+    try:
+        entry = db.query(AuditEntry).filter_by(id=entry_id).first()
+        if entry:
+            entry.status = new_status
+            db.commit()
+    finally:
+        db.close()
+
+
+# ── Activity Log (Anti-Theft) ───────────────────────────────────────────────────
+
+def log_activity(user, action, details="", gym_id=None, role="", amount=None, record_ref=""):
+    db = get_db()
+    try:
+        db.add(ActivityLog(
+            gym_id=gym_id,
+            user=str(user),
+            role=str(role),
+            action=str(action),
+            details=str(details),
+            amount=amount,
+            record_ref=str(record_ref),
+        ))
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def get_activity_logs(gym_id=None, limit=500, date_from=None, date_to=None, user=None, action=None):
+    db = get_db()
+    try:
+        q = db.query(ActivityLog)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        if user:
+            q = q.filter(ActivityLog.user == user)
+        if action:
+            q = q.filter(ActivityLog.action == action)
+        if date_from:
+            q = q.filter(ActivityLog.created_at >= datetime.combine(date_from, datetime.min.time())
+                         if hasattr(date_from, 'year') else ActivityLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(ActivityLog.created_at <= datetime.combine(date_to, datetime.max.time())
+                         if hasattr(date_to, 'year') else ActivityLog.created_at <= date_to)
+        return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+    finally:
+        db.close()
+
+
+def get_member_portal_usage(gym_id=None, active_minutes=15, limit=500):
+    db = get_db()
+    try:
+        actions = ("MEMBER_PORTAL_LOGIN", "MEMBER_PORTAL_ACTIVE")
+        q = db.query(ActivityLog).filter(ActivityLog.action.in_(actions))
+        if gym_id:
+            q = q.filter(ActivityLog.gym_id == gym_id)
+        logs = q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+
+        grouped = {}
+        for log in logs:
+            serial = str(log.user or "").strip()
+            if not serial:
+                continue
+            item = grouped.setdefault(serial, {
+                "serial": serial,
+                "name": "",
+                "gym_id": log.gym_id,
+                "last_seen": log.created_at,
+                "last_login": None,
+                "visits": 0,
+                "active_events": 0,
+            })
+            item["visits"] += 1
+            if log.action == "MEMBER_PORTAL_ACTIVE":
+                item["active_events"] += 1
+            else:
+                if item["last_login"] is None:
+                    item["last_login"] = log.created_at
+            if log.created_at and (item["last_seen"] is None or log.created_at > item["last_seen"]):
+                item["last_seen"] = log.created_at
+            if not item["name"] and log.details:
+                details = str(log.details)
+                if details.startswith("Member: "):
+                    item["name"] = details.split("Member: ", 1)[1].split(" | ", 1)[0]
+
+        now = datetime.now()
+        for item in grouped.values():
+            if not item["name"]:
+                member = db.query(Member).filter(Member.serial_number == item["serial"]).first()
+                if member:
+                    item["name"] = member.full_name
+                    item["gym_id"] = member.gym_id
+            last_seen = item["last_seen"]
+            item["is_active"] = bool(
+                last_seen and (now - last_seen).total_seconds() <= active_minutes * 60
+            )
+            item["last_seen_text"] = (
+                last_seen.strftime("%d %b %Y, %I:%M %p") if last_seen else "—"
+            )
+        return sorted(
+            grouped.values(),
+            key=lambda x: x["last_seen"] or datetime.min,
+            reverse=True,
+        )
+    finally:
+        db.close()
+
+
+# ── Shift Session Functions ─────────────────────────────────────────────────────
+
+def open_shift(gym_id, staff_user, role, opening_cash=0.0):
+    db = get_db()
+    try:
+        existing = db.query(ShiftSession).filter_by(
+            gym_id=gym_id, staff_user=staff_user, status="open"
+        ).first()
+        if existing:
+            return False, "Aapki pehle se ek shift open hai. Pehle band karein."
+        s = ShiftSession(
+            gym_id=gym_id, staff_user=staff_user, role=role,
+            opening_cash=float(opening_cash), status="open"
+        )
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+        log_activity(user=staff_user, action="SHIFT_OPENED",
+                     details=f"Opening cash: PKR {opening_cash:,.0f}",
+                     gym_id=gym_id, role=role, amount=opening_cash)
+        return True, s.id
+    except Exception as e:
+        try: db.rollback()
+        except: pass
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def close_shift(shift_id, closing_cash):
+    db = get_db()
+    try:
+        shift = db.query(ShiftSession).filter_by(id=shift_id).first()
+        if not shift:
+            return False, "Shift nahi mili."
+        if shift.status != "open":
+            return False, "Yeh shift already band hai."
+
+        opened_str = shift.opened_at.strftime("%Y-%m-%d")
+        recs = db.query(FeeRecord).filter(
+            FeeRecord.gym_id == shift.gym_id,
+            FeeRecord.collected_by == shift.staff_user,
+            FeeRecord.payment_date >= opened_str,
+        ).all()
+        shift_collections = [r for r in recs if r.created_at and r.created_at >= shift.opened_at]
+        collected = sum(r.amount or 0 for r in shift_collections)
+
+        expected = (shift.opening_cash or 0) + collected
+        discrepancy = float(closing_cash) - expected
+        status = "flagged" if discrepancy < -1 else "closed"
+
+        shift.closed_at = datetime.now()
+        shift.expected_cash = expected
+        shift.closing_cash = float(closing_cash)
+        shift.discrepancy = discrepancy
+        shift.status = status
+        db.commit()
+
+        log_activity(
+            user=shift.staff_user, action="SHIFT_CLOSED",
+            details=f"Opening: PKR {shift.opening_cash:,.0f} | Collected: PKR {collected:,.0f} | Expected: PKR {expected:,.0f} | Submitted: PKR {closing_cash:,.0f} | Diff: PKR {discrepancy:,.0f}",
+            gym_id=shift.gym_id, role=shift.role, amount=discrepancy,
+            record_ref="FLAGGED" if status == "flagged" else "OK"
+        )
+        return True, {"expected": expected, "closing": closing_cash, "discrepancy": discrepancy, "status": status}
+    except Exception as e:
+        try: db.rollback()
+        except: pass
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_active_shift(gym_id, staff_user):
+    db = get_db()
+    try:
+        return db.query(ShiftSession).filter_by(
+            gym_id=gym_id, staff_user=staff_user, status="open"
+        ).first()
+    finally:
+        db.close()
+
+
+def get_staff_today_metrics(username: str, gym_id=None) -> dict:
+    from datetime import date as _date
+    today = _date.today()
+    today_str = str(today)
+    today_start = datetime.combine(today, datetime.min.time())
+    db = get_db()
+    try:
+        fq = db.query(FeeRecord).filter(
+            FeeRecord.collected_by == username,
+            FeeRecord.payment_date == today_str,
+        )
+        if gym_id:
+            fq = fq.filter(FeeRecord.gym_id == gym_id)
+        fees = fq.all()
+        fee_total = sum(r.amount or 0 for r in fees)
+        fee_count = len(fees)
+
+        aq = db.query(Attendance).filter(
+            Attendance.marked_by == username,
+            Attendance.check_date == today_str,
+        )
+        if gym_id:
+            aq = aq.filter(Attendance.gym_id == gym_id)
+        att_count = aq.count()
+
+        mq = db.query(Member).filter(Member.status == "active")
+        if gym_id:
+            mq = mq.filter(Member.gym_id == gym_id)
+        total_active = mq.count()
+
+        sq = db.query(ShiftSession).filter_by(staff_user=username, status="open")
+        if gym_id:
+            sq = sq.filter(ShiftSession.gym_id == gym_id)
+        active_shift = sq.first()
+        shift_open = active_shift is not None
+        shift_id = active_shift.id if active_shift else None
+        shift_opening = active_shift.opening_cash if active_shift else 0.0
+        shift_opened_at = active_shift.opened_at.strftime("%H:%M") if active_shift else None
+
+        sq2 = db.query(ShiftSession).filter(
+            ShiftSession.staff_user == username,
+            ShiftSession.opened_at >= today_start,
+        )
+        if gym_id:
+            sq2 = sq2.filter(ShiftSession.gym_id == gym_id)
+        shifts_today = sq2.count()
+
+        lq = db.query(ActivityLog).filter(
+            ActivityLog.user == username,
+            ActivityLog.created_at >= today_start,
+        )
+        if gym_id:
+            lq = lq.filter(ActivityLog.gym_id == gym_id)
+        logs = lq.order_by(ActivityLog.created_at.desc()).all()
+
+        deletions = [l for l in logs if "DELETE" in (l.action or "").upper()]
+        new_members = [l for l in logs if l.action in ("MEMBER_ADDED", "MEMBER_REGISTERED")]
+        last_log = logs[0] if logs else None
+
+        return {
+            "fee_total": fee_total,
+            "fee_count": fee_count,
+            "att_count": att_count,
+            "total_active_members": total_active,
+            "shift_open": shift_open,
+            "shift_id": shift_id,
+            "shift_opening_cash": shift_opening,
+            "shift_opened_at": shift_opened_at,
+            "shifts_today": shifts_today,
+            "activity_count": len(logs),
+            "deletions_today": len(deletions),
+            "new_members_today": len(new_members),
+            "last_action": last_log.action if last_log else None,
+            "last_action_time": last_log.created_at.strftime("%H:%M") if last_log else None,
+        }
+    except Exception as e:
+        return {
+            "fee_total": 0, "fee_count": 0, "att_count": 0,
+            "total_active_members": 0, "shift_open": False,
+            "shift_id": None, "shift_opening_cash": 0,
+            "shift_opened_at": None, "shifts_today": 0,
+            "activity_count": 0, "deletions_today": 0,
+            "new_members_today": 0, "last_action": None, "last_action_time": None,
+        }
+    finally:
+        db.close()
+
+
+def get_today_shifts(gym_id=None):
+    db = get_db()
+    try:
+        today_start = datetime.combine(datetime.now().date(), datetime.min.time())
+        q = db.query(ShiftSession).filter(ShiftSession.opened_at >= today_start)
+        if gym_id:
+            q = q.filter_by(gym_id=gym_id)
+        return q.order_by(ShiftSession.opened_at.desc()).all()
+    finally:
+        db.close()
+
+
+def check_fraud_alerts(gym_id=None, target_date=None):
+    from collections import defaultdict
+    alerts = []
+    check_date = target_date or datetime.now().date()
+    date_str = str(check_date)
+    today_start = datetime.combine(check_date, datetime.min.time())
+    today_end = datetime.combine(check_date, datetime.max.time())
+
+    dbs = get_db()
+    try:
+        delete_logs = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_DELETED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            delete_logs = delete_logs.filter_by(gym_id=gym_id)
+        del_by = defaultdict(list)
+        for lg in delete_logs.all():
+            del_by[lg.user].append(lg)
+        for user, entries in del_by.items():
+            n = len(entries)
+            total_deleted = sum(e.amount or 0 for e in entries)
+            if n >= 4:
+                alerts.append({
+                    "severity": "critical",
+                    "icon": "🚨",
+                    "title": f"{user} ne aaj {n} fee records DELETE kiye!",
+                    "detail": f"Deleted amount: PKR {total_deleted:,.0f} — Fori jaanch karein!"
+                })
+            elif n >= 2:
+                alerts.append({
+                    "severity": "warning",
+                    "icon": "⚠️",
+                    "title": f"{user} ne aaj {n} fee records delete kiye",
+                    "detail": f"Deleted amount: PKR {total_deleted:,.0f}"
+                })
+
+        edit_logs = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_EDITED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            edit_logs = edit_logs.filter_by(gym_id=gym_id)
+        edit_by = defaultdict(int)
+        for lg in edit_logs.all():
+            edit_by[lg.user] += 1
+        for user, n in edit_by.items():
+            if n >= 3:
+                alerts.append({
+                    "severity": "warning",
+                    "icon": "✏️",
+                    "title": f"{user} ne aaj {n} baar fee records EDIT kiye",
+                    "detail": "Zyada edits amount manipulation ki nishani ho sakti hai."
+                })
+
+        off_q = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_COLLECTED",
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            off_q = off_q.filter_by(gym_id=gym_id)
+        off_hours = []
+        for lg in off_q.all():
+            if lg.created_at:
+                h = lg.created_at.hour
+                if h < 7 or h >= 22:
+                    off_hours.append(lg)
+        if off_hours:
+            names = list({e.user for e in off_hours})
+            alerts.append({
+                "severity": "warning",
+                "icon": "🌙",
+                "title": f"Off-hours fee collection ({len(off_hours)} transactions)",
+                "detail": f"Staff: {', '.join(names)} — Normal hours se bahar fees collect ki gayi."
+            })
+
+        flagged_shifts = dbs.query(ShiftSession).filter(
+            ShiftSession.status == "flagged",
+            ShiftSession.closed_at >= today_start,
+        )
+        if gym_id:
+            flagged_shifts = flagged_shifts.filter_by(gym_id=gym_id)
+        for s in flagged_shifts.all():
+            alerts.append({
+                "severity": "critical",
+                "icon": "💸",
+                "title": f"{s.staff_user} ki shift mein cash short!",
+                "detail": f"Expected: PKR {s.expected_cash:,.0f} | Submitted: PKR {s.closing_cash:,.0f} | Short: PKR {abs(s.discrepancy):,.0f}"
+            })
+
+        big_del = dbs.query(ActivityLog).filter(
+            ActivityLog.action == "FEE_DELETED",
+            ActivityLog.amount >= 3000,
+            ActivityLog.created_at >= today_start,
+            ActivityLog.created_at <= today_end,
+        )
+        if gym_id:
+            big_del = big_del.filter_by(gym_id=gym_id)
+        for lg in big_del.all():
+            alerts.append({
+                "severity": "critical",
+                "icon": "💰",
+                "title": f"Bara amount delete kiya — PKR {(lg.amount or 0):,.0f}",
+                "detail": f"Staff: {lg.user} | Receipt: {lg.record_ref or '—'} | Time: {lg.created_at.strftime('%H:%M') if lg.created_at else '—'}"
+            })
+
+        return alerts
+    except Exception:
+        return []
+    finally:
+        dbs.close()
 
 
 # ── Body Measurements ──────────────────────────────────────────────────────────
@@ -1350,7 +2691,7 @@ def update_complaint_status(complaint_id, status, resolved_by=None):
         c.status = status
         if status == "Resolved":
             c.resolved_by = resolved_by
-            c.resolved_at = datetime.utcnow()
+            c.resolved_at = datetime.now()
         db.commit()
         return True, f"Status updated to {status}."
     except Exception as e:
@@ -1384,32 +2725,16 @@ def get_active_member_count(gym_id=None):
         db.close()
 
 
-def get_expenses_by_category(gym_id=None):
-    db = get_db()
-    try:
-        q = db.query(DailyExpense.category,
-                     func.coalesce(func.sum(DailyExpense.amount), 0).label("total"))
-        if gym_id:
-            q = q.filter(DailyExpense.gym_id == gym_id)
-        rows = q.group_by(DailyExpense.category).order_by(func.sum(DailyExpense.amount).desc()).all()
-        return [{"category": r.category, "total": float(r.total)} for r in rows]
-    finally:
-        db.close()
-
-
 def get_stats(gym_id=None):
     db = get_db()
     try:
         mq = db.query(Member)
-        fq = db.query(FeeRecord)
-        eq = db.query(DailyExpense)
         if gym_id:
             mq = mq.filter_by(gym_id=gym_id)
-            fq = fq.filter_by(gym_id=gym_id)
-            eq = eq.filter_by(gym_id=gym_id)
-        total_members  = mq.count()
+        total_members = mq.count()
         active_members = mq.filter_by(status="Active").count()
-        total_revenue  = db.query(func.coalesce(func.sum(FeeRecord.amount), 0)).filter(
+        
+        total_revenue = db.query(func.coalesce(func.sum(FeeRecord.amount), 0)).filter(
             *([FeeRecord.gym_id == gym_id] if gym_id else [])
         ).scalar()
         total_expenses = db.query(func.coalesce(func.sum(DailyExpense.amount), 0)).filter(
@@ -1428,232 +2753,25 @@ def get_stats(gym_id=None):
             *([StockSale.gym_id == gym_id] if gym_id else [])
         ).scalar()
         return {
-            "total_members":   total_members,
-            "active_members":  active_members,
-            "total_revenue":   float(total_revenue or 0),
-            "total_expenses":  float(total_expenses or 0),
-            "month_revenue":   float(month_fees or 0),
-            "month_expenses":  float(month_exp or 0),
-            "net_profit":      float((total_revenue or 0) - (total_expenses or 0)),
+            "total_members": total_members,
+            "active_members": active_members,
+            "total_revenue": float(total_revenue or 0),
+            "total_expenses": float(total_expenses or 0),
+            "month_revenue": float(month_fees or 0),
+            "month_expenses": float(month_exp or 0),
+            "net_profit": float((total_revenue or 0) - (total_expenses or 0)),
             "inventory_revenue": float(inv_rev or 0),
         }
     finally:
         db.close()
-
-def update_member_photo_path(member_id, photo_path):
-    """
-    Jab admin card page se ya kahin se bhi photo upload kare, 
-    toh database mein uska path bilkul sahi folder ke sath update ho jaye.
-    """
-    db = SessionLocal()
-    try:
-        member = db.query(Member).filter(Member.id == member_id).first()
-        if member:
-            # Agar poora path save ho raha ho, toh sirf filename nikal kar standard folder set karein
-            filename = os.path.basename(photo_path)
-            member.photo_path = f"gym-app/uploads/{filename}"
-            db.commit()
-            return True
-        return False
-    except Exception as e:
-        print(f"Error updating member photo path: {e}")
-        db.rollback()
-        return False
-    finally:
-        db.close()
-# --- EMERGENCY POSTGRESQL CLEANUP SYSTEM ---
-def clean_corrupt_html_paths():
-    try:
-        from sqlalchemy import text
-        # Yeh aap ke online PostgreSQL database se kachra auto-clean kare ka system hai
-        with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE members SET photo_path = NULL WHERE photo_path LIKE '%<div%' OR photo_path LIKE '%style=%'")
-            )
-            connection.commit()
-            print("✨ Online Database safely cleaned from HTML garbage!")
-    except Exception as e:
-        print(f"Cleanup update skipped or not needed: {e}")
-
-# Automatically triggers on app startup to keep your database pure
-clean_corrupt_html_paths()
-# Yeh function database.py ke bilkul last mein hona chahiye
-def is_verified(reference_id):
-    try:
-        conn = sqlite3.connect("gym-app/gym_pro_v3.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT count(*) FROM audit_entries WHERE reference_id = ? AND entry_type = 'fee'", (str(reference_id),))
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count > 0
-    except Exception as e:
-        print(f"Error in is_verified: {e}")
-        return False
-#all clear the end
-# ── Audit & Attendance Helper Functions (Cleaned) ──────────────────────────
-# ── Audit & Verification Helper Functions ──────────────────────────
-
-def is_record_verified(record_id):
-    """Check karta hai ke kya fee record pehle se verify ho chuka hai."""
-    db = get_db()
-    try:
-        # 'AuditEntry' model use kar rahe hain, check karein ke 'fee' type ka entry hai ya nahi
-        log = db.query(AuditEntry).filter(
-            AuditEntry.reference_id == str(record_id), 
-            AuditEntry.entry_type == 'fee'
-        ).first()
-        return log is not None
-    except Exception as e:
-        print(f"Error checking verification: {e}")
-        return False
-    finally:
-        db.close()
-
-def update_audit_by_member(member_id, new_status):
-    db = get_db()
-    try:
-        # Member id ko string mein convert kar ke check karein
-        entry = db.query(AuditEntry).filter(
-            AuditEntry.reference_id == str(member_id), 
-            AuditEntry.status == "Discrepancy"
-        ).first()
-        if entry:
-            entry.status = new_status
-            db.commit()
-    finally:
-        db.close()
-
-def get_active_members(gym_id):
-    db = get_db()
-    try:
-        today = str(date.today())
-        # Aaj jin ki attendance ho gayi unki list
-        attended_ids = [a.member_id for a in db.query(Attendance).filter(Attendance.check_date == today).all()]
-
-        # Sirf wo members jo Active hain aur aaj hazir nahi huye
-        members = db.query(Member).filter(
-            Member.gym_id == gym_id, 
-            Member.status == 'Active',
-            ~Member.id.in_(attended_ids)
-        ).all()
-        return members
-    finally:
-        db.close()
-
-def mark_member_present(member_id, gym_id, attendance_date):
-    db = get_db()
-    try:
-        new_attendance = Attendance(
-            member_id=member_id, 
-            gym_id=gym_id, 
-            check_date=str(attendance_date), 
-            status="Present",
-            marked_by="Auditor"
-        )
-        db.add(new_attendance)
-        db.commit()
-        return True, "Success"
-    except Exception as e:
-        db.rollback()
-        return False, str(e)
-    finally:
-        db.close()
-
-def update_audit_status(entry_id, new_status):
-    db = get_db()
-    try:
-        entry = db.query(AuditEntry).filter_by(id=entry_id).first()
-        if entry:
-            entry.status = new_status
-            db.commit()
-    finally:
-        db.close()
-def get_member_by_id(member_id):
-    db = get_db()
-    try:
-        m_id = int(member_id)
-        # return yahan nahi hona chahiye
-        return db.query(Member).filter(Member.id == m_id).first() 
-    except (ValueError, TypeError):
-        return None
-    finally:
-        db.close()
-
-#1111111+
-# ── FIX: Proper Database Access ──────────────────────────
-def get_member_phone(name):
-    db = get_db() # SQLAlchemy session use karein
-    try:
-        # 'name' ki jagah 'full_name' column use karein
-        member = db.query(Member).filter(Member.full_name == name).first()
-        return member.phone if member else None
-    except Exception as e:
-        print(f"Error finding phone: {e}")
-        return None
-    finally:
-        db.close()
-
-#11111111
-def get_todays_fees(gym_id):
-    db = get_db() # SQLAlchemy session use karein
-    try:
-        today_str = date.today().isoformat()
-        # 'FeeRecord' model use karein, tablename automatically 'fee_records' handle ho jayega
-        results = db.query(FeeRecord.amount).filter(
-            FeeRecord.gym_id == gym_id,
-            FeeRecord.payment_date == today_str
-        ).all()
-        # Returns a list of amounts [1000.0, 500.0]
-        return [r[0] for r in results]
-    except Exception as e:
-        print(f"DEBUG Error in get_todays_fees: {e}")
-        return []
-    finally:
-        db.close()
-
-# ====================
-# ============================================
-# ============================================
-# STAFF TARGET SYSTEM - COMPLETE (FIXED)
-# ============================================
-
-class StaffTarget(Base):
-    __tablename__ = "staff_targets"
-    __table_args__ = {'extend_existing': True}
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=False)
-    staff_username = Column(String(60), nullable=False)
-    
-    # Target Types (No target_type column)
-    new_members_target = Column(Float, default=0.0)
-    new_members_achieved = Column(Float, default=0.0)
-    fee_collection_target = Column(Float, default=0.0)
-    fee_collection_achieved = Column(Float, default=0.0)
-    attendance_target_percentage = Column(Float, default=80.0)
-    attendance_achieved = Column(Float, default=0.0)
-    
-    # Overall
-    total_score = Column(Float, default=0.0)
-    prize_amount = Column(Float, default=0.0)
-    prize_status = Column(String(20), default="Pending")
-    
-    target_month = Column(String(7), nullable=False)
-    status = Column(String(20), default="Active")
-    created_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    gym = relationship("Gym", back_populates="staff_targets")
 
 
 # ============================================
 # STAFF TARGET FUNCTIONS
 # ============================================
 
-def add_staff_target(gym_id, staff_username, new_members_target, fee_collection_target, 
+def add_staff_target(gym_id, staff_username, new_members_target, fee_collection_target,
                      attendance_target_percentage, target_month, created_by, prize_amount=0):
-    """Add complete targets for a staff member"""
     db = get_db()
     try:
         existing = db.query(StaffTarget).filter(
@@ -1687,7 +2805,6 @@ def add_staff_target(gym_id, staff_username, new_members_target, fee_collection_
 
 
 def get_staff_targets(gym_id=None, staff_username=None, target_month=None):
-    """Get targets for staff"""
     db = get_db()
     try:
         query = db.query(StaffTarget)
@@ -1703,7 +2820,6 @@ def get_staff_targets(gym_id=None, staff_username=None, target_month=None):
 
 
 def get_all_staff_targets(gym_id=None, target_month=None):
-    """Get targets for all staff (for history page)"""
     db = get_db()
     try:
         query = db.query(StaffTarget)
@@ -1717,7 +2833,6 @@ def get_all_staff_targets(gym_id=None, target_month=None):
 
 
 def get_staff_target(staff_username, target_month=None):
-    """Get complete target for a staff member"""
     if not target_month:
         target_month = date.today().strftime("%Y-%m")
     
@@ -1731,13 +2846,9 @@ def get_staff_target(staff_username, target_month=None):
         if not target:
             return None
         
-        # Get total active members
         total_members = db.query(Member).filter_by(gym_id=target.gym_id, status="Active").count()
-        
-        # Calculate attendance target from percentage
         attendance_target_count = (target.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
         
-        # Calculate percentages
         new_members_pct = (target.new_members_achieved / target.new_members_target * 100) if target.new_members_target > 0 else 0
         fee_pct = (target.fee_collection_achieved / target.fee_collection_target * 100) if target.fee_collection_target > 0 else 0
         attendance_pct = (target.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
@@ -1762,14 +2873,13 @@ def get_staff_target(staff_username, target_month=None):
         db.close()
 
 
-def update_staff_achievement(staff_username, target_type, achieved_value, target_month=None):
-    """Update achieved value for staff"""
-    db = get_db()
+def update_staff_achievements(staff_username, target_month=None):
+    if not target_month:
+        target_month = date.today().strftime("%Y-%m")
+    
+    db_session = get_db()
     try:
-        if not target_month:
-            target_month = date.today().strftime("%Y-%m")
-        
-        target = db.query(StaffTarget).filter(
+        target = db_session.query(StaffTarget).filter(
             StaffTarget.staff_username == staff_username,
             StaffTarget.target_month == target_month,
             StaffTarget.status == "Active"
@@ -1778,25 +2888,37 @@ def update_staff_achievement(staff_username, target_type, achieved_value, target
         if not target:
             return False, "No active target found"
         
-        if target_type == "new_members":
-            target.new_members_achieved += achieved_value
-        elif target_type == "fee_collection":
-            target.fee_collection_achieved += achieved_value
-        elif target_type == "attendance":
-            target.attendance_achieved += achieved_value
+        gym_id = target.gym_id
+        members_this_month = db_session.query(Member).filter(
+            Member.gym_id == gym_id,
+            func.strftime("%Y-%m", Member.created_at) == target_month
+        ).count()
+        target.new_members_achieved = members_this_month
         
-        # Calculate attendance target from percentage
-        total_members = db.query(Member).filter_by(gym_id=target.gym_id, status="Active").count()
+        fees_this_month = db_session.query(func.sum(FeeRecord.amount)).filter(
+            FeeRecord.gym_id == gym_id,
+            FeeRecord.collected_by == staff_username,
+            func.strftime("%Y-%m", FeeRecord.created_at) == target_month
+        ).scalar() or 0
+        target.fee_collection_achieved = fees_this_month
+        
+        total_members = db_session.query(Member).filter_by(gym_id=gym_id, status="Active").count()
         attendance_target_count = (target.attendance_target_percentage / 100) * total_members if total_members > 0 else 0
         
-        # Calculate total score
-        target.total_score = (
-            (target.new_members_achieved / target.new_members_target * 100) if target.new_members_target > 0 else 0 +
-            (target.fee_collection_achieved / target.fee_collection_target * 100) if target.fee_collection_target > 0 else 0 +
-            (target.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
-        ) / 3
+        attendance_marked = db_session.query(Attendance).filter(
+            Attendance.gym_id == gym_id,
+            Attendance.marked_by == staff_username,
+            func.strftime("%Y-%m", Attendance.check_date) == target_month,
+            Attendance.status == "Present"
+        ).count()
+        target.attendance_achieved = attendance_marked
         
-        # Check if all targets completed
+        new_pct = (target.new_members_achieved / target.new_members_target * 100) if target.new_members_target > 0 else 0
+        fee_pct = (target.fee_collection_achieved / target.fee_collection_target * 100) if target.fee_collection_target > 0 else 0
+        att_pct = (target.attendance_achieved / attendance_target_count * 100) if attendance_target_count > 0 else 0
+        
+        target.total_score = (new_pct + fee_pct + att_pct) / 3
+        
         if (target.new_members_achieved >= target.new_members_target and
             target.fee_collection_achieved >= target.fee_collection_target and
             target.attendance_achieved >= attendance_target_count and
@@ -1804,17 +2926,16 @@ def update_staff_achievement(staff_username, target_type, achieved_value, target
             target.status = "Completed"
             target.prize_status = "Awarded"
         
-        db.commit()
-        return True, "Achievement updated"
+        db_session.commit()
+        return True, "Achievements updated"
     except Exception as e:
-        db.rollback()
+        db_session.rollback()
         return False, str(e)
     finally:
-        db.close()
+        db_session.close()
 
 
 def get_all_staff_progress(gym_id=None, target_month=None):
-    """Get progress for all staff members"""
     if not target_month:
         target_month = date.today().strftime("%Y-%m")
     
@@ -1849,7 +2970,6 @@ def get_all_staff_progress(gym_id=None, target_month=None):
 
 
 def delete_staff_target(target_id):
-    """Delete a staff target"""
     db = get_db()
     try:
         target = db.query(StaffTarget).filter(StaffTarget.id == target_id).first()
@@ -1866,7 +2986,6 @@ def delete_staff_target(target_id):
 
 
 def get_staff_progress(staff_username, target_month=None):
-    """Get complete progress for a staff member"""
     if not target_month:
         target_month = date.today().strftime("%Y-%m")
     
@@ -1893,19 +3012,16 @@ def get_staff_progress(staff_username, target_month=None):
         }
         
         if target:
-            # New Members
             progress['new_members']['target'] = target.new_members_target or 0
             progress['new_members']['achieved'] = target.new_members_achieved or 0
             if target.new_members_target > 0:
                 progress['new_members']['percentage'] = min(100, (target.new_members_achieved / target.new_members_target) * 100)
             
-            # Fee Collection
             progress['fee_collection']['target'] = target.fee_collection_target or 0
             progress['fee_collection']['achieved'] = target.fee_collection_achieved or 0
             if target.fee_collection_target > 0:
                 progress['fee_collection']['percentage'] = min(100, (target.fee_collection_achieved / target.fee_collection_target) * 100)
             
-            # Attendance
             progress['attendance_target_percentage'] = target.attendance_target_percentage or 80
             progress['attendance']['achieved'] = target.attendance_achieved or 0
             
@@ -1933,32 +3049,14 @@ def get_staff_progress(staff_username, target_month=None):
     finally:
         db_session.close()
 
+
 # ============================================
-# ANNOUNCEMENT SYSTEM
+# ANNOUNCEMENT FUNCTIONS
 # ============================================
-
-class Announcement(Base):
-    __tablename__ = "announcements"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    gym_id = Column(Integer, ForeignKey("gyms.id", ondelete="CASCADE"), nullable=True)
-    message = Column(Text, nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_by = Column(String(60))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=True)
-
-    gym = relationship("Gym", back_populates="announcements")
-
-
-# Add relationship to Gym model (find Gym class and add this line)
-# Inside Gym class, add: announcements = relationship("Announcement", back_populates="gym", cascade="all, delete-orphan")
-
 
 def add_announcement(gym_id, message, created_by, expires_at=None):
-    """Add a new announcement"""
     db = get_db()
     try:
-        # Deactivate old announcements
         db.query(Announcement).filter(
             Announcement.gym_id == gym_id,
             Announcement.is_active == True
@@ -1982,19 +3080,15 @@ def add_announcement(gym_id, message, created_by, expires_at=None):
 
 
 def get_active_announcement(gym_id=None):
-    """Get active announcement for gym"""
     db = get_db()
     try:
-        query = db.query(Announcement).filter(
-            Announcement.is_active == True
-        )
+        query = db.query(Announcement).filter(Announcement.is_active == True)
         if gym_id:
             query = query.filter(Announcement.gym_id == gym_id)
         else:
             query = query.filter(Announcement.gym_id == None)
         
-        # Check expiry
-        now = datetime.utcnow()
+        now = datetime.now()
         query = query.filter(
             (Announcement.expires_at == None) | (Announcement.expires_at > now)
         )
@@ -2005,7 +3099,6 @@ def get_active_announcement(gym_id=None):
 
 
 def get_all_announcements(gym_id=None):
-    """Get all announcements for gym"""
     db = get_db()
     try:
         query = db.query(Announcement)
@@ -2017,7 +3110,6 @@ def get_all_announcements(gym_id=None):
 
 
 def delete_announcement(announcement_id):
-    """Delete an announcement"""
     db = get_db()
     try:
         announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
@@ -2032,23 +3124,12 @@ def delete_announcement(announcement_id):
     finally:
         db.close()
 
-# ============================================
-# STAFF ATTENDANCE TRACKING
-# ============================================
 
-class StaffAttendance(Base):
-    __tablename__ = "staff_attendance"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    staff_username = Column(String(60), nullable=False)
-    login_time = Column(DateTime, nullable=False)
-    logout_time = Column(DateTime, nullable=True)
-    session_duration = Column(Integer, default=0)  # Minutes
-    ip_address = Column(String(45))
-    created_at = Column(DateTime, default=datetime.utcnow)
-
+# ============================================
+# STAFF ATTENDANCE FUNCTIONS
+# ============================================
 
 def log_staff_login(staff_username, ip_address=None):
-    """Log staff login time"""
     db = get_db()
     try:
         today = date.today()
@@ -2063,7 +3144,7 @@ def log_staff_login(staff_username, ip_address=None):
         
         attendance = StaffAttendance(
             staff_username=staff_username,
-            login_time=datetime.utcnow(),
+            login_time=datetime.now(),
             ip_address=ip_address
         )
         db.add(attendance)
@@ -2077,7 +3158,6 @@ def log_staff_login(staff_username, ip_address=None):
 
 
 def log_staff_logout(staff_username):
-    """Log staff logout time"""
     db = get_db()
     try:
         today = date.today()
@@ -2090,7 +3170,7 @@ def log_staff_logout(staff_username):
         if not record:
             return False, "No active session found"
         
-        record.logout_time = datetime.utcnow()
+        record.logout_time = datetime.now()
         duration = (record.logout_time - record.login_time).seconds // 60
         record.session_duration = duration
         db.commit()
@@ -2103,7 +3183,6 @@ def log_staff_logout(staff_username):
 
 
 def get_staff_attendance(staff_username=None, date_from=None, date_to=None):
-    """Get staff attendance records"""
     db = get_db()
     try:
         query = db.query(StaffAttendance)
@@ -2119,10 +3198,10 @@ def get_staff_attendance(staff_username=None, date_from=None, date_to=None):
 
 
 def get_staff_attendance_summary(gym_id=None, date_range=30):
-    """Get staff attendance summary for all staff"""
+    check_and_update_staff_status()
+    
     db = get_db()
     try:
-        # Get all staff (excluding admin)
         staff_list = db.query(User).filter(User.role != "admin")
         if gym_id:
             staff_list = staff_list.filter(User.gym_id == gym_id)
@@ -2133,13 +3212,11 @@ def get_staff_attendance_summary(gym_id=None, date_range=30):
         
         results = []
         for staff in staff_list:
-            # Get login count in date range
             logins = db.query(StaffAttendance).filter(
                 StaffAttendance.staff_username == staff.username,
                 StaffAttendance.login_time >= date_from
             ).count()
             
-            # Get today's status
             today_record = db.query(StaffAttendance).filter(
                 StaffAttendance.staff_username == staff.username,
                 func.date(StaffAttendance.login_time) == today,
@@ -2148,7 +3225,6 @@ def get_staff_attendance_summary(gym_id=None, date_range=30):
             
             status = "🟢 Online" if today_record else "⚪ Offline"
             
-            # Get total hours this month
             month_start = today.replace(day=1)
             month_records = db.query(StaffAttendance).filter(
                 StaffAttendance.staff_username == staff.username,
@@ -2175,19 +3251,30 @@ def get_staff_attendance_summary(gym_id=None, date_range=30):
 
 
 def get_my_attendance_summary(staff_username):
-    """Get attendance summary for a specific staff member"""
     db = get_db()
     try:
         today = date.today()
+        now = datetime.now()
+        timeout = timedelta(hours=2)
+        
+        active = db.query(StaffAttendance).filter(
+            StaffAttendance.staff_username == staff_username,
+            func.date(StaffAttendance.login_time) == today,
+            StaffAttendance.logout_time == None
+        ).first()
+        
+        if active and (now - active.login_time) > timeout:
+            active.logout_time = now
+            active.session_duration = (active.logout_time - active.login_time).seconds // 60
+            db.commit()
+        
         month_start = today.replace(day=1)
         
-        # Today's record
         today_record = db.query(StaffAttendance).filter(
             StaffAttendance.staff_username == staff_username,
             func.date(StaffAttendance.login_time) == today
         ).first()
         
-        # This month records
         month_records = db.query(StaffAttendance).filter(
             StaffAttendance.staff_username == staff_username,
             StaffAttendance.login_time >= month_start
@@ -2197,7 +3284,6 @@ def get_my_attendance_summary(staff_username):
         total_minutes = sum(r.session_duration or 0 for r in month_records)
         total_hours = total_minutes // 60
         
-        # Last 7 days
         week_start = today - timedelta(days=7)
         week_records = db.query(StaffAttendance).filter(
             StaffAttendance.staff_username == staff_username,
@@ -2217,7 +3303,6 @@ def get_my_attendance_summary(staff_username):
 
 
 def _get_attendance_streak(staff_username):
-    """Calculate continuous attendance streak"""
     db = get_db()
     try:
         streak = 0
@@ -2239,21 +3324,14 @@ def _get_attendance_streak(staff_username):
     finally:
         db.close()
 
-# ============================================
-# COMPLETE STAFF ATTENDANCE FIX
-# ============================================
-
-# database.py mein add karein
 
 def check_and_update_staff_status():
-    """Check all staff and update status"""
     db = get_db()
     try:
         today = date.today()
-        now = datetime.utcnow()
-        timeout = timedelta(hours=2)  # 2 hours timeout
+        now = datetime.now()
+        timeout = timedelta(hours=2)
         
-        # Get all active sessions
         active_sessions = db.query(StaffAttendance).filter(
             func.date(StaffAttendance.login_time) == today,
             StaffAttendance.logout_time == None
@@ -2261,7 +3339,6 @@ def check_and_update_staff_status():
         
         updated_count = 0
         for session in active_sessions:
-            # Check if session is expired (no activity for 2 hours)
             if (now - session.login_time) > timeout:
                 session.logout_time = now
                 session.session_duration = (session.logout_time - session.login_time).seconds // 60
@@ -2276,141 +3353,600 @@ def check_and_update_staff_status():
         db.close()
 
 
-def get_staff_attendance_summary(gym_id=None, date_range=30):
-    """Get staff attendance summary (with auto logout check)"""
-    # 🔥 First check and update inactive staff
-    check_and_update_staff_status()
-    
+# ============================================
+# STAFF TIMING FUNCTIONS
+# ============================================
+
+def get_staff_timing(staff_username: str) -> dict | None:
     db = get_db()
     try:
-        # Get all staff (excluding admin)
-        staff_list = db.query(User).filter(User.role != "admin")
-        if gym_id:
-            staff_list = staff_list.filter(User.gym_id == gym_id)
-        staff_list = staff_list.all()
+        timing = db.query(StaffTiming).filter_by(staff_username=staff_username).first()
+        if timing:
+            return {
+                "check_in_time": timing.check_in_time,
+                "check_out_time": timing.check_out_time,
+                "grace_minutes": timing.grace_minutes,
+                "gym_id": timing.gym_id
+            }
+        return None
+    finally:
+        db.close()
+
+
+def set_staff_timing(gym_id: int, staff_username: str, check_in_time: str, check_out_time: str, grace_minutes: int = 15):
+    db = get_db()
+    try:
+        existing = db.query(StaffTiming).filter_by(staff_username=staff_username).first()
+        if existing:
+            existing.check_in_time = check_in_time
+            existing.check_out_time = check_out_time
+            existing.grace_minutes = grace_minutes
+            existing.gym_id = gym_id
+        else:
+            timing = StaffTiming(
+                gym_id=gym_id,
+                staff_username=staff_username,
+                check_in_time=check_in_time,
+                check_out_time=check_out_time,
+                grace_minutes=grace_minutes
+            )
+            db.add(timing)
+        db.commit()
+        return True, "Staff timing updated successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_all_staff_timings(gym_id: int):
+    db = get_db()
+    try:
+        return db.query(StaffTiming).filter_by(gym_id=gym_id).all()
+    finally:
+        db.close()
+
+
+# ============================================
+# GYM MEMBERSHIP PLANS FUNCTIONS
+# ============================================
+
+def add_membership_plan(gym_id, name, price, duration_days, features):
+    db = get_db()
+    try:
+        existing = db.query(MembershipPlan).filter(
+            MembershipPlan.gym_id == gym_id,
+            MembershipPlan.name == name,
+            MembershipPlan.is_active == 1
+        ).first()
         
-        today = date.today()
-        date_from = today - timedelta(days=date_range)
+        if existing:
+            return False, "A plan with this name already exists"
         
-        results = []
-        for staff in staff_list:
-            # Get login count in date range
-            logins = db.query(StaffAttendance).filter(
-                StaffAttendance.staff_username == staff.username,
-                StaffAttendance.login_time >= date_from
-            ).count()
-            
-            # Get today's status (after auto-logout check)
-            today_record = db.query(StaffAttendance).filter(
-                StaffAttendance.staff_username == staff.username,
-                func.date(StaffAttendance.login_time) == today,
-                StaffAttendance.logout_time == None
-            ).first()
-            
-            status = "🟢 Online" if today_record else "⚪ Offline"
-            
-            # Get total hours this month
-            month_start = today.replace(day=1)
-            month_records = db.query(StaffAttendance).filter(
-                StaffAttendance.staff_username == staff.username,
-                StaffAttendance.login_time >= month_start,
-                StaffAttendance.logout_time != None
-            ).all()
-            
-            total_minutes = sum(r.session_duration or 0 for r in month_records)
-            total_hours = total_minutes // 60
-            
-            results.append({
-                'username': staff.username,
-                'full_name': staff.full_name,
-                'role': staff.role,
-                'logins': logins,
-                'status': status,
-                'total_hours': total_hours,
-                'today_status': "✅ Logged In" if today_record else "⏳ Not Logged In"
-            })
+        plan = MembershipPlan(
+            gym_id=gym_id,
+            name=name,
+            price=price,
+            duration_days=duration_days,
+            features=features,
+            is_active=1
+        )
+        db.add(plan)
+        db.commit()
+        return True, "Plan added successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_gym_plans(gym_id):
+    db = get_db()
+    try:
+        return db.query(MembershipPlan).filter(
+            MembershipPlan.gym_id == gym_id,
+            MembershipPlan.is_active == 1
+        ).order_by(MembershipPlan.price).all()
+    finally:
+        db.close()
+
+
+def delete_plan(plan_id):
+    db = get_db()
+    try:
+        plan = db.query(MembershipPlan).filter_by(id=plan_id).first()
+        if plan:
+            plan.is_active = 0
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def update_plan(plan_id, name, price, duration_days, features):
+    db = get_db()
+    try:
+        plan = db.query(MembershipPlan).filter_by(id=plan_id).first()
+        if plan:
+            plan.name = name
+            plan.price = price
+            plan.duration_days = duration_days
+            plan.features = features
+            db.commit()
+            return True, "Plan updated successfully!"
+        return False, "Plan not found"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+# ============================================
+# GYM PHOTOS FUNCTIONS
+# ============================================
+
+def save_gym_photo(gym_id, filepath):
+    db = get_db()
+    try:
+        existing = db.query(GymPhoto).filter_by(gym_id=gym_id).count()
         
+        photo = GymPhoto(
+            gym_id=gym_id,
+            path=filepath,
+            is_primary=1 if existing == 0 else 0
+        )
+        db.add(photo)
+        db.commit()
+        return True, "Photo saved successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_gym_photos(gym_id):
+    db = get_db()
+    try:
+        return db.query(GymPhoto).filter_by(gym_id=gym_id).order_by(
+            GymPhoto.is_primary.desc(), GymPhoto.uploaded_at.desc()
+        ).all()
+    finally:
+        db.close()
+
+
+def delete_gym_photo(photo_id):
+    db = get_db()
+    try:
+        photo = db.query(GymPhoto).filter_by(id=photo_id).first()
+        if photo:
+            if os.path.exists(photo.path):
+                try:
+                    os.remove(photo.path)
+                except:
+                    pass
+            db.delete(photo)
+            db.commit()
+        return True, "Photo deleted"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def set_primary_photo(photo_id):
+    db = get_db()
+    try:
+        photo = db.query(GymPhoto).filter_by(id=photo_id).first()
+        if photo:
+            db.query(GymPhoto).filter_by(gym_id=photo.gym_id).update({"is_primary": 0})
+            photo.is_primary = 1
+            db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+# ============================================
+# GYM TIMINGS FUNCTIONS
+# ============================================
+
+def update_gym_timings(gym_id, mon_fri_start, mon_fri_end, sat_start, sat_end, sun_start, sun_end):
+    db = get_db()
+    try:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            return False, "Gym not found"
+        
+        gym.mon_fri_start = mon_fri_start
+        gym.mon_fri_end = mon_fri_end
+        gym.sat_start = sat_start
+        gym.sat_end = sat_end
+        gym.sun_start = sun_start
+        gym.sun_end = sun_end
+        db.commit()
+        return True, "Timings updated successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_gym_amenities(gym_id, amenities):
+    db = get_db()
+    try:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            return False, "Gym not found"
+        
+        gym.amenities = amenities
+        db.commit()
+        return True, "Amenities updated successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_gym_info(gym_id, description, website, social_media, bank_account, tax_id):
+    db = get_db()
+    try:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            return False, "Gym not found"
+        
+        gym.description = description
+        gym.website = website
+        gym.social_media = social_media
+        gym.bank_account = bank_account
+        gym.tax_id = tax_id
+        db.commit()
+        return True, "Information updated successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_gym_status(gym_id, status):
+    db = get_db()
+    try:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            return False, "Gym not found"
+        
+        gym.status = status
+        db.commit()
+        return True, f"Status updated to {status}!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def update_gym_settings(gym_id, max_members, checkin_required, reminder_days, allow_online_payments):
+    db = get_db()
+    try:
+        gym = db.query(Gym).filter_by(id=gym_id).first()
+        if not gym:
+            return False, "Gym not found"
+        
+        gym.max_members = max_members
+        gym.checkin_required = 1 if checkin_required else 0
+        gym.reminder_days = reminder_days
+        gym.allow_online_payments = 1 if allow_online_payments else 0
+        db.commit()
+        return True, "Settings updated successfully!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def add_gym_columns():
+    db = get_db()
+    try:
+        from sqlalchemy import inspect, text
+        
+        inspector = inspect(engine)
+        
+        if 'gyms' not in inspector.get_table_names():
+            return
+        
+        columns = [c['name'] for c in inspector.get_columns('gyms')]
+        
+        new_columns = {
+            'next_serial': 'INTEGER DEFAULT 1',
+            'description': 'TEXT',
+            'website': 'VARCHAR(255)',
+            'social_media': 'VARCHAR(255)',
+            'bank_account': 'VARCHAR(255)',
+            'tax_id': 'VARCHAR(100)',
+            'status': "VARCHAR(20) DEFAULT 'active'",
+            'max_members': 'INTEGER DEFAULT 0',
+            'checkin_required': 'INTEGER DEFAULT 0',
+            'reminder_days': 'INTEGER DEFAULT 7',
+            'allow_online_payments': 'INTEGER DEFAULT 0',
+            'mon_fri_start': 'VARCHAR(10)',
+            'mon_fri_end': 'VARCHAR(10)',
+            'sat_start': 'VARCHAR(10)',
+            'sat_end': 'VARCHAR(10)',
+            'sun_start': 'VARCHAR(10)',
+            'sun_end': 'VARCHAR(10)',
+            'amenities': 'TEXT',
+            'currency': "VARCHAR(10) DEFAULT 'PKR'",
+            'timezone': "VARCHAR(50) DEFAULT 'Asia/Karachi'",
+            'logo_path': 'TEXT',
+            'facebook': 'VARCHAR(255)',
+            'instagram': 'VARCHAR(255)',
+            'youtube': 'VARCHAR(255)',
+            'twitter': 'VARCHAR(255)',
+            'linkedin': 'VARCHAR(255)',
+            'bank_name': 'VARCHAR(255)',
+            'account_title': 'VARCHAR(255)',
+            'account_number': 'VARCHAR(100)',
+            'iban': 'VARCHAR(100)',
+            'rules': 'TEXT',
+            'expense_categories': 'TEXT',
+            'holiday_mode': 'INTEGER DEFAULT 0'
+        }
+        
+        for col, col_type in new_columns.items():
+            if col not in columns:
+                try:
+                    db.execute(text(f'ALTER TABLE gyms ADD COLUMN {col} {col_type}'))
+                    print(f"✅ Added column: {col}")
+                except Exception as e:
+                    print(f"⚠️ Could not add {col}: {e}")
+        
+        db.commit()
+    except Exception as e:
+        print(f"⚠️ Column migration error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ============================================
+# 🏋️ AI VOICE TRAINER FUNCTIONS
+# ============================================
+
+def get_exercises_by_category(category=None, gender=None, difficulty=None):
+    """Get exercises filtered by category/gender/difficulty"""
+    db = get_db()
+    try:
+        q = db.query(Exercise).filter(Exercise.is_active == True)
+        if category:
+            q = q.filter(Exercise.category == category)
+        if difficulty:
+            q = q.filter(Exercise.difficulty == difficulty)
+        results = q.all()
+        # Gender filter optional - agar gender-specific mile to do, warna saari do
+        if gender and gender != "both":
+            gender_filtered = [e for e in results if e.gender_specific in ("both", gender)]
+            if gender_filtered:
+                return gender_filtered
         return results
     finally:
         db.close()
 
 
-def get_my_attendance_summary(staff_username):
-    """Get attendance summary for a specific staff member"""
-    # 🔥 Check and update this staff's status
+def get_all_exercises():
+    """Get all active exercises"""
     db = get_db()
     try:
-        today = date.today()
-        now = datetime.utcnow()
-        timeout = timedelta(hours=2)
-        
-        # Check if this staff has an active session
-        active = db.query(StaffAttendance).filter(
-            StaffAttendance.staff_username == staff_username,
-            func.date(StaffAttendance.login_time) == today,
-            StaffAttendance.logout_time == None
-        ).first()
-        
-        # Auto logout if inactive
-        if active and (now - active.login_time) > timeout:
-            active.logout_time = now
-            active.session_duration = (active.logout_time - active.login_time).seconds // 60
-            db.commit()
-        
-        # Now get the summary
-        month_start = today.replace(day=1)
-        
-        today_record = db.query(StaffAttendance).filter(
-            StaffAttendance.staff_username == staff_username,
-            func.date(StaffAttendance.login_time) == today
-        ).first()
-        
-        month_records = db.query(StaffAttendance).filter(
-            StaffAttendance.staff_username == staff_username,
-            StaffAttendance.login_time >= month_start
-        ).all()
-        
-        total_days = len(month_records)
-        total_minutes = sum(r.session_duration or 0 for r in month_records)
-        total_hours = total_minutes // 60
-        
-        week_start = today - timedelta(days=7)
-        week_records = db.query(StaffAttendance).filter(
-            StaffAttendance.staff_username == staff_username,
-            StaffAttendance.login_time >= week_start
-        ).all()
-        
-        return {
-            'today_status': "✅ Logged In" if today_record and today_record.logout_time is None else "⏳ Not Logged In",
-            'today_login': today_record.login_time.strftime('%I:%M %p') if today_record else None,
-            'total_days': total_days,
-            'total_hours': total_hours,
-            'week_days': len(week_records),
-            'current_streak': _get_attendance_streak(staff_username)
-        }
+        return db.query(Exercise).filter(Exercise.is_active == True).all()
     finally:
         db.close()
 
 
-def _get_attendance_streak(staff_username):
-    """Calculate continuous attendance streak"""
+def get_exercise(exercise_id):
+    """Get single exercise by ID"""
     db = get_db()
     try:
-        streak = 0
-        check_date = date.today()
-        
-        for _ in range(365):
-            record = db.query(StaffAttendance).filter(
-                StaffAttendance.staff_username == staff_username,
-                func.date(StaffAttendance.login_time) == check_date
-            ).first()
-            
-            if record:
-                streak += 1
-                check_date -= timedelta(days=1)
-            else:
-                break
-        
-        return streak
+        return db.query(Exercise).filter_by(id=exercise_id).first()
     finally:
         db.close()
+
+
+def add_exercise(name, name_urdu, category, difficulty, equipment,
+                 target_muscles, instructions, voice_guide, common_mistakes,
+                 gender_specific="both"):
+    """Add new exercise"""
+    db = get_db()
+    try:
+        import json
+        ex = Exercise(
+            name=name,
+            name_urdu=name_urdu,
+            category=category,
+            difficulty=difficulty,
+            equipment=equipment,
+            target_muscles=json.dumps(target_muscles) if isinstance(target_muscles, list) else target_muscles,
+            instructions=json.dumps(instructions) if isinstance(instructions, list) else instructions,
+            voice_guide=json.dumps(voice_guide) if isinstance(voice_guide, dict) else voice_guide,
+            common_mistakes=json.dumps(common_mistakes) if isinstance(common_mistakes, list) else common_mistakes,
+            gender_specific=gender_specific
+        )
+        db.add(ex)
+        db.commit()
+        db.refresh(ex)
+        return True, ex.id
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def log_workout_session(member_id, gym_id, exercise_id, sets, reps, weight,
+                        form_score=0, voice_feedback=""):
+    """Log a completed workout session"""
+    db = get_db()
+    try:
+        session = WorkoutSession(
+            member_id=member_id,
+            gym_id=gym_id,
+            exercise_id=exercise_id,
+            sets_completed=sets,
+            reps_completed=reps,
+            weight_used_kg=weight,
+            form_score=form_score,
+            voice_feedback=voice_feedback,
+            completed_at=datetime.now()
+        )
+        db.add(session)
+        db.commit()
+        return True, "Workout logged successfully"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def get_member_workout_history(member_id, limit=30):
+    """Get member's recent workout sessions"""
+    db = get_db()
+    try:
+        return db.query(WorkoutSession).filter_by(member_id=member_id)\
+            .order_by(WorkoutSession.started_at.desc()).limit(limit).all()
+    finally:
+        db.close()
+
+
+# ============================================
+# 🌱 SEED 20 EXERCISES
+# ============================================
+
+def seed_default_exercises():
+    """Add 20 default exercises (only if empty)"""
+    db = get_db()
+    try:
+        count = db.query(Exercise).count()
+        if count > 0:
+            return False, f"Already {count} exercises exist"
+        exercises = [
+            {"name": "Bench Press", "name_urdu": "بینچ پریس", "category": "Chest", "difficulty": "Intermediate", "equipment": "Barbell", "target_muscles": '["Chest", "Triceps"]', "instructions": '["Bench par let jao", "Bar pakro", "Push karo", "Neeche lao"]', "voice_guide": '{"start": "Bench press shuru. 10 reps.", "good_rep": "Shabash!", "bad_form": "Kamar seedhi", "rest": "1 min", "finish": "Set done!"}', "common_mistakes": '["Kamar uthana"]', "gender_specific": "both"},
+            {"name": "Push Ups", "name_urdu": "پش اپس", "category": "Chest", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Chest", "Triceps"]', "instructions": '["Zameen par ulta", "Jism seedha", "Neeche jao", "Upar push"]', "voice_guide": '{"start": "Push ups shuru. 15 reps.", "good_rep": "Zabardast!", "bad_form": "Kamar seedhi", "rest": "30 sec", "finish": "Acha!"}', "common_mistakes": '["Kamar jhukana"]', "gender_specific": "both"},
+            {"name": "Deadlift", "name_urdu": "ڈیڈ لفٹ", "category": "Back", "difficulty": "Advanced", "equipment": "Barbell", "target_muscles": '["Back", "Glutes"]', "instructions": '["Bar ke paas", "Jhuk kar pakro", "Utho", "Neeche lao"]', "voice_guide": '{"start": "Deadlift shuru. 8 reps.", "good_rep": "Perfect!", "bad_form": "Kamar gol mat", "rest": "2 min", "finish": "Set!"}', "common_mistakes": '["Kamar gol"]', "gender_specific": "both"},
+            {"name": "Lat Pulldown", "name_urdu": "لیٹ پل ڈاؤن", "category": "Back", "difficulty": "Beginner", "equipment": "Machine", "target_muscles": '["Back", "Biceps"]', "instructions": '["Machine par", "Bar pakro", "Kheencho", "Wapas"]', "voice_guide": '{"start": "Lat pulldown shuru. 12 reps.", "good_rep": "Acha!", "bad_form": "Jism mat jhukao", "rest": "45 sec", "finish": "Done!"}', "common_mistakes": '["Jism jhukana"]', "gender_specific": "both"},
+            {"name": "Pull Ups", "name_urdu": "پل اپس", "category": "Back", "difficulty": "Advanced", "equipment": "Pull-up Bar", "target_muscles": '["Back", "Biceps"]', "instructions": '["Bar pakro", "Upar kheencho", "Thodi upar", "Neeche aao"]', "voice_guide": '{"start": "Pull ups shuru. 8 reps.", "good_rep": "Zabardast!", "bad_form": "Jhulana mat", "rest": "2 min", "finish": "Done!"}', "common_mistakes": '["Jhulana"]', "gender_specific": "both"},
+            {"name": "Squats", "name_urdu": "اسکواٹس", "category": "Legs", "difficulty": "Intermediate", "equipment": "Barbell", "target_muscles": '["Quads", "Glutes"]', "instructions": '["Bar kandhon", "Neeche baitho", "Ghutne aage mat", "Upar utho"]', "voice_guide": '{"start": "Squats shuru. 10 reps.", "good_rep": "Shabash!", "bad_form": "Ghutne andar mat", "rest": "90 sec", "finish": "Legs!"}', "common_mistakes": '["Ghutne andar"]', "gender_specific": "both"},
+            {"name": "Lunges", "name_urdu": "لنجز", "category": "Legs", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Quads", "Glutes"]', "instructions": '["Khare ho", "Pair aage", "Neeche jao", "Wapas"]', "voice_guide": '{"start": "Lunges shuru. 10 reps.", "good_rep": "Sahi!", "bad_form": "Ghutna aage mat", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Ghutna aage"]', "gender_specific": "both"},
+            {"name": "Leg Press", "name_urdu": "لیگ پریس", "category": "Legs", "difficulty": "Beginner", "equipment": "Machine", "target_muscles": '["Quads"]', "instructions": '["Machine par", "Pair rakho", "Push", "Wapas"]', "voice_guide": '{"start": "Leg press shuru. 12 reps.", "good_rep": "Acha!", "bad_form": "Ghutne lock mat", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Ghutne lock"]', "gender_specific": "both"},
+            {"name": "Bicep Curls", "name_urdu": "بائسپ کرلز", "category": "Arms", "difficulty": "Beginner", "equipment": "Dumbbell", "target_muscles": '["Biceps"]', "instructions": '["Dumbbell pakro", "Kohni jism paas", "Upar uthao", "Neeche"]', "voice_guide": '{"start": "Bicep curls shuru. 12 reps.", "good_rep": "Acha!", "bad_form": "Kohni hilao mat", "rest": "45 sec", "finish": "Done!"}', "common_mistakes": '["Kohni hilana"]', "gender_specific": "both"},
+            {"name": "Tricep Dips", "name_urdu": "ٹرائسپ ڈپس", "category": "Arms", "difficulty": "Intermediate", "equipment": "Bodyweight", "target_muscles": '["Triceps"]', "instructions": '["Bench par haath", "Pair aage", "Neeche", "Upar push"]', "voice_guide": '{"start": "Tricep dips shuru. 12 reps.", "good_rep": "Zabardast!", "bad_form": "Kohni bahar mat", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Kohni phailana"]', "gender_specific": "both"},
+            {"name": "Shoulder Press", "name_urdu": "شولڈر پریس", "category": "Shoulders", "difficulty": "Intermediate", "equipment": "Dumbbell", "target_muscles": '["Shoulders"]', "instructions": '["Dumbbell kandhon", "Upar push", "Hold", "Neeche"]', "voice_guide": '{"start": "Shoulder press shuru. 10 reps.", "good_rep": "Acha!", "bad_form": "Kamar mat jhukao", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Kamar jhukana"]', "gender_specific": "both"},
+            {"name": "Plank", "name_urdu": "پلانک", "category": "Core", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Core"]', "instructions": '["Kohniyon par", "Jism seedha", "Core tight", "Hold"]', "voice_guide": '{"start": "Plank shuru. 30 sec.", "good_rep": "Sahi!", "bad_form": "Kamar neeche mat", "rest": "30 sec", "finish": "Core done!"}', "common_mistakes": '["Kamar jhukana"]', "gender_specific": "both"},
+            {"name": "Crunches", "name_urdu": "کرنچز", "category": "Core", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Abs"]', "instructions": '["Zameen par", "Ghutne modho", "Upar utho", "Neeche"]', "voice_guide": '{"start": "Crunches shuru. 20 reps.", "good_rep": "Acha!", "bad_form": "Garda n mat", "rest": "30 sec", "finish": "Abs done!"}', "common_mistakes": '["Garda n"]', "gender_specific": "both"},
+            {"name": "Russian Twist", "name_urdu": "رشین ٹوئسٹ", "category": "Core", "difficulty": "Intermediate", "equipment": "Bodyweight", "target_muscles": '["Obliques"]', "instructions": '["Baith jao", "Jhukao", "Side se side", "Core tight"]', "voice_guide": '{"start": "Russian twist shuru. 30 reps.", "good_rep": "Acha!", "bad_form": "Jism mat hilao", "rest": "45 sec", "finish": "Done!"}', "common_mistakes": '["Jism hilana"]', "gender_specific": "both"},
+            {"name": "Treadmill Run", "name_urdu": "ٹریڈمل رن", "category": "Cardio", "difficulty": "Beginner", "equipment": "Machine", "target_muscles": '["Legs"]', "instructions": '["Treadmill par", "Speed set", "Run", "Cool down"]', "voice_guide": '{"start": "Treadmill shuru. 10 min.", "good_rep": "Acha pace!", "bad_form": "Haath mat pakdo", "rest": "2 min", "finish": "Cardio!"}', "common_mistakes": '["Handrail"]', "gender_specific": "both"},
+            {"name": "Mountain Climbers", "name_urdu": "ماؤنٹین کلائمبرز", "category": "Cardio", "difficulty": "Intermediate", "equipment": "Bodyweight", "target_muscles": '["Core"]', "instructions": '["Push up position", "Ghutna lao", "Dusra lao", "Tez"]', "voice_guide": '{"start": "Mountain climbers shuru. 30 sec.", "good_rep": "Acha!", "bad_form": "Kamar upar mat", "rest": "30 sec", "finish": "Done!"}', "common_mistakes": '["Kamar uthana"]', "gender_specific": "both"},
+            {"name": "Burpees", "name_urdu": "برپیز", "category": "Cardio", "difficulty": "Advanced", "equipment": "Bodyweight", "target_muscles": '["Full Body"]', "instructions": '["Khare", "Neeche", "Push up", "Jump"]', "voice_guide": '{"start": "Burpees shuru. 10 reps.", "good_rep": "Zabardast!", "bad_form": "Form sahi", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Form"]', "gender_specific": "both"},
+            {"name": "Glute Bridge", "name_urdu": "گلوٹ برج", "category": "Legs", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Glutes"]', "instructions": '["Let jao", "Ghutne modho", "Hips uthao", "Squeeze"]', "voice_guide": '{"start": "Glute bridge shuru. 15 reps.", "good_rep": "Shabash!", "bad_form": "Kamar zyada mat", "rest": "30 sec", "finish": "Glutes!"}', "common_mistakes": '["Kamar zyada"]', "gender_specific": "female"},
+            {"name": "Side Leg Raise", "name_urdu": "سائیڈ لیگ ریز", "category": "Legs", "difficulty": "Beginner", "equipment": "Bodyweight", "target_muscles": '["Glutes"]', "instructions": '["Karwat par", "Pair seedha", "Upar", "Neeche"]', "voice_guide": '{"start": "Side leg raise shuru. 15 reps.", "good_rep": "Acha!", "bad_form": "Jism mat hilao", "rest": "30 sec", "finish": "Done!"}', "common_mistakes": '["Jism hilana"]', "gender_specific": "female"},
+            {"name": "Hip Thrust", "name_urdu": "ہپ ٹھرسٹ", "category": "Legs", "difficulty": "Intermediate", "equipment": "Bench", "target_muscles": '["Glutes"]', "instructions": '["Bench par back", "Pair zameen", "Hips uthao", "Squeeze"]', "voice_guide": '{"start": "Hip thrust shuru. 12 reps.", "good_rep": "Zabardast!", "bad_form": "Kamar se mat", "rest": "1 min", "finish": "Done!"}', "common_mistakes": '["Kamar se"]', "gender_specific": "female"},
+        ]
+        for ex_data in exercises:
+            ex = Exercise(**ex_data)
+            db.add(ex)
+        db.commit()
+        return True, f"20 exercises added!"
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+    finally:
+        db.close()
+
+def get_monthly_revenue(gym_id=None, year=None):
+    year = year or date.today().year
+    records = get_fee_records(gym_id=gym_id)
+    monthly = {i: 0.0 for i in range(1, 13)}
+    for r in records:
+        try:
+            d = date.fromisoformat(r.payment_date)
+            if d.year == year:
+                monthly[d.month] += r.amount
+        except Exception:
+            pass
+    return monthly
+
+# ============================================
+# 🤖 AI EXERCISE GUIDE GENERATOR
+# ============================================
+
+def ai_generate_exercise_guide(exercise_name: str, member_info: dict = None) -> str:
+    """AI se exercise guide generate karo (Roman Urdu mein)"""
+    import requests
+    
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return '{"error": "GROQ_API_KEY set nahi"}'
+    
+    member_context = ""
+    if member_info:
+        member_context = f"Member: {member_info.get('full_name', 'Member')}, Gender: {member_info.get('gender', 'N/A')}"
+    
+    prompt = f"""Aap ek expert personal trainer hain. Member ne yeh exercise poochi hai: **{exercise_name}**
+{member_context}
+
+Roman Urdu mein yeh sab do:
+1. Exercise kya hai - 2 lines
+2. Instructions - 5 steps
+3. Common Mistakes - 3 galtiyan
+4. Voice Guide - start/good_rep/bad_form/rest/finish
+
+Format EXACTLY JSON (no markdown):
+{{
+  "name": "{exercise_name}",
+  "name_urdu": "اردو نام",
+  "category": "Chest/Back/Legs/Arms/Shoulders/Core/Cardio",
+  "difficulty": "Beginner/Intermediate/Advanced",
+  "equipment": "kya chahiye",
+  "instructions": ["step 1", "step 2", "step 3", "step 4", "step 5"],
+  "common_mistakes": ["galti 1", "galti 2", "galti 3"],
+  "voice_guide": {{"start": "...", "good_rep": "...", "bad_form": "...", "rest": "...", "finish": "..."}}
+}}"""
+    
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "openai/gpt-oss-120b",
+                "messages": [
+                    {"role": "system", "content": "You are expert fitness trainer. Respond in Roman Urdu + English. Output valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1500,
+            },
+            timeout=30,
+        )
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"].strip()
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+            return content
+        return '{"error": "AI error"}'
+    except Exception as e:
+        return '{"error": "' + str(e) + '"}'

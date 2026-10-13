@@ -268,7 +268,7 @@ def render(gym_id, role, current_user):
     with col_sel2:
         st.write("")
         st.write("")
-        if st.button("🔄 Refresh Data", use_container_width=True):
+        if st.button("🔄 Refresh Data", width="stretch"):
             st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
@@ -392,10 +392,10 @@ def render(gym_id, role, current_user):
                 submitted = st.form_submit_button(
                     "💾 Add Expense",
                     type="primary",
-                    use_container_width=True
+                    width="stretch"
                 )
             with col_btn2:
-                if st.form_submit_button("🔄 Reset", use_container_width=True):
+                if st.form_submit_button("🔄 Reset", width="stretch"):
                     st.rerun()
             
             if submitted:
@@ -444,7 +444,7 @@ def render(gym_id, role, current_user):
         with col_f4:
             st.write("")
             st.write("")
-            if st.button("🔄 Apply", use_container_width=True):
+            if st.button("🔄 Apply", width="stretch"):
                 st.rerun()
         
         # Filter expenses
@@ -481,7 +481,7 @@ def render(gym_id, role, current_user):
             # Display table
             st.dataframe(
                 df[["Date", "Category", "Amount", "Description", "Staff", "Status"]],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=400,
                 column_config={
@@ -506,7 +506,7 @@ def render(gym_id, role, current_user):
             # Export
             col_exp1, col_exp2, col_exp3 = st.columns([1, 1, 3])
             with col_exp1:
-                if st.button("⬇️ Export CSV", use_container_width=True):
+                if st.button("⬇️ Export CSV", width="stretch"):
                     csv_buf = io.StringIO()
                     df.to_csv(csv_buf, index=False)
                     st.download_button(
@@ -514,11 +514,11 @@ def render(gym_id, role, current_user):
                         data=csv_buf.getvalue().encode(), 
                         file_name=f"expenses_{date.today()}.csv", 
                         mime="text/csv",
-                        use_container_width=True
+                        width="stretch"
                     )
             
             with col_exp2:
-                if st.button("📋 Copy Report", use_container_width=True):
+                if st.button("📋 Copy Report", width="stretch"):
                     gym_name = next((g.name for g in gyms if g.id == sel_gid), "GymPro") if sel_gid else "All Gyms"
                     report = generate_expense_report(filtered_expenses, gym_name)
                     st.code(report, language="text")
@@ -549,7 +549,7 @@ def render(gym_id, role, current_user):
                                 new_description = st.text_area("Description", value=selected_exp.description or "")
                                 new_staff = st.text_input("Staff Name", value=selected_exp.staff_name or "")
                                 
-                                if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                                if st.form_submit_button("💾 Save Changes", type="primary", width="stretch"):
                                     # ✅ Try update_expense if available
                                     if hasattr(db, 'update_expense'):
                                         ok, msg = db.update_expense(
@@ -575,7 +575,7 @@ def render(gym_id, role, current_user):
                     with st.expander("🗑️ Delete Record", expanded=False):
                         st.warning(f"⚠️ Delete this expense record?")
                         st.caption("This cannot be undone!")
-                        if st.button("🚨 Confirm Delete", type="primary", use_container_width=True):
+                        if st.button("🚨 Confirm Delete", type="primary", width="stretch"):
                             if hasattr(db, 'delete_expense'):
                                 ok, msg = db.delete_expense(selected_id)
                                 if ok:
@@ -635,7 +635,7 @@ def render(gym_id, role, current_user):
                     showlegend=False,
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             
             # Monthly trend
             st.subheader("📈 Monthly Trend")
@@ -672,7 +672,7 @@ def render(gym_id, role, current_user):
                     margin=dict(l=40, r=40, t=60, b=40),
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             
             # Staff breakdown
             st.subheader("👤 Staff Expenses")
@@ -703,7 +703,7 @@ def render(gym_id, role, current_user):
                         margin=dict(l=20, r=20, t=40, b=20),
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 
                 with col_m2:
                     st.markdown("**👤 Staff Totals:**")

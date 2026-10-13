@@ -394,7 +394,7 @@ def render(gym_id, role, username):
                     <div style="font-size:0.8rem;color:#94A3B8;">🆔 {member.serial_number}</div>
                     """, unsafe_allow_html=True)
                     
-                    if st.button("✅ Present", key=f"btn_{member.id}", use_container_width=True):
+                    if st.button("✅ Present", key=f"btn_{member.id}", width="stretch"):
                         ok, msg = db.mark_member_present(member.id, hsel_gid, date.today())
                         db.update_audit_by_member(member.id, "Verified")
                         if ok:
@@ -457,7 +457,7 @@ def render(gym_id, role, username):
                     actual = st.number_input("💰 Actual Amount Observed (PKR)", min_value=0.0, format="%.2f")
                     description = st.text_input("📝 Description / Notes")
                     
-                    if st.form_submit_button("✅ Submit Cross-Verification", type="primary", use_container_width=True):
+                    if st.form_submit_button("✅ Submit Cross-Verification", type="primary", width="stretch"):
                         status, msg = db.add_audit_entry(
                             gym_id=sel_gid, 
                             entry_type="fee", 
@@ -1045,7 +1045,7 @@ def render(gym_id, role, username):
                     data=csv_buf.getvalue(),
                     file_name=f"staff_activity_{date.today()}.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                     key="sm_csv_download",
                 )
             else:
@@ -1060,7 +1060,7 @@ def render(gym_id, role, username):
         st.markdown("#### 🤖 AI Fraud Risk Analyzer")
         st.caption("AI 30 din ka pura data analyze karke har staff ka risk level aur chori ke patterns batayega.")
 
-        if st.button("🔍 AI Se Analyze Karwao", type="primary", use_container_width=True, key="ai_fraud_btn"):
+        if st.button("🔍 AI Se Analyze Karwao", type="primary", width="stretch", key="ai_fraud_btn"):
             with st.spinner("🤖 AI data analyze kar raha hai — please wait..."):
                 try:
                     from datetime import timedelta

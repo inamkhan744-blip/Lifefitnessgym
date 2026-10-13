@@ -1,9 +1,16 @@
 # fee_collection.py - ULTIMATE PROFESSIONAL VERSION
 # WITH ENHANCED OCR, PARTIAL PAYMENT, PDF/EXCEL EXPORT, MEMBER HISTORY, ADMIN PANEL WITH PHOTO
-# FIXED: Admin panel only deletes fee records, NOT members
+# FIXED: Admin panel shows ALL records (not just current month)
+# FIXED: Today's collection uses created_at (collection date) not payment_date
 # FIXED: Plain text receipt (NO HTML/CSS - works everywhere)
 # FIXED: Auto-fill fee amount, period start, period end when member selected
 # FIXED: Dynamic keys for number_input so values update properly
+# NEW: Search in History tab
+# FIXED: Payment Date = Today (LOCKED - cannot change)
+# FIXED: Period Start = Today
+# FIXED: Period End = Period Start + 30 days
+# FIXED: Admin Panel shows ALL months entries
+# FIXED: Fee Status shows ONLY Active members
 
 import streamlit as st
 import pandas as pd
@@ -20,6 +27,45 @@ import re
 import numpy as np
 import json
 import sqlite3
+
+
+# ═══════════════════════════════════════════════════════════
+# 🚀 CACHED DB HELPERS — speed boost
+# ═══════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_members(gym_id):
+    """Cached members list — 60 sec TTL"""
+    if gym_id is None:
+        all_m = []
+        for g in db.get_all_gyms():
+            all_m.extend(db.get_members(gym_id=g.id))
+        return all_m
+    return db.get_members(gym_id=gym_id)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_fee_records(gym_id, date_from=None, date_to=None):
+    """Cached fee records — 60 sec TTL"""
+    df = str(date_from) if date_from else None
+    dt = str(date_to) if date_to else None
+    return db.get_fee_records(gym_id=gym_id, date_from=df, date_to=dt)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_all_fee_records(gym_id):
+    """All fee records — cached"""
+    if gym_id is None:
+        all_r = []
+        for g in db.get_all_gyms():
+            all_r.extend(db.get_fee_records(gym_id=g.id))
+        return all_r
+    return db.get_fee_records(gym_id=gym_id)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_fee_records_by_member(member_id):
+    """Fee records for a member"""
+    return db.get_fee_records(member_id=member_id)
+
+
 
 # ============================================
 # PDF EXPORT (ReportLab)
@@ -79,6 +125,66 @@ from printer_utils import (
     format_receipt, render_print_preview,
     render_print_component
 )
+
+
+# ═══════════════════════════════════════════════════════════
+# 🚀 BULK STATUS LOADER
+# ═══════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _bulk_member_status(gym_id, member_ids_tuple):
+    """Load payment status for ALL members in ONE query"""
+    if not member_ids_tuple:
+        return {}
+    
+    # Get ALL records once
+    if gym_id is None:
+        all_records = []
+        for g in db.get_all_gyms():
+            all_records.extend(db.get_fee_records(gym_id=g.id))
+    else:
+        all_records = db.get_fee_records(gym_id=gym_id)
+    
+    # Group by member (latest first)
+    member_latest = {}
+    for r in all_records:
+        mid = r.member_id
+        if mid not in member_latest:
+            member_latest[mid] = r
+        else:
+            try:
+                if r.payment_date and member_latest[mid].payment_date:
+                    if str(r.payment_date) > str(member_latest[mid].payment_date):
+                        member_latest[mid] = r
+            except Exception:
+                pass
+    
+    today = date.today()
+    result = {}
+    
+    for mid in member_ids_tuple:
+        r = member_latest.get(mid)
+        if r and r.period_end:
+            try:
+                pe = pd.to_datetime(r.period_end).date()
+                if pe >= today:
+                    dl = (pe - today).days
+                    if dl <= 7:
+                        result[mid] = ("upcoming", f"🟡 {dl}d left", "#F59E0B", "#1E293B")
+                    else:
+                        result[mid] = ("paid", f"✅ Paid ({dl}d left)", "#10B981", "white")
+                else:
+                    do = (today - pe).days
+                    result[mid] = ("unpaid", f"🔴 Expired ({do}d)", "#EF4444", "white")
+            except Exception:
+                result[mid] = ("unpaid", "⏳ Pending", "#F59E0B", "#1E293B")
+        else:
+            result[mid] = ("unpaid", "⏳ Pending", "#F59E0B", "#1E293B")
+    
+    return result
+
+
+
 
 # ============================================
 # IMAGE HELPERS (OPTIMIZED + ORIENTATION FIX)
@@ -1214,11 +1320,11 @@ def get_member_payment_status(member):
 
 
 # ============================================
-# COLLECTION SUMMARY CARDS
+# COLLECTION SUMMARY CARDS - FIXED VERSION
 # ============================================
 
 def render_collection_summary(sel_gym_id, date_from, date_to, gyms=None):
-    """Render collection summary cards at top"""
+    """Render collection summary cards at top - FIXED: Uses created_at for today's collection"""
     
     if sel_gym_id is None and gyms:
         all_records = []
@@ -1234,15 +1340,71 @@ def render_collection_summary(sel_gym_id, date_from, date_to, gyms=None):
     avg_payment = total_collected / total_members if total_members > 0 else 0
     
     today = date.today()
-    if sel_gym_id is None and gyms:
-        today_records = []
-        for g in gyms:
-            recs = db.get_fee_records(gym_id=g.id, date_from=today, date_to=today)
-            today_records.extend(recs)
-    else:
-        today_records = db.get_fee_records(gym_id=sel_gym_id, date_from=today, date_to=today)
+    
+    # 🔥 FIXED: Today's collection = records where created_at == today
+    today_records = []
+    for r in records:
+        if hasattr(r, 'created_at') and r.created_at:
+            try:
+                if isinstance(r.created_at, str):
+                    created_date = pd.to_datetime(r.created_at).date()
+                else:
+                    created_date = r.created_at.date() if hasattr(r.created_at, 'date') else r.created_at
+                if created_date == today:
+                    today_records.append(r)
+                    continue
+            except:
+                pass
+        
+        # Fallback: agar created_at nahi hai toh payment_date use karein
+        if r.payment_date:
+            if isinstance(r.payment_date, str):
+                try:
+                    r_date = pd.to_datetime(r.payment_date).date()
+                except:
+                    r_date = None
+            else:
+                r_date = r.payment_date.date() if hasattr(r.payment_date, 'date') else r.payment_date
+            
+            if r_date == today:
+                today_records.append(r)
+    
+    # 🔥 If no records found in current date range, fetch today's records separately
+    if not today_records:
+        try:
+            if sel_gym_id is None and gyms:
+                for g in gyms:
+                    recs = db.get_fee_records(gym_id=g.id, date_from=today, date_to=today)
+                    for r in recs:
+                        if hasattr(r, 'created_at') and r.created_at:
+                            try:
+                                if isinstance(r.created_at, str):
+                                    created_date = pd.to_datetime(r.created_at).date()
+                                else:
+                                    created_date = r.created_at.date() if hasattr(r.created_at, 'date') else r.created_at
+                                if created_date == today:
+                                    today_records.append(r)
+                            except:
+                                pass
+            else:
+                recs = db.get_fee_records(gym_id=sel_gym_id, date_from=today, date_to=today)
+                for r in recs:
+                    if hasattr(r, 'created_at') and r.created_at:
+                        try:
+                            if isinstance(r.created_at, str):
+                                created_date = pd.to_datetime(r.created_at).date()
+                            else:
+                                created_date = r.created_at.date() if hasattr(r.created_at, 'date') else r.created_at
+                            if created_date == today:
+                                today_records.append(r)
+                        except:
+                            pass
+        except:
+            pass
+    
     today_total = sum(r.amount for r in today_records)
     
+    # This month
     month_start = today.replace(day=1)
     if sel_gym_id is None and gyms:
         month_records = []
@@ -1253,24 +1415,23 @@ def render_collection_summary(sel_gym_id, date_from, date_to, gyms=None):
         month_records = db.get_fee_records(gym_id=sel_gym_id, date_from=month_start, date_to=today)
     month_total = sum(r.amount for r in month_records)
     
-    if sel_gym_id is None and gyms:
-        all_members = []
-        for g in gyms:
-            all_members.extend(db.get_members(gym_id=g.id))
-    else:
-        all_members = db.get_members(gym_id=sel_gym_id) if sel_gym_id else []
+    # 🚀 FAST: use cached members + bulk status
+    all_members = _cached_members(sel_gym_id)
+    
+    member_ids = tuple(m.id for m in all_members)
+    status_map = _bulk_member_status(sel_gym_id, member_ids)
     
     paid_count = 0
     unpaid_count = 0
     upcoming_count = 0
     
     for m in all_members:
-        status_type, _, _, _ = get_member_payment_status(m)
-        if status_type == "paid":
+        st_type = status_map.get(m.id, ("unpaid",))[0]
+        if st_type == "paid":
             paid_count += 1
-        elif status_type == "unpaid":
+        elif st_type == "unpaid":
             unpaid_count += 1
-        elif status_type == "upcoming":
+        elif st_type == "upcoming":
             upcoming_count += 1
     
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -1725,11 +1886,12 @@ def render_collect_fee(gym_id, current_user):
         st.info("Add a gym first.")
         return
 
+    # 🖨️ PRINT — Show print button (not text receipt)
     pending = st.session_state.pop('pending_print', None)
     if pending:
         st.success("✅ Payment recorded!")
-        render_receipt_plain(pending['data'])
         st.divider()
+        # 🖨️ Print button — actual print dialog
         render_print_component(pending['data'], copies=pending['copies'])
         st.divider()
 
@@ -1812,14 +1974,10 @@ def render_collect_fee(gym_id, current_user):
             sel_gym_id = gym_opts[gym_sel]
             gym_sel_name = gym_sel
         
+        # 🚀 FAST: cached members
+        members = _cached_members(sel_gym_id)
         if sel_gym_id is None:
-            all_members = []
-            for g in gyms:
-                all_members.extend(db.get_members(gym_id=g.id))
-            members = all_members
             st.info(f"📊 Showing members from ALL gyms ({len(members)} total)")
-        else:
-            members = db.get_members(gym_id=sel_gym_id)
 
         search_query = st.text_input("🔍 Search Member", key="cf_search", placeholder="Type name or serial number...")
 
@@ -1981,8 +2139,8 @@ def render_collect_fee(gym_id, current_user):
             today = date.today()
             month_start = today.replace(day=1)
             
-            # Get all fee records for this member in current month
-            all_records = db.get_fee_records(member_id=sel_mem.id)
+            # 🚀 FAST: cached member records
+            all_records = _cached_fee_records_by_member(sel_mem.id)
             this_month_payments = []
             for r in all_records:
                 if r.payment_date:
@@ -2089,55 +2247,40 @@ def render_collect_fee(gym_id, current_user):
             payment_method = st.selectbox("💳 Payment Method *", db.PAYMENT_METHODS, key="cf_method")
 
         with f_c2:
-            payment_date = st.date_input("📅 Payment Date *", value=date.today(), key="cf_date")
+            # 🔥 FIXED: Payment Date = Today (LOCKED - cannot change)
+            today = date.today()
+            st.date_input(
+                "📅 Payment Date *",
+                value=today,
+                key="cf_date",
+                disabled=True,
+                help="Payment date is always today's date"
+            )
+            payment_date = today  # Always today's date
             
-            # 🔥 FIXED: Dynamic key for period start based on member_id
+                        # 🔥 FIXED: Period Start = TODAY (not expiry date)
             period_start_key = f"cf_period_start_{member_id}" if member_id else "cf_period_start_default"
             
-            if sel_mem and sel_mem.expiry_date:
-                try:
-                    current_expiry = sel_mem.expiry_date
-                    if isinstance(current_expiry, str):
-                        current_expiry = pd.to_datetime(current_expiry).date()
-                    else:
-                        current_expiry = current_expiry.date() if hasattr(current_expiry, 'date') else current_expiry
-                    
-                    # If expired, start from today, else start from current expiry
-                    if current_expiry < date.today():
-                        default_start = date.today()
-                    else:
-                        default_start = current_expiry
-                except:
-                    default_start = date.today()
-            else:
-                default_start = date.today()
+            today = date.today()
+            default_start = today
             
-            period_start = st.date_input("📅 Period Start", value=default_start, key=period_start_key)
+            period_start = st.date_input(
+                "📅 Period Start",
+                value=default_start,
+                key=period_start_key,
+                help="Auto-filled: Today's date. Change manually if needed."
+            )
             
-            # 🔥 FIXED: Dynamic key for period end based on member_id
+            # 🔥 FIXED: Period End = Period Start + 30 days
             period_end_key = f"cf_period_end_{member_id}" if member_id else "cf_period_end_default"
             
-            # Auto-fill period end (30 days from period start)
             default_end = period_start + timedelta(days=30)
             
-            expiry_info = ""
-            if sel_mem and sel_mem.expiry_date:
-                try:
-                    current_expiry = sel_mem.expiry_date
-                    if isinstance(current_expiry, str):
-                        current_expiry = pd.to_datetime(current_expiry).date()
-                    else:
-                        current_expiry = current_expiry.date() if hasattr(current_expiry, 'date') else current_expiry
-                    if current_expiry > date.today():
-                        expiry_info = f" (Current expiry: {current_expiry})"
-                except:
-                    pass
-            
             period_end = st.date_input(
-                f"📅 Period End{expiry_info}", 
-                value=default_end, 
+                "📅 Period End",
+                value=default_end,
                 key=period_end_key,
-                help=f"⏰ Default: 30 days from Period Start ({default_end})"
+                help="Auto-filled: 30 days from Period Start. Change manually if needed."
             )
 
         notes = st.text_area("📝 Notes (optional)", height=60, key="cf_notes", placeholder="e.g., Partial payment, remaining PKR 3000")
@@ -2236,7 +2379,7 @@ def render_collect_fee(gym_id, current_user):
 
 
 # ============================================
-# TAB 2: HISTORY & ADMIN (FIXED - ONLY CURRENT MONTH ENTRIES)
+# TAB 2: HISTORY & ADMIN (WITH SEARCH) - FIXED: SHOWS ALL RECORDS
 # ============================================
 
 def render_history_admin(gym_id, role, current_user=""):
@@ -2256,7 +2399,9 @@ def render_history_admin(gym_id, role, current_user=""):
     else:
         gym_opts = {g.name: g.id for g in gyms}
     
-    col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
+    # 🔍 SEARCH IN HISTORY - Added 4th column
+    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1.5])
+    
     with col_f1:
         if user and user.role.lower() == "staff" and user.gym_id:
             staff_gym = db.get_gym(user.gym_id)
@@ -2281,8 +2426,26 @@ def render_history_admin(gym_id, role, current_user=""):
         date_from = st.date_input("📅 From Date", value=month_start, key="fc_from")
     with col_f3:
         date_to = st.date_input("📅 To Date", value=today, key="fc_to")
+    
+    # 🔍 SEARCH INPUT
+    with col_f4:
+        st.write("")
+        st.write("")
+        search_history = st.text_input("🔍 Search", placeholder="Name or Serial...", key="history_search")
 
     records = render_collection_summary(sel_gid, date_from, date_to, gyms)
+    
+    # 🔍 Filter records by search
+    if search_history and records:
+        search_lower = search_history.lower().strip()
+        filtered_records = []
+        for r in records:
+            member = db.get_member(r.member_id)
+            if member:
+                if (search_lower in (member.full_name or "").lower() or 
+                    search_lower in (member.serial_number or "").lower()):
+                    filtered_records.append(r)
+        records = filtered_records
 
     if user and user.role.lower() == "staff":
         render_staff_performance(records, current_user)
@@ -2306,12 +2469,9 @@ def render_history_admin(gym_id, role, current_user=""):
     
     st.divider()
 
-    if sel_gid is None and gyms:
-        all_members = []
-        for g in gyms:
-            all_members.extend(db.get_members(gym_id=g.id))
-    else:
-        all_members = db.get_members(gym_id=sel_gid) if sel_gid else []
+    # 🚀 FAST: cached members
+    _all = _cached_members(sel_gid)
+    all_members = [m for m in _all if m.status == "Active"]
     
     paid_members = []
     unpaid_members = []
@@ -2467,7 +2627,7 @@ def render_history_admin(gym_id, role, current_user=""):
     
     if recent_records:
         recent_data = []
-        for r in recent_records[:30]:
+        for r in recent_records:
             mem = db.get_member(r.member_id)
             recent_data.append({
                 "Date": r.payment_date,
@@ -2495,27 +2655,27 @@ def render_history_admin(gym_id, role, current_user=""):
         st.info("No payments in current month")
 
     # ============================================
-    # 🔐 ADMIN PANEL - ONLY CURRENT MONTH FEE RECORDS
+    # 🔐 ADMIN PANEL - SHOWS ALL RECORDS (FIXED)
     # ============================================
     
     st.divider()
-    st.subheader("🔐 Admin Panel - Manage Fee Records (Current Month Only)")
-    st.caption("Edit or delete **fee records** only. Members will NOT be deleted. Only current month entries shown.")
+    st.subheader("🔐 Admin Panel - Manage Fee Records (All Months)")
+    st.caption("Edit or delete **fee records** only. Members will NOT be deleted. All months entries shown.")
     
     if str(role).lower() in ["admin", "owner"]:
-        # Get only current month fee records
-        month_start = date.today().replace(day=1)
-        month_end = date.today()
-        
+        # 🔥 FIXED: Get ALL fee records (not just current month)
         if sel_gid is None and gyms:
             all_fee_records = []
             for g in gyms:
-                records = db.get_fee_records(gym_id=g.id, date_from=month_start, date_to=month_end)
+                records = db.get_fee_records(gym_id=g.id, date_from=date(2020,1,1), date_to=date.today())
                 all_fee_records.extend(records)
         else:
-            all_fee_records = db.get_fee_records(gym_id=sel_gid, date_from=month_start, date_to=month_end) if sel_gid else []
+            all_fee_records = db.get_fee_records(gym_id=sel_gid, date_from=date(2020,1,1), date_to=date.today()) if sel_gid else []
         
         if all_fee_records:
+            # Sort by date (newest first)
+            all_fee_records = sorted(all_fee_records, key=lambda r: r.payment_date if r.payment_date else "", reverse=True)
+            
             # Create selectable options
             record_opts = {}
             for r in all_fee_records:
@@ -2747,7 +2907,7 @@ def render_history_admin(gym_id, role, current_user=""):
                                 except Exception as e:
                                     st.error(f"❌ Error deleting fee record: {str(e)}")
         else:
-            st.info("No fee records found in current month.")
+            st.info("No fee records found in database.")
     else:
         st.warning("🔒 Only Admin can access this section.")
 

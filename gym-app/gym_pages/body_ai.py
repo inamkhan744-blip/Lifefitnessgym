@@ -1,6 +1,7 @@
 """
-GymPro — AI Body Coach (COMPLETE FIXED VERSION)
+GymPro — AI Body Coach (ULTIMATE ENHANCED VERSION)
 Interactive SVG body map + AI analysis + Exercise videos + Timer + Progress log
+✅ 14+ Features: Rest Timer, Progress Photos, Streak Badges, Voice Guidance, Music, Weather, Gamification
 """
 
 import streamlit as st
@@ -11,78 +12,256 @@ import json
 import time
 from datetime import date, datetime, timedelta
 import pandas as pd
+import hashlib
+import base64
+from gtts import gTTS
+import io
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GROQ AI HELPER (FIXED with latest model)
+# GROQ AI HELPER - WITH MULTI-MODEL FALLBACK
 # ─────────────────────────────────────────────────────────────────────────────
+
+STABLE_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+]
 
 def _groq(messages: list, max_tokens: int = 1800) -> str:
-    """Call Groq API with full error handling and fallback."""
+    """Call Groq API with multi-model fallback."""
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
-        return "⚠️ GROQ_API_KEY set nahi — AI unavailable. Please contact gym staff."
+        return "⚠️ GROQ_API_KEY set nahi — AI unavailable."
     
+    for model in STABLE_MODELS:
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": max_tokens},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    return data["choices"][0]["message"]["content"].strip()
+        except:
+            continue
+    
+    return "⚠️ AI unavailable. Please try again later."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEXT-TO-SPEECH (Voice Guidance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _speak(text: str):
+    """Convert text to speech for voice guidance."""
     try:
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}", 
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama-3.1-8b-instant",  # ✅ LATEST MODEL
-                "messages": messages,
-                "temperature": 0.7, 
-                "max_tokens": max_tokens
-            },
-            timeout=30,
-        )
+        tts = gTTS(text=text[:500], lang="ur", slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        st.audio(fp, format="audio/mp3", autoplay=True)
+    except:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WEATHER-BASED SUGGESTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_weather_suggestion() -> dict:
+    """Get weather-based workout suggestion."""
+    # Simple weather logic (can be enhanced with real API)
+    hour = datetime.now().hour
+    if 5 <= hour < 8:
+        return {"icon": "🌅", "suggestion": "Subah ki fresh hawa — cardio ke liye best!", "type": "cardio"}
+    elif 8 <= hour < 12:
+        return {"icon": "☀️", "suggestion": "Dopahar ka waqt — strength training karein!", "type": "strength"}
+    elif 12 <= hour < 16:
+        return {"icon": "🌤️", "suggestion": "Thoda garam hai — indoor workout karein", "type": "indoor"}
+    elif 16 <= hour < 19:
+        return {"icon": "🌅", "suggestion": "Shaam ka golden time — full body workout!", "type": "fullbody"}
+    else:
+        return {"icon": "🌙", "suggestion": "Raat ka waqt — light stretching aur yoga karein", "type": "yoga"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MUSIC RECOMMENDATIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_music_recommendation(intensity: int) -> str:
+    """Get music recommendation based on workout intensity."""
+    if intensity >= 8:
+        return "🎵 **EDM Workout Mix** — Fast beats for high intensity!"
+    elif intensity >= 5:
+        return "🎵 **Hip-Hop Workout** — Medium tempo, great for lifting!"
+    elif intensity >= 3:
+        return "🎵 **Pop Workout** — Upbeat and motivating!"
+    else:
+        return "🎵 **Lo-Fi Chill** — Relaxed pace for stretching/yoga"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKOUT STREAK & BADGES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_streak_badges(workout_log: list) -> dict:
+    """Calculate streaks and badges from workout log."""
+    if not workout_log:
+        return {"streak": 0, "badges": [], "level": 1, "total_workouts": 0}
+    
+    total = len(workout_log)
+    level = min(total // 10 + 1, 10)
+    
+    # Calculate streak
+    today = date.today()
+    streak = 0
+    check_date = today
+    workout_dates = [w["date"] for w in workout_log]
+    
+    while str(check_date) in workout_dates:
+        streak += 1
+        check_date -= timedelta(days=1)
+    
+    # Badges
+    badges = []
+    if streak >= 7:
+        badges.append("🔥 7-Day Streak")
+    if streak >= 30:
+        badges.append("🏆 30-Day Streak")
+    if total >= 50:
+        badges.append("💪 50 Workouts")
+    if total >= 100:
+        badges.append("⭐ 100 Workouts")
+    if level >= 5:
+        badges.append("🎯 Level 5")
+    if level >= 10:
+        badges.append("👑 Level 10")
+    
+    return {"streak": streak, "badges": badges, "level": level, "total_workouts": total}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROGRESS PHOTOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_progress_photos():
+    """Render before/after progress photos section."""
+    st.markdown("### 📸 Progress Photos")
+    
+    if "progress_photos" not in st.session_state:
+        st.session_state["progress_photos"] = []
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption("📅 Before")
+        photo = st.file_uploader("Upload Before Photo", type=["jpg", "jpeg", "png"], key="before_photo")
+        if photo:
+            st.session_state["progress_photos"].append({
+                "type": "before",
+                "date": date.today().isoformat(),
+                "data": base64.b64encode(photo.read()).decode()
+            })
+            st.success("✅ Before photo saved!")
+            st.rerun()
+    
+    with col2:
+        st.caption("📅 After")
+        photo = st.file_uploader("Upload After Photo", type=["jpg", "jpeg", "png"], key="after_photo")
+        if photo:
+            st.session_state["progress_photos"].append({
+                "type": "after",
+                "date": date.today().isoformat(),
+                "data": base64.b64encode(photo.read()).decode()
+            })
+            st.success("✅ After photo saved!")
+            st.rerun()
+    
+    # Show gallery
+    if st.session_state["progress_photos"]:
+        st.markdown("#### 🖼️ Your Progress Gallery")
+        cols = st.columns(3)
+        for i, p in enumerate(st.session_state["progress_photos"][-6:]):
+            with cols[i % 3]:
+                st.image(f"data:image/jpeg;base64,{p['data']}", caption=f"{p['type']} - {p['date']}", width=120)
         
-        # ✅ Check status code
-        if r.status_code != 200:
-            error_msg = f"API Error {r.status_code}"
-            try:
-                error_data = r.json()
-                if "error" in error_data:
-                    error_msg += f": {error_data['error'].get('message', 'Unknown error')}"
-            except:
-                pass
-            return f"⚠️ {error_msg}. Please try again later."
-        
-        data = r.json()
-        
-        # ✅ Check if 'choices' exists
-        if "choices" in data and len(data["choices"]) > 0:
-            return data["choices"][0]["message"]["content"].strip()
+        if st.button("🗑️ Clear All Photos"):
+            st.session_state["progress_photos"] = []
+            st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REST TIMER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_rest_timer():
+    """Render rest timer between sets."""
+    st.markdown("### ⏱️ Rest Timer")
+    
+    if "rest_timer_running" not in st.session_state:
+        st.session_state["rest_timer_running"] = False
+    if "rest_timer_end" not in st.session_state:
+        st.session_state["rest_timer_end"] = 0
+    
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    with col1:
+        rest_seconds = st.number_input("Rest (seconds)", min_value=5, max_value=300, value=60, step=5, key="rest_duration")
+    with col2:
+        if st.button("▶️ Start Rest", key="rest_start", use_container_width=True):
+            st.session_state["rest_timer_running"] = True
+            st.session_state["rest_timer_end"] = time.time() + rest_seconds
+            # Voice guidance
+            _speak(f"Rest for {rest_seconds} seconds. Take deep breaths.")
+    with col3:
+        if st.button("⏹ Stop", key="rest_stop", use_container_width=True):
+            st.session_state["rest_timer_running"] = False
+    with col4:
+        if st.button("🔊 Voice", key="rest_voice", use_container_width=True):
+            _speak(f"Rest for {rest_seconds} seconds. Relax your muscles.")
+    
+    if st.session_state["rest_timer_running"]:
+        remaining = st.session_state["rest_timer_end"] - time.time()
+        if remaining > 0:
+            mins = int(remaining // 60)
+            secs = int(remaining % 60)
+            progress = 1 - (remaining / rest_seconds)
+            color = "#34d399" if progress < 0.5 else "#fbbf24" if progress < 0.8 else "#f87171"
+            st.markdown(f"""
+            <div style="background:#0f172a;border:2px solid #7c3aed;border-radius:12px;padding:0.8rem;text-align:center;margin:0.3rem 0;">
+                <div style="font-size:2.5rem;font-weight:900;color:{color};">
+                    {mins:02d}:{secs:02d}
+                </div>
+                <div style="background:#1e293b;border-radius:99px;height:6px;margin-top:0.3rem;">
+                    <div style="height:100%;width:{progress*100:.0f}%;background:{color};border-radius:99px;transition:width 0.5s;"></div>
+                </div>
+                <div style="color:#94a3b8;font-size:0.75rem;">Rest time remaining</div>
+            </div>
+            """, unsafe_allow_html=True)
+            time.sleep(0.5)
+            st.rerun()
         else:
-            return f"⚠️ No response from AI. Please try again."
-            
-    except requests.exceptions.Timeout:
-        return "⚠️ AI is taking too long. Please try again."
-    except requests.exceptions.ConnectionError:
-        return "⚠️ Network error. Please check your internet."
-    except Exception as e:
-        return f"⚠️ AI error: {str(e)}"
+            st.success("⏰ Rest complete! Next set start karein! 🎉")
+            _speak("Rest complete! Start your next set.")
+            st.session_state["rest_timer_running"] = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# YOUTUBE SEARCH (for exercise videos)
+# YOUTUBE SEARCH (with caching)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=3600)
 def _search_youtube(query: str, max_results: int = 5) -> list:
     """Search YouTube for exercise videos."""
     try:
         import re
         import urllib.parse
         
-        # Simple search using YouTube's public API fallback
         search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         resp = requests.get(search_url, headers=headers, timeout=10)
         
-        # Extract video IDs from page
         video_ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)
         video_ids = list(dict.fromkeys(video_ids))[:max_results]
         
@@ -123,8 +302,9 @@ PRESETS = {
     "Core Strength":["core", "back", "glutes"],
 }
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# INTERACTIVE SVG BODY MAP
+# INTERACTIVE SVG BODY MAP (Enhanced)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_body_html(selected: str | None, highlight_set: set | None = None) -> str:
@@ -235,54 +415,34 @@ def _build_body_html(selected: str | None, highlight_set: set | None = None) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WORKOUT TIMER
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _render_timer():
-    """Simple countdown timer for workouts."""
-    st.markdown("### ⏱️ Workout Timer")
-    
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        minutes = st.number_input("Minutes", min_value=1, max_value=60, value=5, key="timer_minutes")
-    with col2:
-        if st.button("▶️ Start", key="timer_start", use_container_width=True):
-            st.session_state["timer_running"] = True
-            st.session_state["timer_end"] = time.time() + (minutes * 60)
-    with col3:
-        if st.button("⏹ Stop", key="timer_stop", use_container_width=True):
-            st.session_state["timer_running"] = False
-    
-    if st.session_state.get("timer_running", False):
-        remaining = st.session_state["timer_end"] - time.time()
-        if remaining > 0:
-            mins = int(remaining // 60)
-            secs = int(remaining % 60)
-            st.markdown(f"""
-            <div style="background:#0f172a;border:1px solid #7c3aed;border-radius:12px;
-                        padding:0.8rem;text-align:center;margin:0.5rem 0;">
-                <div style="font-size:2.5rem;font-weight:900;color:#a78bfa;">
-                    {mins:02d}:{secs:02d}
-                </div>
-                <div style="color:#64748b;font-size:0.8rem;">Time Remaining</div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.rerun()
-        else:
-            st.success("⏰ Timer finished! Well done! 🎉")
-            st.session_state["timer_running"] = False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# WORKOUT LOG
+# WORKOUT LOG (Enhanced with Streak Badges)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_workout_log(m):
-    """Log completed workouts."""
+    """Render workout log with streaks and badges."""
     st.markdown("### 📋 Workout Log")
     
     if "workout_log" not in st.session_state:
         st.session_state["workout_log"] = []
+    
+    # Show badges and stats
+    stats = _get_streak_badges(st.session_state["workout_log"])
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("🔥 Streak", f"{stats['streak']} days")
+    with col2:
+        st.metric("💪 Workouts", stats['total_workouts'])
+    with col3:
+        st.metric("⭐ Level", stats['level'])
+    with col4:
+        badge_count = len(stats['badges'])
+        st.metric("🏆 Badges", badge_count)
+    
+    if stats['badges']:
+        st.markdown("#### 🏅 Your Badges")
+        badge_html = " ".join([f'<span style="background:#1e293b;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.7rem;color:#a78bfa;border:1px solid #a78bfa44;">{b}</span>' for b in stats['badges']])
+        st.markdown(f'<div style="margin:0.5rem 0;">{badge_html}</div>', unsafe_allow_html=True)
     
     # Add workout
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -291,28 +451,27 @@ def _render_workout_log(m):
     with col2:
         duration = st.number_input("Duration (min)", min_value=1, max_value=180, value=30, key="log_duration")
     with col3:
-        if st.button("✅ Log Workout", key="log_btn", use_container_width=True):
-            if workout_name.strip():
-                st.session_state["workout_log"].append({
-                    "date": date.today().isoformat(),
-                    "workout": workout_name.strip(),
-                    "duration": duration,
-                    "timestamp": datetime.now().strftime("%H:%M")
-                })
-                st.success("✅ Workout logged!")
-                st.rerun()
-            else:
-                st.warning("Please enter workout name")
+        intensity = st.selectbox("💪 Intensity", [1,2,3,4,5,6,7,8,9,10], index=4, key="log_intensity")
+    
+    if st.button("✅ Log Workout", key="log_btn", use_container_width=True):
+        if workout_name.strip():
+            st.session_state["workout_log"].append({
+                "date": date.today().isoformat(),
+                "workout": workout_name.strip(),
+                "duration": duration,
+                "intensity": intensity,
+                "timestamp": datetime.now().strftime("%H:%M")
+            })
+            _speak(f"Great job! {workout_name} logged. Keep it up!")
+            st.success("✅ Workout logged!")
+            st.rerun()
+        else:
+            st.warning("Please enter workout name")
     
     # Show history
     if st.session_state["workout_log"]:
         df = pd.DataFrame(st.session_state["workout_log"])
         st.dataframe(df, hide_index=True, use_container_width=True)
-        
-        # Stats
-        total_workouts = len(df)
-        total_minutes = df["duration"].sum() if "duration" in df.columns else 0
-        st.caption(f"Total: {total_workouts} workouts · {total_minutes} minutes")
         
         if st.button("🗑️ Clear Log", key="clear_log"):
             st.session_state["workout_log"] = []
@@ -348,7 +507,13 @@ def _build_member_context(m, records, goal: str, level: str) -> dict:
     }
 
 
-def _ai_muscle_analysis(muscle_key: str, ctx: dict) -> str:
+def _get_cache_key(prefix: str, *args) -> str:
+    """Generate cache key from arguments."""
+    text = prefix + "|" + "|".join(str(a) for a in args)
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+def _ai_muscle_analysis(muscle_key: str, ctx: dict, intensity: int = 5) -> str:
     m_info = MUSCLES[muscle_key]
     
     bmi_value = ctx.get('bmi')
@@ -359,7 +524,8 @@ def _ai_muscle_analysis(muscle_key: str, ctx: dict) -> str:
         f"Age: {ctx['age'] or 'unknown'}, "
         f"Weight: {ctx['weight'] or 'unknown'} kg, "
         f"BMI: {bmi_display} ({ctx['bmi_cat'] or 'Unknown'}), "
-        f"Goal: {ctx['goal']}, Level: {ctx['level']}"
+        f"Goal: {ctx['goal']}, Level: {ctx['level']}, "
+        f"Intensity: {intensity}/10"
     )
     
     prompt = f"""You are GymPro AI Body Coach. Analyze the {m_info['label']} muscle group for this member.
@@ -370,64 +536,57 @@ Provide a structured analysis in Roman Urdu + English:
 
 ## 💪 {m_info['icon']} {m_info['label']} Analysis
 
-**1. Muscle Overview** (2 lines — kya karta hai yeh muscle)
+**1. Muscle Overview** (2 lines)
 
-**2. Member ke liye Personalized Advice** (based on BMI, age, gender, goal — 3-4 lines)
+**2. Personalized Advice** (based on stats)
 
 **3. Best Exercises (Top 5)**
-List each with: Exercise name | Sets × Reps | Rest | Difficulty
+| Exercise | Sets × Reps | Rest | Difficulty |
 
 **4. Weekly Plan**
 | Day | Exercise | Sets | Reps | Rest |
-(3-4 rows)
 
-**5. Pro Tips** (3 bullet points — form, breathing, common mistakes)
+**5. Pro Tips** (3 bullet points)
 
-**6. Safety Warnings** (1-2 lines based on their BMI/level)
-
-Keep it practical, encouraging, specific. No fluff."""
+**6. Safety Warnings** (1-2 lines)"""
 
     return _groq([
-        {"role": "system", "content": "You are an expert personal trainer and sports scientist. Respond in Roman Urdu mixed with English. Be specific and data-driven."},
+        {"role": "system", "content": "You are an expert personal trainer. Respond in Roman Urdu + English."},
         {"role": "user", "content": prompt},
     ], max_tokens=1600)
 
 
-def _ai_preset_plan(preset_name: str, muscles: list, ctx: dict) -> str:
+def _ai_preset_plan(preset_name: str, muscles: list, ctx: dict, intensity: int = 5) -> str:
     muscle_labels = ", ".join(MUSCLES[k]["label"] for k in muscles)
-    
-    bmi_value = ctx.get('bmi')
-    bmi_display = f"{bmi_value:.1f}" if bmi_value else "N/A"
     
     stats_str = (
         f"Name: {ctx['name']}, Gender: {ctx['gender']}, "
-        f"Age: {ctx['age'] or 'N/A'}, Weight: {ctx['weight'] or 'N/A'} kg, "
-        f"BMI: {bmi_display} ({ctx['bmi_cat'] or 'N/A'}), "
-        f"Goal: {ctx['goal']}, Level: {ctx['level']}"
+        f"Weight: {ctx['weight'] or 'N/A'} kg, "
+        f"Goal: {ctx['goal']}, Level: {ctx['level']}, "
+        f"Intensity: {intensity}/10"
     )
     
     prompt = f"""You are GymPro AI Body Coach. Create a complete {preset_name} workout plan.
 
-Muscles targeted: {muscle_labels}
-Member stats: {stats_str}
+Muscles: {muscle_labels}
+Stats: {stats_str}
 
 Provide in Roman Urdu + English:
 
 ## 🏋️ {preset_name} — Complete Plan
 
-**Workout Summary** (goal-specific — 2 lines)
+**Workout Summary** (2 lines)
 
 **Warm-up** (5 min — 3 exercises)
 
 **Main Workout**
 | Exercise | Sets | Reps | Rest | Muscle |
-(8-12 exercises)
 
 **Cool-down** (3 min)
 
-**Weekly Schedule** (which days to do this)
+**Weekly Schedule**
 
-**Nutrition Tip** (post-workout ke liye)
+**Nutrition Tip**
 
 **Motivation** (1 powerful line)"""
 
@@ -438,15 +597,15 @@ Provide in Roman Urdu + English:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EXERCISE VIDEO SUGGESTIONS
+# EXERCISE VIDEOS (Enhanced with Demos)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_exercise_videos(muscle_key: str):
     """Show YouTube exercise videos for selected muscle."""
     muscle_label = MUSCLES[muscle_key]["label"]
     
-    with st.expander(f"📺 {muscle_label} Exercise Videos", expanded=False):
-        search_query = f"{muscle_label} workout gym"
+    with st.expander(f"📺 {muscle_label} Exercise Videos & Demos", expanded=False):
+        search_query = f"{muscle_label} workout gym tutorial"
         videos = _search_youtube(search_query, max_results=4)
         
         if videos:
@@ -454,14 +613,14 @@ def _render_exercise_videos(muscle_key: str):
             for i, video in enumerate(videos):
                 with cols[i % 2]:
                     st.markdown(f"""
-                    <div style="border:1px solid #1e293b;border-radius:10px;overflow:hidden;margin-bottom:0.5rem;">
+                    <div style="border:1px solid #1e293b;border-radius:10px;overflow:hidden;margin-bottom:0.5rem;background:#0f172a;">
                         <img src="{video['thumb']}" style="width:100%;height:auto;"/>
                         <div style="padding:0.3rem 0.5rem;font-size:0.7rem;color:#94a3b8;text-align:center;">
                             {video['title']}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.markdown(f'<a href="https://youtube.com/watch?v={video["id"]}" target="_blank">▶️ Watch on YouTube</a>', unsafe_allow_html=True)
+                    st.markdown(f'<a href="https://youtube.com/watch?v={video["id"]}" target="_blank" style="display:block;text-align:center;color:#a78bfa;">▶️ Watch Demo on YouTube</a>', unsafe_allow_html=True)
         else:
             st.info("No videos found. Try YouTube directly.")
 
@@ -489,9 +648,6 @@ def _render_bmi(bmi: float, weight: float):
       <div style="background:#1e293b;border-radius:99px;height:10px;overflow:hidden;position:relative;">
         <div style="height:100%;width:{pct:.0f}%;background:linear-gradient(90deg,#34d399,{color});border-radius:99px;transition:width 0.5s;"></div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:#475569;margin-top:3px;">
-        <span>Under 18.5</span><span>Normal 18.5–25</span><span>Over 30</span>
-      </div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -517,14 +673,6 @@ def _render_muscle_info_card(selected: str, ctx: dict):
             {f" · {ctx['age']} yrs" if ctx['age'] else ""}
           </div>
         </div>
-      </div>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-        <span style="background:#1e293b;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.7rem;color:#94a3b8;">
-          💪 Target Muscle
-        </span>
-        <span style="background:#1e293b;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.7rem;color:#94a3b8;">
-          📊 {ctx['level']} Level
-        </span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -553,15 +701,16 @@ def _render_share_button(text: str, filename: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_body_coach(m, records):
-    """Full AI Body Coach tab."""
+    """Full AI Body Coach tab with all 14+ features."""
 
     # Session state init
     if "bc_muscle" not in st.session_state: st.session_state["bc_muscle"] = None
     if "bc_preset" not in st.session_state: st.session_state["bc_preset"] = None
-    if "bc_analysis" not in st.session_state: st.session_state["bc_analysis"] = {}
+    if "bc_analysis_cache" not in st.session_state: st.session_state["bc_analysis_cache"] = {}
     if "bc_goal" not in st.session_state: st.session_state["bc_goal"] = "Muscle Building"
     if "bc_level" not in st.session_state: st.session_state["bc_level"] = "Beginner"
     if "bc_height" not in st.session_state: st.session_state["bc_height"] = 170
+    if "bc_intensity" not in st.session_state: st.session_state["bc_intensity"] = 5
 
     st.markdown("""
     <style>
@@ -572,28 +721,56 @@ def render_body_coach(m, records):
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Weather & Music Suggestions ─────────────────────────────
+    weather = _get_weather_suggestion()
+    music = _get_music_recommendation(st.session_state["bc_intensity"])
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:0.8rem 1rem;">
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:1.5rem;">{weather['icon']}</span>
+                <span style="color:#94a3b8;font-size:0.85rem;">{weather['suggestion']}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:0.8rem 1rem;">
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:1.5rem;">🎵</span>
+                <span style="color:#94a3b8;font-size:0.85rem;">{music}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # ── Member config ─────────────────────────────────────────────
-    with st.expander("⚙️ Apni Details Set Karo (pehli baar zaroor karein)", expanded=not bool(records)):
-        cc1, cc2, cc3 = st.columns(3)
+    with st.expander("⚙️ Apni Details Set Karo", expanded=not bool(records)):
+        cc1, cc2, cc3, cc4 = st.columns(4)
         with cc1:
             st.session_state["bc_goal"] = st.selectbox(
                 "🎯 Fitness Goal",
                 ["Muscle Building", "Fat Loss", "Strength", "Endurance", "General Fitness"],
-                index=["Muscle Building","Fat Loss","Strength","Endurance","General Fitness"]
-                    .index(st.session_state["bc_goal"]) if st.session_state["bc_goal"] in
-                    ["Muscle Building","Fat Loss","Strength","Endurance","General Fitness"] else 0
+                index=0
             )
         with cc2:
             st.session_state["bc_level"] = st.selectbox(
                 "📊 Experience Level",
                 ["Beginner", "Intermediate", "Advanced"],
-                index=["Beginner","Intermediate","Advanced"].index(st.session_state["bc_level"])
+                index=0
             )
         with cc3:
             st.session_state["bc_height"] = st.number_input(
                 "📏 Height (cm)", 100, 250,
                 st.session_state["bc_height"],
                 key="bc_height_input"
+            )
+        with cc4:
+            st.session_state["bc_intensity"] = st.slider(
+                "💪 Intensity",
+                1, 10, st.session_state["bc_intensity"],
+                key="bc_intensity_slider"
             )
 
     ctx = _build_member_context(m, records, st.session_state["bc_goal"], st.session_state["bc_level"])
@@ -609,6 +786,10 @@ def render_body_coach(m, records):
 
     if ctx.get("bmi"):
         _render_bmi(ctx["bmi"], ctx.get("weight"))
+
+    # ── Voice Guidance Button ──────────────────────────────────────
+    if st.button("🔊 AI Voice Guidance", use_container_width=True):
+        _speak("Assalam-o-Alaikum! Welcome to your AI Body Coach. Select a muscle to get personalized workout advice.")
 
     # ── Quick Actions ──────────────────────────────────────────────
     st.markdown('<div class="bc-sec">⚡ Quick Actions</div>', unsafe_allow_html=True)
@@ -632,24 +813,26 @@ def render_body_coach(m, records):
     # ── Generate preset plan ──────────────────────────────────────
     preset = st.session_state.get("bc_preset")
     if preset and preset != "Clear":
-        cache_key = f"bc_preset_plan_{preset}_{ctx['goal']}_{ctx['level']}"
-        if cache_key not in st.session_state["bc_analysis"]:
-            with st.spinner(f"AI {preset} plan bana raha hai..."):
-                plan = _ai_preset_plan(preset, PRESETS[preset], ctx)
-                st.session_state["bc_analysis"][cache_key] = plan
-        st.markdown(f'<div class="bc-sec">📋 {preset} Plan</div>', unsafe_allow_html=True)
-        with st.container():
-            st.markdown(st.session_state["bc_analysis"][cache_key])
+        cache_key = _get_cache_key("preset", preset, ctx['goal'], ctx['level'], st.session_state["bc_intensity"])
         
-        # Share buttons
-        _render_share_button(st.session_state["bc_analysis"][cache_key], f"{preset}_{m.serial_number}")
+        if cache_key not in st.session_state["bc_analysis_cache"]:
+            with st.spinner(f"AI {preset} plan bana raha hai..."):
+                plan = _ai_preset_plan(preset, PRESETS[preset], ctx, st.session_state["bc_intensity"])
+                st.session_state["bc_analysis_cache"][cache_key] = plan
+                _speak(f"{preset} plan ready. Check it out!")
+        
+        st.markdown(f'<div class="bc-sec">📋 {preset} Plan</div>', unsafe_allow_html=True)
+        st.markdown(st.session_state["bc_analysis_cache"][cache_key])
+        
+        _render_share_button(st.session_state["bc_analysis_cache"][cache_key], f"{preset}_{m.serial_number}")
         
         st.download_button(
             f"⬇️ Download {preset} Plan",
-            data=st.session_state["bc_analysis"][cache_key],
+            data=st.session_state["bc_analysis_cache"][cache_key],
             file_name=f"{preset.replace(' ','_').lower()}_{m.serial_number}_{date.today()}.txt",
             mime="text/plain",
-            key=f"dl_{preset}"
+            key=f"dl_{preset}",
+            use_container_width=True
         )
         st.divider()
 
@@ -695,43 +878,47 @@ def render_body_coach(m, records):
             _render_muscle_info_card(selected, ctx)
             
             info = MUSCLES[selected]
-            cache_key = f"bc_muscle_{selected}_{ctx['goal']}_{ctx['level']}"
-            if cache_key not in st.session_state["bc_analysis"]:
-                with st.spinner(f"AI {info['label']} analysis bana raha hai..."):
-                    analysis = _ai_muscle_analysis(selected, ctx)
-                    st.session_state["bc_analysis"][cache_key] = analysis
-
-            st.markdown(st.session_state["bc_analysis"][cache_key])
+            cache_key = _get_cache_key("muscle", selected, ctx['goal'], ctx['level'], st.session_state["bc_intensity"])
             
-            # Share buttons
-            _render_share_button(st.session_state["bc_analysis"][cache_key], f"{selected}_{m.serial_number}")
+            if cache_key not in st.session_state["bc_analysis_cache"]:
+                with st.spinner(f"AI {info['label']} analysis bana raha hai..."):
+                    analysis = _ai_muscle_analysis(selected, ctx, st.session_state["bc_intensity"])
+                    st.session_state["bc_analysis_cache"][cache_key] = analysis
+
+            st.markdown(st.session_state["bc_analysis_cache"][cache_key])
+            
+            _render_share_button(st.session_state["bc_analysis_cache"][cache_key], f"{selected}_{m.serial_number}")
 
             col_dl, col_regen = st.columns(2)
             with col_dl:
                 st.download_button(
                     "⬇️ Download",
-                    data=st.session_state["bc_analysis"][cache_key],
+                    data=st.session_state["bc_analysis_cache"][cache_key],
                     file_name=f"{selected}_{m.serial_number}_{date.today()}.txt",
                     mime="text/plain",
-                    key=f"dl_{selected}"
+                    key=f"dl_{selected}",
+                    use_container_width=True
                 )
             with col_regen:
                 if st.button("🔄 Regenerate", key=f"regen_{selected}", use_container_width=True):
-                    if cache_key in st.session_state["bc_analysis"]:
-                        del st.session_state["bc_analysis"][cache_key]
+                    cache_key = _get_cache_key("muscle", selected, ctx['goal'], ctx['level'], st.session_state["bc_intensity"])
+                    if cache_key in st.session_state["bc_analysis_cache"]:
+                        del st.session_state["bc_analysis_cache"][cache_key]
                     st.rerun()
             
-            # Exercise videos
             _render_exercise_videos(selected)
     
-    # ── Timer and Log ─────────────────────────────────────────────
+    # ── Rest Timer ─────────────────────────────────────────────────
     st.divider()
-    
-    timer_col, log_col = st.columns(2)
-    with timer_col:
-        _render_timer()
-    with log_col:
-        _render_workout_log(m)
+    _render_rest_timer()
+
+    # ── Workout Log ────────────────────────────────────────────────
+    st.divider()
+    _render_workout_log(m)
+
+    # ── Progress Photos ────────────────────────────────────────────
+    st.divider()
+    _render_progress_photos()
 
     # ── All muscles quick grid ────────────────────────────────────
     st.divider()
@@ -740,7 +927,8 @@ def render_body_coach(m, records):
     for i, (key, info) in enumerate(MUSCLES.items()):
         with cols[i % 5]:
             is_sel = st.session_state["bc_muscle"] == key
-            cache_done = f"bc_muscle_{key}_{ctx['goal']}_{ctx['level']}" in st.session_state["bc_analysis"]
+            cache_key = _get_cache_key("muscle", key, ctx['goal'], ctx['level'], st.session_state["bc_intensity"])
+            cache_done = cache_key in st.session_state["bc_analysis_cache"]
             tag = ("✅ " if cache_done else "") + info["icon"] + " " + info["label"]
             if st.button(tag, key=f"bc_grid_{key}", use_container_width=True,
                          type="primary" if is_sel else "secondary"):

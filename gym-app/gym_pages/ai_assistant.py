@@ -1,1278 +1,1265 @@
 import streamlit as st
 from datetime import date, datetime, timedelta
-import io
-import os
-import re
-import requests
-import database as db
+import io, os, re, requests, database as db, sqlite3
+import shutil, json, ast, time, subprocess, zipfile, difflib
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+
+from database import (
+    get_db, get_gym, get_all_gyms, get_members, get_member, get_member_by_serial,
+    add_member, update_member, delete_member, get_fee_records, add_fee_record,
+    get_expenses, add_expense, get_attendance, mark_attendance,
+    get_stock_items, add_stock_item, get_complaints, add_complaint,
+    get_body_measurements, add_body_measurement, get_staff_targets,
+    get_staff_progress, get_active_announcement, get_all_announcements,
+    get_gym_plans, get_gym_photos, get_recent_scans, get_stats,
+    get_monthly_revenue, get_expiring_members, get_absent_members,
+    get_birthday_members, get_attendance_leaderboard, get_activity_logs,
+    get_daily_fee_summary, get_staff_attendance_summary, get_my_attendance_summary,
+    get_staff_timing, get_all_staff_timings, get_unknown_captures,
+    get_face_encodings, get_receipt_logs, get_audit_entries,
+    MEMBERSHIP_TYPES, PAYMENT_METHODS, EXPENSE_CATEGORIES, STOCK_CATEGORIES,
+    COMPLAINT_PRIORITIES, COMPLAINT_STATUSES, get_health_tip,
+    get_setting, set_setting, hash_password, verify_password,
+    SessionLocal, Base, engine, IS_POSTGRES, DB_MODE, UPLOAD_FOLDER,
+    get_member_count, get_active_member_count, get_expenses_by_category,
+    get_all_users
+)
+
+# ═══════════════════════════════════════════════════════════
+# 🤖 IMPORT V12 ENGINE
+# ═══════════════════════════════════════════════════════════
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from gym_pages.ai_coder_v12 import (
+        v12_execute, v12_auto_fix, v12_self_test, v12_get_commits,
+        v12_time_travel, v12_scan_project, v12_load_index, v12_index_summary,
+        v12_cleanup_backups, v12_is_protected, v12_validate_syntax,
+        v12_validate_imports, v12_validate_safety, v12_build_context,
+        PROTECTED_FILES, PROTECTED_EXTENSIONS, PROTECTED_DIRS,
+        V12_BACKUP_ROOT, v12_get_conversation,
+    )
+    V12_AVAILABLE = True
+except Exception as _e:
+    V12_AVAILABLE = False
+    _V12_IMPORT_ERROR = str(_e)
+
 
 # ============================================
-# YOUTUBE SEARCH FUNCTION
+# CONFIG
 # ============================================
 
-def _fmt_duration(secs) -> str:
-    """Convert seconds to mm:ss or hh:mm:ss string."""
+CODER_COMMITS_FILE = ".ai_coder_commits.json"
+CODER_MEMORY_FILE = ".ai_coder_memory.json"
+CODER_SCHEDULE_FILE = ".ai_coder_schedule.json"
+CODER_MAX_CHARS = 32000
+CODER_MAX_TOKENS = 16000
+CODER_MAX_RETRIES = 3
+SKIP_DIRS = {"__pycache__", ".git", "node_modules", ".streamlit", "backups",
+             "uploads", "member_photos", "docs", "logs", ".backups"}
+
+
+# ============================================
+# YOUTUBE
+# ============================================
+
+_YT_CACHE = {}
+_YT_CACHE_TIMEOUT = 300
+
+
+def _fmt_duration(secs):
     try:
         s = int(secs)
         h, rem = divmod(s, 3600)
-        m, sc  = divmod(rem, 60)
+        m, sc = divmod(rem, 60)
         return f"{h}:{m:02d}:{sc:02d}" if h else f"{m}:{sc:02d}"
     except Exception:
         return ""
 
 
-# Simple in-process cache: {query_key: [results]}
-_YT_CACHE: dict = {}
-
-
-def search_youtube(query: str, max_results: int = 10) -> list:
-    """
-    Search YouTube using yt-dlp (handles bot detection automatically).
-    Falls back to Invidious API, then to direct scraping if both fail.
-    Returns list of {id, title, duration, thumb} dicts.
-    """
+def search_youtube(query, max_results=10):
     cache_key = f"{query.strip().lower()}|{max_results}"
     if cache_key in _YT_CACHE:
-        return _YT_CACHE[cache_key]
-
-    # ── Strategy 1: yt-dlp (most reliable, handles all bot checks) ─────────
+        cached, ts = _YT_CACHE[cache_key]
+        if (datetime.now() - ts).seconds < _YT_CACHE_TIMEOUT:
+            return cached
     try:
         from yt_dlp import YoutubeDL
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "skip_download": True,
-            "socket_timeout": 15,
-        }
+        opts = {"quiet": True, "no_warnings": True, "extract_flat": True,
+                "skip_download": True, "socket_timeout": 15}
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
         results = []
         for e in (info or {}).get("entries", []):
             vid_id = e.get("id", "")
-            if not vid_id:
-                continue
-            results.append({
-                "id":       vid_id,
-                "title":    e.get("title", "Unknown"),
-                "duration": _fmt_duration(e.get("duration", 0)),
-                "thumb":    f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg",
-            })
+            if vid_id:
+                results.append({
+                    "id": vid_id,
+                    "title": e.get("title", "Unknown"),
+                    "duration": _fmt_duration(e.get("duration", 0)),
+                    "thumb": f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg",
+                })
         if results:
-            _YT_CACHE[cache_key] = results
+            _YT_CACHE[cache_key] = (results, datetime.now())
             return results
-    except Exception as e:
-        print(f"[yt-dlp] search failed: {e}")
+    except Exception:
+        pass
+    return []
 
-    # ── Strategy 2: Invidious public API (no key needed) ───────────────────
-    invidious_instances = [
-        "https://invidious.io",
-        "https://inv.riverside.rocks",
-        "https://invidious.privacyredirect.com",
-        "https://yt.cdaut.de",
-    ]
-    for base in invidious_instances:
-        try:
-            r = requests.get(
-                f"{base}/api/v1/search",
-                params={"q": query, "type": "video", "page": 1},
-                timeout=8,
-                headers={"User-Agent": "GymPro/1.0"},
-            )
-            if r.status_code == 200:
-                data = r.json()
-                results = []
-                for item in data[:max_results]:
-                    vid_id = item.get("videoId", "")
-                    if not vid_id:
-                        continue
-                    thumbs = item.get("videoThumbnails", [])
-                    thumb  = next((t["url"] for t in thumbs if "medium" in t.get("quality","").lower()),
-                                  f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg")
-                    results.append({
-                        "id":       vid_id,
-                        "title":    item.get("title", "Unknown"),
-                        "duration": _fmt_duration(item.get("lengthSeconds", 0)),
-                        "thumb":    thumb,
-                    })
-                if results:
-                    _YT_CACHE[cache_key] = results
-                    return results
-        except Exception:
-            continue
-
-    # ── Strategy 3: Direct scraping (last resort) ──────────────────────────
-    try:
-        import json as _json
-        url  = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-        resp = requests.get(url, headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        }, timeout=12)
-        m = re.search(r'var ytInitialData\s*=\s*(\{.*?\});\s*</script>', resp.text, re.DOTALL)
-        if m:
-            section = (_json.loads(m.group(1))
-                       .get("contents", {})
-                       .get("twoColumnSearchResultsRenderer", {})
-                       .get("primaryContents", {})
-                       .get("sectionListRenderer", {})
-                       .get("contents", [{}])[0]
-                       .get("itemSectionRenderer", {})
-                       .get("contents", []))
-            results = []
-            for item in section:
-                vr = item.get("videoRenderer", {})
-                vid_id = vr.get("videoId", "")
-                if not vid_id:
-                    continue
-                title_runs = vr.get("title", {}).get("runs", [])
-                title = title_runs[0].get("text", "Unknown") if title_runs else "Unknown"
-                dur   = (vr.get("lengthText", {}).get("simpleText", ""))
-                results.append({"id": vid_id, "title": title, "duration": dur,
-                                 "thumb": f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"})
-            if results:
-                _YT_CACHE[cache_key] = results[:max_results]
-                return results[:max_results]
-
-        ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)))
-        results = [{"id": v, "title": f"Track {i+1}", "duration": "",
-                    "thumb": f"https://img.youtube.com/vi/{v}/mqdefault.jpg"}
-                   for i, v in enumerate(ids[:max_results])]
-        if results:
-            _YT_CACHE[cache_key] = results
-        return results
-    except Exception as e:
-        print(f"[scrape] YouTube search failed: {e}")
-        return []
-
-def extract_youtube_id(url_or_id: str) -> str:
-    if not url_or_id:
-        return ""
-    url_or_id = url_or_id.strip()
-    regex = r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})'
-    match = re.search(regex, url_or_id)
-    if match:
-        return match.group(1)
-    if len(url_or_id) == 11:
-        return url_or_id
-    return ""
 
 # ============================================
-# TEXT-TO-SPEECH (Google TTS)
-# ============================================
-
-try:
-    from gtts import gTTS
-    HAS_GTTS = True
-except ImportError:
-    HAS_GTTS = False
-
-# ============================================
-# SPEECH-TO-TEXT (SpeechRecognition)
-# ============================================
-
-try:
-    import speech_recognition as sr
-    HAS_SPEECH = True
-except ImportError:
-    HAS_SPEECH = False
-
-# ============================================
-# PAGE CONTEXT
-# ============================================
-
-PAGE_CONTEXT = {
-    "Dashboard": "Showing gym overview: member counts, revenue, expenses, recent activity.",
-    "Gym Setup": "Managing gym locations — add, edit, delete gyms with address and contact info.",
-    "Members": "Managing members: registration, photo upload, serial numbers, edit/delete.",
-    "Membership Cards": "Viewing and printing digital membership cards for members.",
-    "Attendance": "Tracking daily attendance: marking present/absent, viewing history.",
-    "Progress Tracker": "Logging member body measurements and fitness progress over time.",
-    "Fee Collection": "Recording and tracking monthly fee payments from members.",
-    "Expenses": "Logging gym expenses by category: equipment, maintenance, utilities, etc.",
-    "Inventory": "Managing gym equipment and supply stock levels.",
-    "Reports": "Generating financial and membership analytics reports.",
-    "Message Center": "Sending announcements and messages to members.",
-    "WhatsApp": "Sending WhatsApp messages to members via link/template.",
-    "Complaints": "Logging and resolving member complaints and feedback.",
-    "Audit": "Reviewing financial records and audit logs.",
-    "User Management": "Managing staff user accounts, roles, and passwords.",
-    "AI Assistant": "AI-powered assistant for gym management guidance.",
-}
-
-SYSTEM_PROMPT = (
-    "You are GymPro AI — a highly intelligent, real-time gym management assistant embedded directly inside GymPro app. "
-    "You have access to LIVE gym data including member counts, fees, overdue payments, staff activity, and fraud alerts.\n\n"
-    "YOUR PERSONALITY:\n"
-    "- Speak like a smart, caring senior colleague — not a robot\n"
-    "- Roman Urdu mein baat karo jab user Roman Urdu mein likhe\n"
-    "- Be direct, specific, and actionable — no vague answers\n"
-    "- Give exact numbers from the live data provided\n\n"
-    "FOR ADMIN: Give full business intelligence — revenue trends, fraud patterns, staff performance, overdue recovery\n"
-    "FOR STAFF: Give step-by-step guidance — 'ab yeh karo, phir yeh karo' format\n\n"
-    "Always use the LIVE DATA provided in context. Never say 'I don't have access to data' — you do."
-)
-
-# ============================================
-# SESSION STATE INIT
+# SESSION STATE
 # ============================================
 
 def _init_state():
     defaults = {
-        "ai_chat_history": [],
-        "ai_input_counter": 0,
-        "ai_last_question": "",
-        "speak_trigger": None,
-        "auto_speak": False,
-        # Music
-        "music_results": [],        # list of {id, title, duration, thumb}
-        "music_search": "",
-        "active_music": None,       # current video_id string
-        "active_music_title": "",
-        "music_queue": [],          # full result list for prev/next
-        "music_queue_idx": 0,
-        # Video
-        "video_results": [],        # list of {id, title, duration, thumb}
-        "video_search": "",
-        "active_video": None,
-        "active_video_title": "",
+        "ai_chat_history": [], "ai_input_counter": 0, "ai_last_question": "",
+        "speak_trigger": None, "auto_speak": False,
+        "music_results": [], "music_search": "", "active_music": None,
+        "active_music_title": "", "music_queue": [], "music_queue_idx": 0,
+        "video_results": [], "video_search": "", "active_video": None,
+        "active_video_title": "", "ai_coder_result": None,
+        "coder_undo_stack": [], "coder_last_error": None,
+        "coder_memory": [], "coder_search_results": [],
+        "music_playing": False, "music_volume": 0.5,
+        # V12 state
+        "v12_last_result": None, "v12_last_preview": None,
+        "v12_action": None, "v12_command": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-# ============================================
-# HELPER FUNCTIONS
-# ============================================
 
-def is_roman_urdu(text: str) -> bool:
-    roman_urdu_words = ["hai", "hain", "ka", "ki", "ke", "ko", "se", "mein", "mai", "ho", "hum", "ap", "tum", "wo", "ye", "kya", "kyu", "kaise", "kahan", "kab", "kitna", "kitne", "aap", "mujhe", "tujhe", "usne", "unhon"]
-    words = text.lower().split()
-    if not words:
-        return False
-    urdu_count = sum(1 for w in words if w in roman_urdu_words)
-    return urdu_count / len(words) > 0.2
-
-def detect_language(text: str) -> str:
-    if any(ord(char) in range(0x0600, 0x06FF) for char in text):
-        return "urdu_script"
-    if is_roman_urdu(text):
-        return "roman_urdu"
-    return "english"
-
-def play_tts(text: str):
-    if not HAS_GTTS:
-        return
+def play_tts(text):
     try:
-        lang_code = "ur" if detect_language(text) in ["urdu_script", "roman_urdu"] else "en"
-        clean_text = re.sub(r'[*_`#\-\n]', ' ', text)[:500]
-        tts = gTTS(text=clean_text, lang=lang_code, slow=False)
+        from gtts import gTTS
+        lang = "ur" if any(ord(c) in range(0x0600, 0x06FF) for c in text) else "en"
+        clean = re.sub(r'[*_`#\-\n]', ' ', text)[:500]
+        tts = gTTS(text=clean, lang=lang, slow=False)
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         fp.seek(0)
         st.audio(fp, format="audio/mp3", autoplay=True)
-    except:
+    except Exception:
         pass
 
-def transcribe_mic(audio_bytes: bytes) -> str:
-    if not HAS_SPEECH:
-        return None
-    try:
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-        
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(tmp_path) as source:
-            audio = recognizer.record(source)
-            try:
-                text = recognizer.recognize_google(audio, language="ur-PK")
-                return text
-            except:
-                try:
-                    text = recognizer.recognize_google(audio, language="en-US")
-                    return text
-                except:
-                    return None
-    except:
-        return None
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
 
 # ============================================
-# AI RESPONSE ENGINE
+# MUSIC BAR
 # ============================================
 
-def _get_live_context(gym_id=None, role="staff", username=""):
-    """Build rich real-time data string to inject into every AI call."""
-    lines = []
-    try:
-        stats = db.get_stats(gym_id)
-        lines.append(
-            f"MEMBERS: total={stats.get('total_members',0)}, active={stats.get('active_members',0)}"
-        )
-        rev = stats.get('month_revenue', 0)
-        exp = stats.get('month_expenses', 0)
-        lines.append(
-            f"FINANCIALS (this month): revenue=PKR {rev:,.0f}, expenses=PKR {exp:,.0f}, net=PKR {rev-exp:,.0f}"
-        )
-    except Exception:
-        pass
-    try:
-        today_total, today_count, _ = db.get_daily_fee_summary(gym_id=gym_id)
-        lines.append(f"TODAY'S FEE COLLECTIONS: PKR {today_total:,.0f} in {today_count} receipts")
-    except Exception:
-        pass
-    try:
-        alerts = db.check_fraud_alerts(gym_id=gym_id)
-        if alerts:
-            critical = [a for a in alerts if a["severity"] == "critical"]
-            lines.append(
-                f"FRAUD ALERTS TODAY: {len(alerts)} alerts, {len(critical)} critical. "
-                + " | ".join(a["title"] for a in alerts[:3])
-            )
-        else:
-            lines.append("FRAUD ALERTS TODAY: none — all clear")
-    except Exception:
-        pass
-    try:
-        shifts = db.get_today_shifts(gym_id=gym_id)
-        open_s  = [s for s in shifts if s.status == "open"]
-        flagged = [s for s in shifts if s.status == "flagged"]
-        lines.append(f"SHIFTS TODAY: {len(shifts)} total, {len(open_s)} open, {len(flagged)} flagged")
-    except Exception:
-        pass
-    try:
-        from datetime import date as _date, timedelta
-        overdue_logs = db.get_activity_logs(gym_id=gym_id, action="FEE_DELETED", limit=50,
-                                            date_from=_date.today()-timedelta(days=7))
-        if overdue_logs:
-            lines.append(f"FEE DELETIONS (last 7 days): {len(overdue_logs)} records deleted")
-    except Exception:
-        pass
-    lines.append(f"LOGGED IN USER: {username or 'unknown'}, ROLE: {role}")
-    return "\n".join(lines)
-
-
-def _build_system_content(page: str, gym_stats: dict, role="staff", username="", gym_id=None) -> str:
-    page_ctx = PAGE_CONTEXT.get(page, "")
-    live_ctx = _get_live_context(gym_id=gym_id, role=role, username=username)
-    role_instr = (
-        "This user is an ADMIN/OWNER — give full business intelligence, proactively mention risks, "
-        "fraud alerts, overdue recovery, and staff performance. Be a trusted business advisor."
-        if role in ["admin", "owner"] else
-        "This user is STAFF — guide step by step in simple Roman Urdu. "
-        "If they seem confused, break instructions into numbered steps like 1. pehle yeh karo 2. phir yeh."
-    )
-    return (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"=== LIVE GYM DATA ===\n{live_ctx}\n\n"
-        f"=== CURRENT PAGE ===\n{page}: {page_ctx}\n\n"
-        f"=== ROLE INSTRUCTION ===\n{role_instr}"
-    )
-
-def _rule_based_response(user_msg: str, page: str, gym_stats: dict) -> str:
-    q = user_msg.lower()
-    
-    if any(w in q for w in ["salam", "hello", "hi", "hey", "assalam", "adaab"]):
-        return "👋 **Assalam-u-Alaikum!** Main GymPro AI hoon. Aap **" + page + "** page par hain. Koi sawal poochiye! Members, fees, attendance, workout, diet — sab mein madad kar sakta hoon."
-    
-    if any(w in q for w in ["member", "register", "serial", "enroll", "new member"]):
-        return "📝 **Member Register:** Members page par jao → 'Register Member' tab → form fill karo → photo upload karo. Serial number (PF-00001) automatically generate hoga."
-    
-    if any(w in q for w in ["fee", "payment", "collect", "paisa", "money", "charges"]):
-        return f"💰 **Fees Collection:** Is mahine ka revenue: **PKR {gym_stats.get('month_revenue', 0):,.0f}**. Har member ki payment record karo."
-    
-    if any(w in q for w in ["expense", "cost", "spend", "kharch", "expenditure"]):
-        return f"📊 **Expenses:** Is mahine total expenses: **PKR {gym_stats.get('month_expenses', 0):,.0f}**. Categories: Equipment, Maintenance, Utilities."
-    
-    if any(w in q for w in ["attendance", "present", "absent", "aaye", "haazri"]):
-        return "📋 **Attendance:** Rozana haazri mark karo. 3+ din ghaib members alert hote hain."
-    
-    if any(w in q for w in ["diet", "khana", "protein", "nutrition", "food"]):
-        return """🥗 **Diet Plan:**
-• Subah: 2 ande + oats + milk + banana
-• Dopahar: Chicken 200g + brown rice + salad
-• Shaam: Protein shake + dry fruits
-• Raat: Fish/Chicken 150g + vegetables
-• Paani: 8-10 glass rozana
-❌ Avoid: Junk food, sugar, soft drinks"""
-    
-    if any(w in q for w in ["workout", "exercise", "kasrat", "routine", "gym plan"]):
-        return """🏋️ **Weekly Workout:**
-• Mon: Chest + Triceps
-• Tue: Back + Biceps
-• Wed: Legs + Shoulders
-• Thu: Rest / Cardio
-• Fri: Full Body
-• Sat: Abs + Core
-• Sun: Active Rest
-🔥 Warm-up 10 min mandatory!"""
-    
-    if any(w in q for w in ["inventory", "stock", "equipment"]):
-        return "📦 **Inventory:** Equipment aur supplies track karo. Low-stock alerts sidebar mein aate hain."
-    
-    if any(w in q for w in ["report", "analytics", "chart", "statistics"]):
-        total = gym_stats.get("total_members", "?")
-        active = gym_stats.get("active_members", "?")
-        return f"📈 **Reports:** Total: {total}, Active: {active}, Revenue: PKR {gym_stats.get('month_revenue', 0):,.0f}"
-    
-    if any(w in q for w in ["gym", "setup", "add gym", "branch"]):
-        return "🏢 **Gym Setup:** Nayi gym add karo. Har gym ka alag member pool aur financials."
-    
-    if any(w in q for w in ["help", "madad", "support", "kya", "batao"]):
-        return f"""🤖 **Main yeh topics mein help kar sakta hoon:**
-📊 Members, Fees, Attendance, Expenses
-📦 Inventory, Reports, Gym Setup
-🏋️ Workout Plans, Diet Plans
-💬 Complaints, Messages
-
-Aap **{page}** page par hain. Poochiye!"""
-    
-    return f"🤔 Samajh nahi aaya. Aap **{page}** page par hain. Members, fees, attendance, workout, diet — kisi bhi topic par poochiye! 😊"
-
-def get_ai_response(messages: list, page: str, gym_stats: dict,
-                    role="staff", username="", gym_id=None) -> str:
-    system_content = _build_system_content(page, gym_stats, role=role, username=username, gym_id=gym_id)
-    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
-    if groq_key:
-        try:
-            import requests as req
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "system", "content": system_content}] + messages,
-                "max_tokens": 800,
-                "temperature": 0.5,
-            }
-            resp = req.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=25,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
-        except Exception:
-            pass
-    return _rule_based_response(messages[-1]["content"] if messages else "", page, gym_stats)
-
-
-def _api_messages() -> list:
-    return [
-        {"role": "assistant" if m["role"] == "assistant" else "user", "content": m["content"]}
-        for m in st.session_state.get("ai_chat_history", [])[-20:]
-    ]
-
-
-def _push_and_respond(user_text: str, page: str, gym_stats: dict,
-                      role="staff", username="", gym_id=None):
-    if st.session_state.get("ai_last_question", "") == user_text:
-        st.warning("⚠️ Yeh sawaal already pooch chuke ho!")
+def render_persistent_music_bar():
+    _init_state()
+    vid = st.session_state.get("active_music")
+    title = st.session_state.get("active_music_title", "")
+    queue = st.session_state.get("music_queue", [])
+    idx = st.session_state.get("music_queue_idx", 0)
+    if "music_playing" not in st.session_state:
+        st.session_state["music_playing"] = bool(vid)
+    if "music_volume" not in st.session_state:
+        st.session_state["music_volume"] = 0.5
+    if not vid:
         return
-    st.session_state["ai_last_question"] = user_text
-    st.session_state["ai_chat_history"].append({"role": "user", "content": user_text})
-    with st.spinner("🤔 Soch raha hoon..."):
-        reply = get_ai_response(_api_messages(), page, gym_stats,
-                                role=role, username=username, gym_id=gym_id)
-    st.session_state["ai_chat_history"].append({"role": "assistant", "content": reply})
-    
-    if st.session_state.get("auto_speak", True):
-        st.session_state["speak_trigger"] = reply
-    
-    st.session_state["ai_input_counter"] += 1
-    st.rerun()
+    html = (
+        '<div style="background:linear-gradient(90deg,#1E3A5F,#1E1B4B);border:1px solid #3B82F6;'
+        'border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;">'
+        '<span style="color:#60A5FA;font-weight:700;font-size:0.7rem;">NOW PLAYING</span><br>'
+        f'<span style="color:#F1F5F9;font-size:0.8rem;">{title[:50]}</span></div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+    with c1:
+        if st.button("⏮", key="pmb_prev", use_container_width=True):
+            if queue and idx > 0:
+                ni = idx - 1
+                st.session_state["music_queue_idx"] = ni
+                st.session_state["active_music"] = queue[ni]["id"]
+                st.session_state["active_music_title"] = queue[ni]["title"]
+                st.session_state["music_playing"] = True
+                st.rerun()
+    with c2:
+        if st.session_state["music_playing"]:
+            if st.button("⏸", key="pmb_pause", use_container_width=True):
+                st.session_state["music_playing"] = False
+                st.rerun()
+        else:
+            if st.button("▶️", key="pmb_play", use_container_width=True):
+                st.session_state["music_playing"] = True
+                st.rerun()
+    with c3:
+        if st.button("⏹", key="pmb_stop", use_container_width=True):
+            st.session_state["active_music"] = None
+            st.session_state["active_music_title"] = ""
+            st.session_state["music_playing"] = False
+            st.rerun()
+    with c4:
+        vol = st.slider("Volume", 0.0, 1.0, st.session_state["music_volume"], key="music_vol_slider")
+        st.session_state["music_volume"] = vol
+    if st.session_state["music_playing"]:
+        embed_url = f"https://www.youtube.com/embed/{vid}?autoplay=1&mute=0"
+        audio_html = (
+            f'<iframe id="ytplayer" type="text/html" width="0" height="0" '
+            f'src="{embed_url}" frameborder="0" allow="autoplay; encrypted-media" '
+            f'allowfullscreen></iframe>'
+        )
+        st.components.v1.html(audio_html, height=0)
 
-# ============================================
-# SIDEBAR WIDGET
-# ============================================
 
-def render_sidebar_widget(current_page: str, gym_id=None, role="staff", username=""):
+def render_sidebar_widget(current_page, gym_id=None, role="staff", username=""):
     _init_state()
     gym_stats = {}
     try:
         gym_stats = db.get_stats(gym_id)
     except Exception:
         pass
-
-    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
-    role_color = "#FBBF24" if role in ["admin", "owner"] else "#60A5FA"
-
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner",
+                  "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
     with st.expander(f"🤖 AI Assistant — {role_label}", expanded=False):
-
-        # Proactive snapshot for admin
-        if role in ["admin", "owner"]:
-            try:
-                alerts = db.check_fraud_alerts(gym_id=gym_id)
-                today_total, today_count, _ = db.get_daily_fee_summary(gym_id=gym_id)
-                alert_badge = f"🚨 {len(alerts)} alert{'s' if len(alerts)!=1 else ''}" if alerts else "✅ Sab theek"
-                st.markdown(f"""
-                <div style="background:#0F172A;border:1px solid {role_color};border-radius:8px;
-                            padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.78rem;">
-                    <span style="color:{role_color};font-weight:700;">{role_label}</span>
-                    <span style="color:#94A3B8;"> · </span>
-                    <span style="color:#34D399;">💰 PKR {today_total:,.0f} aaj</span>
-                    <span style="color:#94A3B8;"> · </span>
-                    <span style="color:{'#F87171' if alerts else '#34D399'};">{alert_badge}</span>
-                </div>
-                """, unsafe_allow_html=True)
-            except Exception:
-                pass
-
-        # Quick chips — role specific
-        if role in ["admin", "owner"]:
-            chips = ["Aaj ka summary?", "Koi fraud alert?", "Overdue members?", "Staff performance?"]
-        else:
-            chips = ["Fee kaise collect karein?", "Member kaise register karein?", "Shift kaise kholein?"]
-
+        chips = ["Aaj ka summary?", "Fee collection?"] if role in ["admin", "owner"] else ["Fee kaise?", "Member kaise?"]
         chip_cols = st.columns(2)
-        for i, chip in enumerate(chips[:4]):
+        for i, chip in enumerate(chips):
             if chip_cols[i % 2].button(chip, key=f"sb_chip_{i}", use_container_width=True):
                 _push_and_respond(chip, current_page, gym_stats, role=role, username=username, gym_id=gym_id)
-
-        # Chat history preview
-        history = st.session_state.get("ai_chat_history", [])
-        if history:
-            html = '<div style="max-height:180px;overflow-y:auto;font-size:0.78rem;margin:0.3rem 0;">'
-            for msg in history[-6:]:
-                bg  = "#1E3A5F" if msg["role"] == "user" else "#1a1a3a"
-                ico = "👤" if msg["role"] == "user" else "🤖"
-                txt = msg["content"][:100] + ("…" if len(msg["content"]) > 100 else "")
-                html += f'<div style="background:{bg};padding:4px 8px;margin:2px 0;border-radius:5px;">{ico} {txt}</div>'
-            html += "</div>"
-            st.markdown(html, unsafe_allow_html=True)
-        else:
-            st.caption(f"📍 {current_page} · Kuch bhi poochiye!")
-
         key = f"sb_chat_{st.session_state.get('ai_input_counter', 0)}"
-        user_input = st.text_input("", placeholder="Roman Urdu mein likhein...", key=key,
-                                   label_visibility="collapsed")
+        user_input = st.text_input("", placeholder="Roman Urdu...", key=key, label_visibility="collapsed")
         col1, col2 = st.columns([3, 1])
-        send  = col1.button("Send ➤", key="sb_send_btn",  type="primary", use_container_width=True)
-        clear = col2.button("🗑",     key="sb_clear_btn", use_container_width=True)
-
+        send = col1.button("Send ➤", key="sb_send_btn", type="primary", use_container_width=True)
+        clear = col2.button("🗑", key="sb_clear_btn", use_container_width=True)
         if clear:
             st.session_state["ai_chat_history"] = []
-            st.session_state["ai_last_question"] = ""
             st.session_state["ai_input_counter"] += 1
             st.rerun()
-
         if send and user_input.strip():
-            _push_and_respond(user_input.strip(), current_page, gym_stats,
-                              role=role, username=username, gym_id=gym_id)
+            _push_and_respond(user_input.strip(), current_page, gym_stats, role=role, username=username, gym_id=gym_id)
 
-        auto = st.toggle("🔊 Voice", value=st.session_state.get("auto_speak", False), key="sb_voice_toggle")
-        st.session_state["auto_speak"] = auto
-
-        if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", False):
-            play_tts(st.session_state["speak_trigger"])
-            st.session_state["speak_trigger"] = None
 
 # ============================================
-# 🎵 MUSIC PLAYER - SEARCH ANY SONG
+# AI CHAT
+# ============================================
+
+def _handle_app_check():
+    try:
+        members = db.get_members()
+        today = date.today()
+        fees = db.get_fee_records(date_from=today, date_to=today)
+        return "🔍 DB: OK\n👥 Members: " + str(len(members) if members else 0) + "\n💰 Today: " + str(len(fees) if fees else 0)
+    except Exception as e:
+        return "❌ " + str(e)
+
+
+def _create_backup(backup_name=None):
+    try:
+        if not backup_name:
+            backup_name = "backup_" + datetime.now().strftime('%Y%m%d_%H%M%S')
+        bdir = "backups/" + backup_name
+        os.makedirs(bdir, exist_ok=True)
+        for f in ["app.py", "database.py", "auth.py"]:
+            if os.path.exists(f):
+                shutil.copy2(f, bdir + "/" + f)
+        return "✅ Backup: " + bdir
+    except Exception as e:
+        return "❌ " + str(e)
+
+
+def _run_tests():
+    tests = []
+    try:
+        db.get_stats()
+        tests.append("✅ DB")
+    except Exception:
+        tests.append("❌ DB")
+    try:
+        members = db.get_members()
+        tests.append("✅ Members: " + str(len(members)))
+    except Exception:
+        tests.append("❌ Members")
+    return "🧪 " + ", ".join(tests)
+
+
+def _get_reminders():
+    rem = []
+    try:
+        exp = db.get_expiring_members(days=3)
+        if exp:
+            rem.append(str(len(exp)) + " expiring")
+    except Exception:
+        pass
+    return rem
+
+
+def _get_live_context(gym_id=None, role="staff", username=""):
+    lines = []
+    try:
+        stats = db.get_stats(gym_id)
+        lines.append("Members: " + str(stats.get('total_members', 0)) +
+                     ", Active: " + str(stats.get('active_members', 0)))
+    except Exception:
+        pass
+    lines.append("User: " + str(username) + ", Role: " + str(role))
+    return "\n".join(lines)
+
+
+def get_ai_response(messages, page, gym_stats, role="staff", username="", gym_id=None):
+    """AI Chat with memory + Cohere/Groq fallback + admin powers"""
+    user_msg = messages[-1]["content"] if messages else ""
+    q = user_msg.lower()
+    
+    # ── Admin commands (hardcoded, fast) ──
+    if "backup" in q and role in ["admin", "owner"]:
+        return _create_backup()
+    if "app check" in q and role in ["admin", "owner"]:
+        return _handle_app_check()
+    if "reminder" in q:
+        r = _get_reminders()
+        return "🔔 " + ", ".join(r) if r else "✅ No reminders!"
+    
+    # ── ADMIN: Direct data lookup (bypass AI) ──
+    if role in ["admin", "owner"]:
+        import re as _re
+        
+        # Keywords for "find member" queries
+        is_member_query = any(kw in q for kw in [
+            "member", "phone", "number", "mobile", "contact", "rabta",
+            "irfan", "ali", "khan", "ahmed", "batao", "nikal", "dhoondo",
+            "kitna", "kitne", "details", "info"
+        ])
+        
+        # Keywords for "phone/number" specifically
+        is_phone_query = any(kw in q for kw in [
+            "phone", "number", "mobile", "contact", "rabta", "call"
+        ])
+        
+        if is_member_query:
+            # Step 1: Extract member name (real names, capitalized OR after "ka/ki/naam/naam ka")
+            member_name = None
+            
+            # Pattern 1: "Irfan ka", "Irfan ki", "Irfan naam"
+            m1 = _re.search(r'\b([A-Z][a-z]{2,})\s+(?:ka|ki|naam|naam\s+ka)\b', user_msg)
+            if m1:
+                member_name = m1.group(1)
+            
+            # Pattern 2: Any capitalized word (exclude common words)
+            if not member_name:
+                EXCLUDE = {"Moja", "Mujhe", "Mera", "Meri", "Karo", "Batao", "Nikal", 
+                          "Show", "Phone", "Number", "Mobile", "Contact", "Member",
+                          "Members", "Kitna", "Kitne", "Koi", "Ka", "Ki", "Naam",
+                          "App", "Gym", "Gympro", "Aaj", "Kal", "Wo"}
+                caps = _re.findall(r'\b([A-Z][a-z]{2,})\b', user_msg)
+                for cap in caps:
+                    if cap not in EXCLUDE:
+                        member_name = cap
+                        break
+            
+            # Step 2: If we found a name, query database
+            if member_name:
+                try:
+                    members = db.get_members(gym_id, search=member_name)
+                    if not members:
+                        # Try all gyms
+                        members = db.get_members(None, search=member_name)
+                    
+                    if members:
+                        # If phone query and 1 member — give full details
+                        if is_phone_query and len(members) == 1:
+                            m = members[0]
+                            return (f"📞 **{m.full_name}** (Serial: {m.serial_number})\n"
+                                   f"📱 Phone: **{m.phone or 'N/A'}**\n"
+                                   f"📧 Email: {m.email or 'N/A'}\n"
+                                   f"💳 Plan: {m.membership_type}\n"
+                                   f"📅 Expiry: {m.expiry_date or 'N/A'}\n"
+                                   f"🔵 Status: {m.status or 'N/A'}")
+                        
+                        # If phone query and multiple — list them
+                        if is_phone_query and len(members) > 1:
+                            result = f"🔍 **{member_name}** naam ke {len(members)} members mile:\n\n"
+                            for m in members[:10]:
+                                result += f"• **{m.full_name}** — 📱 {m.phone or 'N/A'} (Serial: {m.serial_number})\n"
+                            return result
+                        
+                        # General member query — list all
+                        result = f"👥 **{member_name}** naam ke {len(members)} members:\n\n"
+                        for m in members[:10]:
+                            result += (f"• **{m.full_name}**\n"
+                                      f"   📱 {m.phone or 'N/A'}\n"
+                                      f"   💳 {m.membership_type} · 📅 {m.expiry_date or 'N/A'}\n"
+                                      f"   🔵 Status: {m.status or 'N/A'}\n\n")
+                        return result
+                    else:
+                        # No member found — DON'T say 'phone' — say actual name
+                        if is_phone_query:
+                            return f"❌ **{member_name}** naam ka koi member nahi mila. Naam sahi likho."
+                        return f"❌ **{member_name}** naam ka koi member nahi mila."
+                except Exception as e:
+                    pass
+    
+    # ── Build system context ──
+    sys_c = _get_live_context(gym_id, role, username)
+    
+    # Role-specific permissions
+    if role in ["admin", "owner"]:
+        role_permission = (
+            "USER IS ADMIN — Full access. User saari member details, phone numbers, "
+            "fees, attendance, aur analytics dekh sakta hai. Agar user member ka "
+            "contact number maange toh batao — koi privacy ka bahana mat banao. "
+            "Aap admin ke liye kaam karte ho."
+        )
+    elif role == "staff":
+        role_permission = (
+            "USER IS STAFF — Limited access. Member ka basic info de sakte ho "
+            "(naam, status, fee), lekin sensitive data (full phone number) mat do "
+            "bina admin permission ke."
+        )
+    else:
+        role_permission = "USER IS AUDITOR — Read-only access."
+    
+    system_prompt = (
+        f"You are GymPro AI Assistant — a SMART, HELPFUL assistant for a gym management app. "
+        f"User: {username}, Role: {role}. "
+        f"App context: {sys_c}. "
+        f"\n\n{role_permission}\n\n"
+        "IMPORTANT RULES:\n"
+        "1. Reply in Roman Urdu (Hindi-English mix), NOT pure Urdu script.\n"
+        "2. Keep replies short (2-4 lines).\n"
+        "3. NEVER say 'Maaf kijiye' unnecessarily. Be confident.\n"
+        "4. Diet/food/workout/general fitness questions ka jawab DO — tum fitness assistant bhi ho.\n"
+        "5. If admin asks for data — provide it, don't refuse.\n"
+        "6. If you don't have data access, say: 'Iske liye admin panel mein dekho' — not 'Maaf kijiye'.\n"
+        "7. Be friendly and helpful, not defensive.\n"
+        "8. You CAN discuss diet plans, nutrition, workouts, supplements.\n"
+        "9. Only refuse if something is truly dangerous or illegal.\n"
+        "10. NEVER invent/fake member names, phone numbers, or any data.\n"
+        "11. If you don't have data, say 'Database se nahi mila' — DON'T make up.\n"
+        "12. Only use REAL data from database lookups shown above.\n"
+    )
+    
+    # ── Build full message history (memory) ──
+    api_messages = [{"role": "system", "content": system_prompt}]
+    for msg in messages[-10:]:  # Last 10 messages
+        api_messages.append({
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", "")
+        })
+    
+    # ── Try Cohere first ──
+    cohere_key = os.environ.get("COHERE_API_KEY", "").strip()
+    if cohere_key:
+        try:
+            resp = requests.post(
+                "https://api.cohere.com/v2/chat",
+                headers={
+                    "Authorization": f"Bearer {cohere_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "command-r-plus-08-2024",
+                    "messages": api_messages,
+                    "temperature": 0.7,
+                    "max_tokens": 500,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if "message" in data and "content" in data["message"]:
+                    for block in data["message"]["content"]:
+                        if block.get("type") == "text":
+                            text = block.get("text", "").strip()
+                            if text:
+                                return text
+        except Exception:
+            pass
+    
+    # ── Fallback: Groq ──
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if groq_key:
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": "Bearer " + groq_key, "Content-Type": "application/json"},
+                json={
+                    "model": "openai/gpt-oss-120b",
+                    "messages": api_messages,
+                    "max_tokens": 500,
+                    "temperature": 0.7,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                out = (msg.get("content") or "").strip()
+                if not out:
+                    out = (msg.get("reasoning") or "").strip()
+                if out:
+                    return out
+        except Exception:
+            pass
+    
+    # ── Final fallback (only if AI failed) ──
+    if "summary" in q:
+        return "📊 Members: " + str(gym_stats.get('total_members', 0))
+    if "fee" in q:
+        try:
+            t, c, _ = db.get_daily_fee_summary()
+            return "💰 Today: PKR " + str(f"{t:,.0f}")
+        except Exception:
+            return "💰"
+    return "🤔 AI se jawab nahi mila. Dobara try karo."
+
+
+def _push_and_respond(user_text, page, gym_stats, role="staff", username="", gym_id=None):
+    if st.session_state.get("ai_last_question") == user_text:
+        st.warning("⚠️ Already pooch chuke ho!")
+        return
+    st.session_state["ai_last_question"] = user_text
+    st.session_state["ai_chat_history"].append({"role": "user", "content": user_text})
+    with st.spinner("🤔..."):
+        reply = get_ai_response(st.session_state["ai_chat_history"][-20:], page, gym_stats, role=role, username=username, gym_id=gym_id)
+    st.session_state["ai_chat_history"].append({"role": "assistant", "content": reply})
+    if st.session_state.get("auto_speak", True):
+        st.session_state["speak_trigger"] = reply
+    st.session_state["ai_input_counter"] += 1
+    st.rerun()
+
+
+# ============================================
+# MUSIC / VIDEO
 # ============================================
 
 _MUSIC_GENRES = [
-    ("🏋️ Workout", "gym workout motivation music"),
+    ("🏋️ Workout", "gym workout motivation"),
     ("🇵🇰 Pakistani", "Pakistani pop songs 2024"),
     ("🎬 Bollywood", "Bollywood hits 2024"),
-    ("⚡ EDM", "EDM workout gym music"),
-    ("☕ Lofi", "lofi hip hop study chill"),
-    ("🎤 Hip-Hop", "hip hop rap workout"),
+    ("⚡ EDM", "EDM gym music"),
+    ("☕ Lofi", "lofi hip hop"),
+    ("🎤 Hip-Hop", "hip hop rap"),
     ("🎸 Punjabi", "Punjabi songs 2024"),
     ("🕌 Naat", "naat sharif new 2024"),
 ]
 
+
 def _music_player():
     _init_state()
-
-    st.markdown("""
-    <div style="background:linear-gradient(135deg,#0F172A,#1E1B4B);border-radius:16px;
-                padding:1.2rem 1.5rem;margin-bottom:1rem;">
-        <h2 style="margin:0;font-size:1.5rem;">🎵 Music Player</h2>
-        <p style="margin:0;color:#94A3B8;font-size:0.9rem;">
-            Search any song • Queue navigation • Continues across pages
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Now playing bar (always visible at top if something is playing)
-    vid   = st.session_state.get("active_music")
-    title = st.session_state.get("active_music_title", "")
-    queue = st.session_state.get("music_queue", [])
-    idx   = st.session_state.get("music_queue_idx", 0)
-
+    st.markdown("### 🎵 Music")
+    vid = st.session_state.get("active_music")
     if vid:
-        st.markdown(f"""
-        <div style="background:linear-gradient(90deg,#1E3A5F,#1E1B4B);border:1px solid #3B82F6;
-                    border-radius:12px;padding:0.8rem 1rem;margin-bottom:1rem;
-                    display:flex;align-items:center;gap:0.6rem;">
-            <span style="font-size:1.4rem;">🎵</span>
-            <div>
-                <div style="color:#60A5FA;font-weight:700;font-size:0.85rem;">NOW PLAYING</div>
-                <div style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{title[:70]}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Player embed — stays alive across page changes via persistent bar
-        st.markdown(f"""
-        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;
-                    border-radius:12px;background:#000;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
-            <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                src="https://www.youtube.com/embed/{vid}?autoplay=1&rel=0&modestbranding=1"
-                frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowfullscreen>
-            </iframe>
-        </div>
-        """, unsafe_allow_html=True)
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            if st.button("⏮ Prev", key="music_prev", use_container_width=True):
-                if queue and idx > 0:
-                    new_idx = idx - 1
-                    st.session_state["music_queue_idx"]   = new_idx
-                    st.session_state["active_music"]      = queue[new_idx]["id"]
-                    st.session_state["active_music_title"] = queue[new_idx]["title"]
-                    st.rerun()
-        with c2:
-            if st.button("⏭ Next", key="music_next", use_container_width=True):
-                if queue and idx < len(queue) - 1:
-                    new_idx = idx + 1
-                    st.session_state["music_queue_idx"]   = new_idx
-                    st.session_state["active_music"]      = queue[new_idx]["id"]
-                    st.session_state["active_music_title"] = queue[new_idx]["title"]
-                    st.rerun()
-        with c3:
-            if queue:
-                st.caption(f"Track {idx+1}/{len(queue)}")
-        with c4:
-            if st.button("⏹ Stop", key="music_stop", use_container_width=True):
-                st.session_state["active_music"]      = None
-                st.session_state["active_music_title"] = ""
-                st.rerun()
-
+        st.markdown("**NOW PLAYING:** " + st.session_state.get('active_music_title', '')[:70])
+        iframe = '<iframe width="100%" height="315" src="https://www.youtube.com/embed/' + vid + '?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>'
+        st.markdown(iframe, unsafe_allow_html=True)
+        if st.button("⏹ Stop", key="music_stop2", use_container_width=True):
+            st.session_state["active_music"] = None
+            st.rerun()
         st.divider()
-
-    # Genre presets
-    st.markdown("#### 🎛️ Genre / Mood — Ek Click Mein")
     g_cols = st.columns(4)
     for i, (label, query) in enumerate(_MUSIC_GENRES):
         if g_cols[i % 4].button(label, key=f"genre_{i}", use_container_width=True):
-            with st.spinner(f"🎵 {label} load ho raha hai..."):
+            with st.spinner(label + "..."):
                 res = search_youtube(query, max_results=10)
             if res:
-                st.session_state["music_results"]     = res
-                st.session_state["music_search"]      = label
-                st.session_state["music_queue"]       = res
-                st.session_state["music_queue_idx"]   = 0
-                st.session_state["active_music"]      = res[0]["id"]
+                st.session_state["music_results"] = res
+                st.session_state["music_queue"] = res
+                st.session_state["music_queue_idx"] = 0
+                st.session_state["active_music"] = res[0]["id"]
                 st.session_state["active_music_title"] = res[0]["title"]
                 st.rerun()
-            else:
-                st.error("Nahi mila, dobara try karein")
-
-    st.divider()
-
-    # Custom search
-    st.markdown("#### 🔍 Custom Search")
-    s1, s2 = st.columns([4, 1])
-    with s1:
-        query_input = st.text_input("", placeholder="e.g. Atif Aslam, Nusrat Fateh Ali Khan, gym beats...",
-                                    key="music_search_input", label_visibility="collapsed")
-    with s2:
-        do_search = st.button("Search 🔍", key="music_search_btn", type="primary", use_container_width=True)
-
-    if do_search and query_input.strip():
-        with st.spinner(f"Searching '{query_input}'..."):
-            res = search_youtube(query_input.strip(), max_results=10)
-        if res:
-            st.session_state["music_results"] = res
-            st.session_state["music_search"]  = query_input.strip()
-            st.session_state["music_queue"]   = res
-            st.session_state["music_queue_idx"] = 0
-            st.rerun()
-        else:
-            st.error("❌ Koi result nahi mila. Aur kuch try karein.")
-
-    # Results grid
     results = st.session_state.get("music_results", [])
     if results:
-        search_label = st.session_state.get("music_search", "")
-        st.success(f"🎵 **{len(results)} tracks** — *{search_label}*")
         cols = st.columns(2)
         for i, track in enumerate(results):
             with cols[i % 2]:
-                is_active = (track["id"] == st.session_state.get("active_music"))
-                border_color = "#3B82F6" if is_active else "#1E293B"
-                st.markdown(f"""
-                <div style="border:2px solid {border_color};border-radius:10px;overflow:hidden;
-                            background:#0F172A;margin-bottom:0.5rem;">
-                    <img src="{track['thumb']}" style="width:100%;height:120px;object-fit:cover;"
-                         onerror="this.src='https://img.youtube.com/vi/{track['id']}/default.jpg'"/>
-                    <div style="padding:0.4rem 0.6rem;">
-                        <div style="font-size:0.78rem;color:#E2E8F0;font-weight:600;
-                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                             title="{track['title']}">{track['title'][:55]}</div>
-                        <div style="font-size:0.7rem;color:#64748B;">{track.get('duration','')}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                lbl = "▶️ Playing" if is_active else "▶️ Play"
-                if st.button(lbl, key=f"mplay_{i}", use_container_width=True,
-                             type="primary" if is_active else "secondary"):
-                    st.session_state["active_music"]      = track["id"]
+                st.markdown("**" + track['title'][:55] + "**")
+                if st.button("▶️ Play", key=f"mplay_{i}", use_container_width=True):
+                    st.session_state["active_music"] = track["id"]
                     st.session_state["active_music_title"] = track["title"]
-                    st.session_state["music_queue"]       = results
-                    st.session_state["music_queue_idx"]   = i
+                    st.session_state["music_queue"] = results
+                    st.session_state["music_queue_idx"] = i
                     st.rerun()
 
-        if st.button("🗑️ Clear Results", key="music_clear", use_container_width=True):
-            st.session_state["music_results"] = []
-            st.session_state["music_search"]  = ""
-            st.rerun()
-
-# ============================================
-# 🎬 VIDEO PLAYER - SEARCH ANY VIDEO
-# ============================================
 
 _VIDEO_CATEGORIES = [
-    ("💪 Chest",         "best chest workout gym"),
-    ("🦵 Legs",          "leg workout gym training"),
-    ("🔙 Back",          "back workout gym training"),
-    ("🏃 Cardio",        "cardio HIIT workout"),
-    ("🧘 Yoga",          "yoga for beginners flexibility"),
-    ("⚡ HIIT",          "HIIT fat burn workout"),
-    ("🥗 Diet Tips",     "gym diet plan for muscle gain"),
-    ("🏋️ Motivation",   "gym motivation bodybuilding"),
-    ("💊 Supplements",   "best supplements for gym beginners"),
-    ("🧠 Mind & Body",   "mindfulness meditation stress relief"),
-    ("🇵🇰 Desi Fitness", "Pakistani fitness training urdu"),
-    ("🤸 Flexibility",   "stretching flexibility full body"),
+    ("💪 Chest", "best chest workout"), ("🦵 Legs", "leg workout"),
+    ("🔙 Back", "back workout"), ("🏃 Cardio", "cardio HIIT"),
+    ("🧘 Yoga", "yoga for beginners"), ("⚡ HIIT", "HIIT fat burn"),
+    ("🥗 Diet", "gym diet plan"), ("🏋️ Motivation", "gym motivation"),
 ]
+
 
 def _video_player():
     _init_state()
-
-    st.markdown("""
-    <div style="background:linear-gradient(135deg,#0F172A,#1A1037);border-radius:16px;
-                padding:1.2rem 1.5rem;margin-bottom:1rem;">
-        <h2 style="margin:0;font-size:1.5rem;">🎬 Video Player</h2>
-        <p style="margin:0;color:#94A3B8;font-size:0.9rem;">
-            Workout tutorials • Exercise guides • Nutrition tips
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Active player — always at top when something is playing
-    active_vid   = st.session_state.get("active_video")
-    active_title = st.session_state.get("active_video_title", "")
-
-    if active_vid:
-        st.markdown(f"""
-        <div style="background:linear-gradient(90deg,#1C1937,#0F172A);border:1px solid #8B5CF6;
-                    border-radius:12px;padding:0.7rem 1rem;margin-bottom:0.8rem;">
-            <span style="color:#A78BFA;font-weight:700;font-size:0.8rem;">▶ NOW PLAYING</span><br/>
-            <span style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{active_title[:80]}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;
-                    border-radius:14px;background:#000;box-shadow:0 8px 32px rgba(0,0,0,0.6);
-                    margin-bottom:0.8rem;">
-            <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                src="https://www.youtube.com/embed/{active_vid}?autoplay=1&rel=0&modestbranding=1"
-                frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowfullscreen>
-            </iframe>
-        </div>
-        """, unsafe_allow_html=True)
-
-        cv1, cv2 = st.columns([4, 1])
-        with cv2:
-            if st.button("⏹ Stop", key="video_stop_top", use_container_width=True):
-                st.session_state["active_video"]       = None
-                st.session_state["active_video_title"] = ""
-                st.rerun()
+    st.markdown("### 🎬 Video")
+    vid = st.session_state.get("active_video")
+    if vid:
+        st.markdown("**NOW PLAYING:** " + st.session_state.get('active_video_title', '')[:80])
+        iframe = '<iframe width="100%" height="400" src="https://www.youtube.com/embed/' + vid + '?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>'
+        st.markdown(iframe, unsafe_allow_html=True)
+        if st.button("⏹ Stop", key="vstop", use_container_width=True):
+            st.session_state["active_video"] = None
+            st.rerun()
         st.divider()
-
-    # Category presets
-    st.markdown("#### 🏷️ Categories — Ek Click Mein")
     cat_cols = st.columns(4)
     for i, (label, query) in enumerate(_VIDEO_CATEGORIES):
         if cat_cols[i % 4].button(label, key=f"vcat_{i}", use_container_width=True):
-            with st.spinner(f"🔍 {label} videos dhundh raha hoon..."):
+            with st.spinner(label + "..."):
                 res = search_youtube(query, max_results=9)
             if res:
-                st.session_state["video_results"]      = res
-                st.session_state["video_search"]       = label
+                st.session_state["video_results"] = res
                 st.rerun()
-            else:
-                st.error("Nahi mila, dobara try karein")
-
-    st.divider()
-
-    # Custom search
-    st.markdown("#### 🔍 Custom Search")
-    vs1, vs2 = st.columns([4, 1])
-    with vs1:
-        v_query = st.text_input("", placeholder="e.g. Shoulder workout, Weight loss tips, Protein diet...",
-                                key="video_search_input", label_visibility="collapsed")
-    with vs2:
-        do_vsearch = st.button("Search 🔍", key="video_search_btn", type="primary", use_container_width=True)
-
-    if do_vsearch and v_query.strip():
-        with st.spinner(f"Searching '{v_query}'..."):
-            res = search_youtube(v_query.strip(), max_results=9)
-        if res:
-            st.session_state["video_results"] = res
-            st.session_state["video_search"]  = v_query.strip()
-            st.rerun()
-        else:
-            st.error("❌ Koi video nahi mila. Kuch aur try karein.")
-
-    # Results grid — 3 columns with titles
     results = st.session_state.get("video_results", [])
     if results:
-        search_label = st.session_state.get("video_search", "")
-        st.success(f"📹 **{len(results)} videos** — *{search_label}*")
         cols3 = st.columns(3)
         for i, track in enumerate(results):
             with cols3[i % 3]:
-                is_active = (track["id"] == active_vid)
-                border_col = "#8B5CF6" if is_active else "#1E293B"
-                st.markdown(f"""
-                <div style="border:2px solid {border_col};border-radius:10px;overflow:hidden;
-                            background:#0F172A;margin-bottom:0.5rem;">
-                    <img src="{track['thumb']}" style="width:100%;height:110px;object-fit:cover;"
-                         onerror="this.src='https://img.youtube.com/vi/{track['id']}/default.jpg'"/>
-                    <div style="padding:0.4rem 0.6rem;">
-                        <div style="font-size:0.74rem;color:#E2E8F0;font-weight:600;
-                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                             title="{track['title']}">{track['title'][:50]}</div>
-                        <div style="font-size:0.68rem;color:#64748B;">{track.get('duration','')}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                lbl = "▶️ Playing" if is_active else "▶️ Play"
-                if st.button(lbl, key=f"vplay_{i}", use_container_width=True,
-                             type="primary" if is_active else "secondary"):
-                    st.session_state["active_video"]       = track["id"]
+                st.markdown("**" + track['title'][:45] + "**")
+                if st.button("▶️ Play", key=f"vplay_{i}", use_container_width=True):
+                    st.session_state["active_video"] = track["id"]
                     st.session_state["active_video_title"] = track["title"]
                     st.rerun()
 
-        if st.button("🗑️ Clear Results", key="video_clear", use_container_width=True):
-            st.session_state["video_results"] = []
-            st.session_state["video_search"]  = ""
-            st.rerun()
-
 
 # ============================================
-# 🤖 STAFF AI COACH — Personal Dashboard Widget
+# 🎯 V12 CODER TAB (Replit-style UI)
 # ============================================
 
-def _score_staff(m: dict) -> tuple[int, str, str]:
-    """
-    Compute a 0-100 performance score and a grade.
-    Returns (score, grade, color).
-    """
-    score = 50  # baseline
+def _render_preview_changes(changes):
+    """Preview mein changes dikhao"""
+    for i, ch in enumerate(changes):
+        fp = ch.get("file", "")
+        act = ch.get("action", "modify")
+        with st.expander(f"#{i+1} — **{act.upper()}**: `{fp}`", expanded=True):
+            if act == "create":
+                st.markdown("**🆕 Naya file:**")
+                st.code(ch.get("new_content", "")[:3000], language="python")
+            elif act == "modify":
+                st.markdown("**🔴 Search (ye milega):**")
+                st.code(ch.get("search_for", ""), language="python")
+                st.markdown("**🟢 Replace (ye hoga):**")
+                st.code(ch.get("replace_with", ""), language="python")
 
-    # Shift opened today?
-    if m["shift_open"]:
-        score += 10
-    elif m["shifts_today"] > 0:
-        score += 5   # opened but already closed — still counts
+
+def _render_result(res):
+    """Execution result dikhao"""
+    if res.get("success"):
+        st.success(res["message"])
     else:
-        score -= 15  # no shift at all
+        st.warning(res["message"])
 
-    # Fees collected
-    if m["fee_count"] >= 5:
-        score += 15
-    elif m["fee_count"] >= 2:
-        score += 8
-    elif m["fee_count"] == 1:
-        score += 3
+    if res.get("plan"):
+        with st.expander("📋 Plan", expanded=False):
+            for i, s in enumerate(res["plan"], 1):
+                st.markdown(f"{i}. {s}")
 
-    # Attendance marking
-    total = m["total_active_members"] or 1
-    att_pct = m["att_count"] / total
-    if att_pct >= 0.8:
-        score += 20
-    elif att_pct >= 0.4:
-        score += 10
-    elif att_pct > 0:
-        score += 4
+    if res.get("changes_applied"):
+        st.markdown("### ✅ Applied")
+        for ch in res["changes_applied"]:
+            st.success(f"**{ch['file']}** — {ch['message']}")
 
-    # Deletions are bad
-    score -= m["deletions_today"] * 10
+    if res.get("verification"):
+        with st.expander("🧪 Verification", expanded=False):
+            for fp, v in res["verification"].items():
+                c1, c2, c3 = st.columns([3, 1, 1])
+                c1.markdown(f"**{fp}**")
+                c2.metric("Syntax", "✅" if v.get("syntax") else "❌")
+                c3.metric("Imports", "✅" if v.get("imports_ok") else "⚠️")
+                if v.get("missing"):
+                    st.caption(f"⚠️ Missing imports: {', '.join(v['missing'])}")
 
-    # New members registered
-    score += m["new_members_today"] * 5
-
-    score = max(0, min(100, score))
-
-    if score >= 80:
-        return score, "⭐ Excellent", "#22C55E"
-    elif score >= 60:
-        return score, "✅ Good",     "#3B82F6"
-    elif score >= 40:
-        return score, "⚠️ Average",  "#F59E0B"
-    else:
-        return score, "❌ Poor",     "#EF4444"
+    if res.get("backup_dir"):
+        st.caption(f"💾 Backup: `{res['backup_dir']}`")
 
 
-def _build_coach_prompt(username: str, m: dict, score: int, grade: str) -> str:
-    now_hour = datetime.now().hour
-    time_of_day = "subah" if now_hour < 12 else ("dopahar" if now_hour < 17 else "shaam")
-    att_pct = int((m["att_count"] / max(m["total_active_members"], 1)) * 100)
+def _v12_coder_tab(role, username, gym_id=None):
+    if role not in ("admin", "owner"):
+        st.error("🔒 Sirf Admin")
+        return
 
-    return f"""You are GymPro AI Coach. Write a SHORT (max 160 words), personal performance message for staff member "{username}" in Roman Urdu (with some English words fine).
+    if not V12_AVAILABLE:
+        st.error("❌ V12 engine load nahi hua")
+        st.code(f"Error: {_V12_IMPORT_ERROR if '_V12_IMPORT_ERROR' in globals() else 'unknown'}")
+        return
 
-TODAY'S METRICS ({time_of_day}):
-- Performance Score: {score}/100 — {grade}
-- Fees Collected: PKR {m['fee_total']:,.0f} ({m['fee_count']} receipts)
-- Member Attendance Marked: {m['att_count']} out of {m['total_active_members']} ({att_pct}%)
-- Shift: {"✅ OPEN since " + str(m['shift_opened_at']) if m['shift_open'] else ("✅ Completed today" if m['shifts_today'] > 0 else "❌ NOT STARTED — no shift opened!")}
-- Fee Deletions Today: {m['deletions_today']} {"⚠️ SUSPICIOUS!" if m['deletions_today'] > 0 else "✅ none"}
-- New Members Registered: {m['new_members_today']}
-- Total Activities: {m['activity_count']}
+    # Header
+    st.markdown("""
+    <div style="text-align:center;padding:1rem;background:linear-gradient(135deg,#0f172a,#1e1b4b);
+    border-radius:16px;border:2px solid #10b981;margin-bottom:1rem;">
+        <h2 style="margin:0;color:#10b981;">🤖 AI Coder V12 — SUPER MODE</h2>
+        <p style="margin:0.5rem 0 0;color:#94a3b8;font-size:0.9rem;">
+        Chat · Preview · Multi-file · Auto-Verify · Database Safe</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-TONE RULES — follow exactly:
-- Score ≥ 80 → Start with STRONG shahbashi: "Shahbash {username}! Zabardast kaam!" — then praise specifically what was done well
-- Score 60-79 → Positive but point out 1-2 things to improve
-- Score 40-59 → Motivating but CLEAR about what's missing, give specific numbered steps
-- Score < 40 → Firm, caring, clear about problems + exact steps to fix them RIGHT NOW
-- If no shift → "Pehle SHIFT kholo: Fee Collection page → Shift Management tab → 'Open Shift'"
-- If att_count == 0 and total_active > 0 → "ZARURI: Attendance page par jao, {m['total_active_members']} members ki attendance abhi mark karo!"
-- If deletions > 0 → STERN warning about fee deletions — "har deletion record hota hai, admin dekhta hai"
-- End with 2-3 numbered ACTION ITEMS for next 1 hour
-
-Keep it punchy and real. Not corporate speak. Like a caring senior colleague."""
-
-
-def render_staff_ai_coach(username: str, role: str = "staff", gym_id=None):
-    """
-    Personalized AI performance coach for staff — shown on their dashboard.
-    Evaluates today's work, gives praise or advice, lists pending tasks.
-    """
-    _init_state()
-
-    m = {}
+    # Project index summary
     try:
-        m = db.get_staff_today_metrics(username, gym_id=gym_id)
+        summary = v12_index_summary()
+        st.caption(summary)
     except Exception:
         pass
 
-    score, grade, grade_color = _score_staff(m)
+    # ═══ 4 BIG BUTTONS ═══
+    if "v12_action" not in st.session_state:
+        st.session_state["v12_action"] = None
 
-    # ── Task checklist ──────────────────────────────────────────────────────
-    tasks = []
-    if not m.get("shift_open") and not m.get("shifts_today", 0):
-        tasks.append(("❌", "Shift abhi tak nahi khuli", "Fee Collection → Shift Management", "critical"))
-    else:
-        tasks.append(("✅", "Shift khuli hai", f"Since {m.get('shift_opened_at','?')}", "ok"))
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        if st.button("🎯 Kuch Banao", use_container_width=True, type="primary", key="v12_btn_create"):
+            st.session_state["v12_action"] = "create"
+    with b2:
+        if st.button("🔧 Error Fix", use_container_width=True, type="primary", key="v12_btn_fix"):
+            st.session_state["v12_action"] = "fix"
+    with b3:
+        if st.button("📜 History", use_container_width=True, type="primary", key="v12_btn_hist"):
+            st.session_state["v12_action"] = "history"
+    with b4:
+        if st.button("🧪 System", use_container_width=True, type="primary", key="v12_btn_sys"):
+            st.session_state["v12_action"] = "system"
 
-    att_pct = int((m.get("att_count", 0) / max(m.get("total_active_members", 1), 1)) * 100)
-    if att_pct < 50 and m.get("total_active_members", 0) > 0:
-        tasks.append(("⚠️", f"Attendance sirf {att_pct}% — {m.get('att_count',0)}/{m.get('total_active_members',0)} members",
-                       "Attendance page → mark karo", "warn"))
-    elif att_pct >= 80:
-        tasks.append(("✅", f"Attendance {att_pct}% complete", f"{m.get('att_count',0)} members marked", "ok"))
-    else:
-        tasks.append(("🔶", f"Attendance {att_pct}% — thori aur baqi hai",
-                       "Attendance page mein baki members", "warn"))
+    st.divider()
+    action = st.session_state.get("v12_action")
 
-    if m.get("fee_count", 0) == 0:
-        tasks.append(("❌", "Aaj abhi koi fee collect nahi hui", "Fee Collection → collect karo", "critical"))
-    else:
-        tasks.append(("✅", f"PKR {m.get('fee_total',0):,.0f} collect kiya ({m.get('fee_count',0)} receipts)", "", "ok"))
+    # ═══ ACTION: CREATE ═══
+    if action == "create":
+        st.markdown("### 🎯 Bolo Kya Karna Hai")
+        st.caption("Roman Urdu mein likho — AI samjhega aur karega")
 
-    if m.get("deletions_today", 0) > 0:
-        tasks.append(("🚨", f"{m['deletions_today']} fee deletion(s) aaj! Admin ko pata hai.", "Explain karo agar mistake thi", "critical"))
+        # Show recent conversation (memory)
+        try:
+            recent = v12_get_conversation(limit=3)
+            if recent:
+                with st.expander("🧠 Pichhli Baatein (AI yaad rakhta hai)", expanded=False):
+                    for turn in reversed(recent):
+                        st.markdown(f"**Tum:** {turn.get('user', '')[:150]}")
+                        if turn.get('topic'):
+                            st.caption(f"📌 Topic: {turn['topic']} · Mode: {turn.get('mode', '?')}")
+                        if turn.get('ai_explanation'):
+                            st.markdown(f"**AI:** {turn.get('ai_explanation', '')[:200]}")
+                        st.divider()
+        except Exception as _e:
+            pass
+        
+        # ── Voice input for V12 command ──
+        with st.expander("🎤 Bol ke Command Do", expanded=False):
+            audio_cmd = st.audio_input("Mic dabao aur command bolo", key="v12_mic_input")
+            if audio_cmd is not None:
+                with st.spinner("🎧 Sun raha hoon..."):
+                    text, err = transcribe_audio(audio_cmd.read(), language="ur")
+                if text:
+                    st.success(f"✅ Samjha: **{text}**")
+                    if st.button("📝 Command Mein Daalo", key="v12_mic_use", type="primary"):
+                        st.session_state["v12_command"] = text
+                        st.rerun()
+                elif err:
+                    st.error(f"❌ {err}")
+        
+        cmd = st.text_area(
+            "Command:",
+            value=st.session_state.get("v12_command", ""),
+            height=140,
+            key="v12_cmd_input",
+            placeholder="Jaise: Members page mein ek search bar add karo jo naam aur phone se search kare...",
+        )
 
-    # ── Score ring HTML ─────────────────────────────────────────────────────
-    ring_color = grade_color
-    score_html = f"""
-<div style="display:flex;align-items:center;gap:1.2rem;padding:1rem 1.25rem;
-            background:linear-gradient(135deg,#0F172A,#1E1B4B);
-            border:2px solid {ring_color};border-radius:14px;margin-bottom:0.8rem;">
-  <div style="position:relative;width:72px;height:72px;flex-shrink:0;">
-    <svg width="72" height="72" viewBox="0 0 72 72">
-      <circle cx="36" cy="36" r="30" fill="none" stroke="#1E293B" stroke-width="8"/>
-      <circle cx="36" cy="36" r="30" fill="none" stroke="{ring_color}" stroke-width="8"
-        stroke-dasharray="{int(score*1.885)} 188.5"
-        stroke-dashoffset="47" stroke-linecap="round" transform="rotate(-90 36 36)"/>
-    </svg>
-    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-                text-align:center;line-height:1;">
-      <div style="font-size:1.1rem;font-weight:800;color:{ring_color};">{score}</div>
-      <div style="font-size:0.5rem;color:#94A3B8;">/ 100</div>
-    </div>
-  </div>
-  <div style="flex:1;">
-    <div style="font-size:1rem;font-weight:700;color:{ring_color};">{grade}</div>
-    <div style="font-size:0.85rem;color:#F1F5F9;font-weight:600;margin-top:0.2rem;">
-      {username}'s Performance — Aaj
-    </div>
-    <div style="font-size:0.75rem;color:#94A3B8;margin-top:0.15rem;">
-      💰 PKR {m.get('fee_total',0):,.0f} &nbsp;·&nbsp;
-      👥 {m.get('att_count',0)}/{m.get('total_active_members',0)} att &nbsp;·&nbsp;
-      {'🟢 Shift Open' if m.get('shift_open') else '🔴 No Shift'}
-    </div>
-  </div>
-</div>"""
-    st.markdown(score_html, unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            preview_btn = st.button("👁️ Pehle Dikhao", use_container_width=True, key="v12_preview_btn")
+        with c2:
+            apply_btn = st.button("🚀 Seedha Karo", use_container_width=True, type="primary", key="v12_apply_btn")
+        with c3:
+            if st.button("❌", use_container_width=True, key="v12_cancel_btn"):
+                st.session_state["v12_action"] = None
+                st.session_state["v12_last_result"] = None
+                st.session_state["v12_last_preview"] = None
+                st.rerun()
 
-    # ── Task checklist ──────────────────────────────────────────────────────
-    with st.expander("📋 Aaj ka Task Checklist", expanded=True):
-        for icon, label, hint, sev in tasks:
-            bg  = {"critical": "#450A0A", "warn": "#422006", "ok": "#052E16"}.get(sev, "#1E293B")
-            bc  = {"critical": "#EF4444", "warn": "#F59E0B", "ok": "#22C55E"}.get(sev, "#475569")
-            st.markdown(f"""
-<div style="background:{bg};border-left:3px solid {bc};border-radius:8px;
-            padding:0.5rem 0.75rem;margin-bottom:0.4rem;display:flex;
-            justify-content:space-between;align-items:center;">
-  <div>
-    <span style="font-size:0.9rem;">{icon} <strong>{label}</strong></span>
-    {"<div style='font-size:0.72rem;color:#94A3B8;margin-top:0.1rem;'>→ " + hint + "</div>" if hint else ""}
-  </div>
-</div>""", unsafe_allow_html=True)
+        if preview_btn and cmd.strip():
+            with st.spinner("👁️ Preview bana raha hoon..."):
+                res = v12_execute(cmd, preview_only=True)
+            st.session_state["v12_last_preview"] = res
+            st.session_state["v12_command"] = cmd
 
-    # ── AI coach message ─────────────────────────────────────────────────────
-    coach_key = f"coach_msg_{username}"
-    if coach_key not in st.session_state:
-        st.session_state[coach_key] = None
-
-    refresh_col, _ = st.columns([1, 3])
-    do_refresh = refresh_col.button("🤖 AI Coach Message", key="staff_coach_btn",
-                                     type="primary", use_container_width=True)
-
-    if do_refresh or (st.session_state[coach_key] is None and score < 60):
-        prompt = _build_coach_prompt(username, m, score, grade)
-        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
-        if groq_key:
+        if apply_btn and cmd.strip():
+            with st.spinner("🚀 Verify + Apply..."):
+                res = v12_execute(cmd, preview_only=False)
+            st.session_state["v12_last_result"] = res
+            st.session_state["v12_command"] = cmd
+            # Refresh index
             try:
-                import requests as _r
-                resp = _r.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}",
-                             "Content-Type": "application/json"},
-                    json={"model": "llama-3.3-70b-versatile",
-                          "messages": [{"role": "user", "content": prompt}],
-                          "max_tokens": 400, "temperature": 0.7},
-                    timeout=20,
-                )
-                resp.raise_for_status()
-                st.session_state[coach_key] = resp.json()["choices"][0]["message"]["content"].strip()
-            except Exception as ex:
-                st.session_state[coach_key] = f"AI Coach abhi available nahi. Baad mein try karein. ({ex})"
+                v12_scan_project()
+            except Exception:
+                pass
+
+        # Show preview
+        prev = st.session_state.get("v12_last_preview")
+        if prev is not None:
+            st.divider()
+            st.markdown("### 👁️ Preview")
+            
+            # Show mode
+            mode = prev.get("mode", "?")
+            mode_icon = "🔍" if mode == "analysis" else "🔧"
+            st.caption(f"{mode_icon} Mode: **{mode.upper()}**")
+            
+            if prev.get("included_files"):
+                st.caption("📂 AI ne ye files padhe: " + ", ".join(prev["included_files"][:5]))
+            
+            preview_changes = prev.get("changes_preview", [])
+            if preview_changes:
+                st.success(f"✅ {len(preview_changes)} changes ready hain")
+                _render_preview_changes(preview_changes)
+            else:
+                # Analysis mode ya empty
+                msg = prev.get("message", "Koi change nahi mila")
+                st.warning(msg)
+                if prev.get("explanation"):
+                    st.info("🤖 AI: " + prev["explanation"])
+
+        # Show result
+        res = st.session_state.get("v12_last_result")
+        if res:
+            st.divider()
+            st.markdown("### 📊 Result")
+            _render_result(res)
+            
+            # Voice for result
+            if res.get("message"):
+                if st.button("🔊 Result Sunao", key="v12_speak_result"):
+                    summary = res.get("message", "")
+                    if res.get("explanation"):
+                        summary += ". " + res["explanation"]
+                    play_tts(summary)
+
+    # ═══ ACTION: FIX ═══
+    elif action == "fix":
+        st.markdown("### 🔧 Error Fix Karo")
+        st.caption("Error paste karo — AI khud diagnose karega aur fix karega")
+
+        # File selector
+        files_list = []
+        try:
+            idx = v12_load_index()
+            files_list = [f for f in idx.get("files", {}).keys() if not v12_is_protected(f)[0]]
+        except Exception:
+            pass
+
+        ef = st.selectbox("File (optional)", [""] + sorted(files_list), key="v12_fix_file")
+
+        err = st.text_area(
+            "Error message:",
+            height=150,
+            key="v12_fix_err",
+            placeholder='Traceback (most recent call last):\n  File "app.py", line 42...',
+        )
+
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            fix_btn = st.button("🩹 Fix Karo", use_container_width=True, type="primary", key="v12_fix_btn")
+        with c2:
+            if st.button("❌ Cancel", use_container_width=True, key="v12_fix_cancel"):
+                st.session_state["v12_action"] = None
+                st.rerun()
+
+        if fix_btn and err.strip():
+            with st.spinner("🔍 Diagnose + Fix..."):
+                res = v12_auto_fix(err, ef or None)
+            if res.get("diagnosis"):
+                st.info(f"🔍 **Diagnosis:** {res['diagnosis']}")
+            for ch in res.get("applied", []):
+                st.success(ch["message"])
+            for ch in res.get("failed", []):
+                st.error(ch["message"])
+            if res.get("backup_dir"):
+                st.caption(f"💾 Backup: `{res['backup_dir']}`")
+            try:
+                v12_scan_project()
+            except Exception:
+                pass
+
+    # ═══ ACTION: HISTORY ═══
+    elif action == "history":
+        st.markdown("### 📜 History — Kya Kya Hua")
+
+        commits = v12_get_commits()
+        if not commits:
+            st.info("Abhi tak kuch nahi hua")
         else:
-            st.session_state[coach_key] = "⚠️ GROQ_API_KEY set nahi hai — AI coach unavailable."
+            st.caption(f"Total: {len(commits)} commits")
+            for c in reversed(commits[-30:]):
+                with st.expander(f"#{c['id']} — {c['description'][:70]}"):
+                    st.caption(f"⏰ {c['time']}")
+                    st.markdown("**Changes:**")
+                    for ch in c.get("changes", []):
+                        st.markdown(f"- `{ch.get('action', 'modify')}` — `{ch.get('file', '')}`")
+                    if st.button(f"🕰️ Wapas Jao #{c['id']}", key=f"v12_tt_{c['id']}"):
+                        ok, msg = v12_time_travel(c["id"])
+                        if ok:
+                            st.success(msg)
+                            try:
+                                v12_scan_project()
+                            except Exception:
+                                pass
+                        else:
+                            st.error(msg)
 
-    if st.session_state.get(coach_key):
-        msg = st.session_state[coach_key]
-        is_praise = score >= 70
-        msg_bg    = "#052E16" if is_praise else "#1C1917"
-        msg_bc    = "#22C55E" if is_praise else "#F59E0B"
-        msg_ico   = "🎉" if score >= 80 else ("👍" if is_praise else ("⚠️" if score >= 40 else "🚨"))
-        st.markdown(f"""
-<div style="background:{msg_bg};border:1px solid {msg_bc};border-radius:12px;
-            padding:1rem 1.25rem;margin-top:0.5rem;">
-  <div style="color:{msg_bc};font-weight:700;font-size:0.8rem;margin-bottom:0.4rem;">
-    {msg_ico} AI COACH — {grade}
-  </div>
-  <div style="color:#F1F5F9;font-size:0.9rem;line-height:1.6;white-space:pre-wrap;">{msg}</div>
-</div>""", unsafe_allow_html=True)
+    # ═══ ACTION: SYSTEM ═══
+    elif action == "system":
+        st.markdown("### 🧪 System Health")
 
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🧪 Full Test Chalao", use_container_width=True, type="primary", key="v12_test_btn"):
+                with st.spinner("Testing..."):
+                    results = v12_self_test()
+                st.markdown("**Results:**")
+                for k, v in results.items():
+                    st.markdown(f"{'✅' if v else '❌'} **{k.replace('_', ' ').title()}**")
+                if all(results.values()):
+                    st.success("🎉 Sab theek hai!")
+                else:
+                    st.warning("⚠️ Kuch fail")
+        with col2:
+            if st.button("🔄 Project Rescan", use_container_width=True, key="v12_rescan_btn"):
+                with st.spinner("Scanning..."):
+                    idx = v12_scan_project()
+                st.success(f"✅ Scan complete: {idx['stats']['total_files']} files, {idx['stats']['total_lines']} lines")
 
-# ============================================
-# 🎵 PERSISTENT SIDEBAR MUSIC BAR
-# ============================================
+        st.divider()
 
-def render_persistent_music_bar():
-    """
-    Render a compact music mini-player in the sidebar.
-    Uses st.components.v1.html so the YouTube iframe stays alive across page
-    navigations — as long as the video_id doesn't change, Streamlit's React
-    reconciler keeps the same iframe node and music keeps playing.
-    """
-    import streamlit.components.v1 as components
+        # Cleanup
+        st.markdown("#### 🧹 Cleanup")
+        if st.button("Purane backups delete (7 din se purane)", key="v12_cleanup_btn"):
+            deleted, msg = v12_cleanup_backups(days=7)
+            st.success(msg)
 
-    _init_state()
-    vid   = st.session_state.get("active_music")
-    title = st.session_state.get("active_music_title", "")
-    queue = st.session_state.get("music_queue", [])
-    idx   = st.session_state.get("music_queue_idx", 0)
+        st.divider()
 
-    if not vid:
-        return  # nothing to show
+        # Protected files info
+        st.markdown("#### 🛡️ Protected Files (AI kabhi touch nahi karega)")
+        with st.expander("Dekho"):
+            st.markdown("**Files:**")
+            for f in sorted(PROTECTED_FILES):
+                st.markdown(f"- 🛡️ `{f}`")
+            st.markdown("**Extensions:**")
+            for e in sorted(PROTECTED_EXTENSIONS):
+                st.markdown(f"- 🛡️ `*{e}`")
+            st.markdown("**Folders:**")
+            for d in sorted(PROTECTED_DIRS):
+                st.markdown(f"- 🛡️ `{d}/`")
 
-    # Build the mini-player HTML — must be byte-for-byte identical across reruns
-    # for the SAME song so React doesn't remount the iframe.
-    html = f"""
-<!DOCTYPE html><html><head>
-<style>
-  * {{ margin:0;padding:0;box-sizing:border-box; }}
-  body {{ background:#0F172A;font-family:system-ui,sans-serif;overflow:hidden; }}
-  .bar {{ display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:linear-gradient(90deg,#1E3A5F,#1E1B4B);
-          border-radius:10px;border:1px solid #3B82F6; }}
-  .ico {{ font-size:20px;flex-shrink:0; }}
-  .info {{ flex:1;min-width:0; }}
-  .label {{ color:#60A5FA;font-size:9px;font-weight:700;text-transform:uppercase;
-            letter-spacing:.05em; }}
-  .song {{ color:#F1F5F9;font-size:11px;font-weight:600;
-           white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }}
-  iframe {{ width:100%;height:52px;border:none;border-radius:8px;margin-top:6px; }}
-</style></head>
-<body>
-<div class="bar">
-  <div class="ico">🎵</div>
-  <div class="info">
-    <div class="label">Now Playing</div>
-    <div class="song" title="{title}">{title[:60]}</div>
-  </div>
-</div>
-<iframe src="https://www.youtube.com/embed/{vid}?autoplay=1&rel=0&modestbranding=1"
-  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-  allowfullscreen></iframe>
-</body></html>
-"""
-    components.html(html, height=130, scrolling=False)
+        st.divider()
 
-    # Controls below the component
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("⏮", key="pmb_prev", use_container_width=True, help="Previous track"):
-            if queue and idx > 0:
-                ni = idx - 1
-                st.session_state["music_queue_idx"]    = ni
-                st.session_state["active_music"]       = queue[ni]["id"]
-                st.session_state["active_music_title"] = queue[ni]["title"]
-                st.rerun()
-    with c2:
-        if st.button("⏭", key="pmb_next", use_container_width=True, help="Next track"):
-            if queue and idx < len(queue) - 1:
-                ni = idx + 1
-                st.session_state["music_queue_idx"]    = ni
-                st.session_state["active_music"]       = queue[ni]["id"]
-                st.session_state["active_music_title"] = queue[ni]["title"]
-                st.rerun()
-    with c3:
-        if st.button("⏹", key="pmb_stop", use_container_width=True, help="Stop music"):
-            st.session_state["active_music"]       = None
-            st.session_state["active_music_title"] = ""
-            st.rerun()
-    if queue:
-        st.caption(f"🎵 {idx+1}/{len(queue)} — go to **AI Assistant → Music** for more")
+        # Project index details
+        st.markdown("#### 📊 Project Index")
+        try:
+            idx = v12_load_index()
+            s = idx.get("stats", {})
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Files", s.get("total_files", 0))
+            c2.metric("Lines", s.get("total_lines", 0))
+            c3.metric("Pages", s.get("pages", 0))
+            st.caption(f"Last scan: {idx.get('scanned_at', 'N/A')}")
+        except Exception as e:
+            st.warning(f"Index load fail: {e}")
 
-# ============================================
-# 💬 CHAT TAB
-# ============================================
-
-def _chat_tab(page: str, gym_stats: dict, role="staff", username="", gym_id=None):
-    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
-
-    st.markdown(f"### 💬 GymPro AI — {role_label}")
-    st.caption("Real-time gym data ke saath AI — Roman Urdu mein poochiye, seedha jawab milega")
-
-    # Role-specific quick action chips
-    if role in ["admin", "owner"]:
-        chips = [
-            "Aaj ka mukammal summary do",
-            "Koi fraud ya chori alert hai?",
-            "Overdue members ki list aur total pending",
-            "Is mahine ka profit/loss",
-            "Staff mein se kaunsa sabse zyada collect kar raha hai?",
-            "Kaunse members aaj expire ho rahe hain?",
-        ]
+    # ═══ DEFAULT ═══
     else:
-        chips = [
-            "Fee kaise collect karein?",
-            "Naya member kaise register karein?",
-            "Shift kaise shuru karein?",
-            "Attendance kaise mark karein?",
-            "Receipt print kaise karein?",
-            "Member ki fee update kaise karein?",
-        ]
+        st.info("👆 Upar 4 buttons mein se ek dabao — kaam shuru karne ke liye")
 
-    st.markdown("#### ⚡ Quick Questions — Ek Click Mein Jawab")
-    cols = st.columns(3)
+
+# ============================================
+# CHAT TAB
+# ============================================
+
+
+
+# ═══════════════════════════════════════════════════════════
+# 🎤 VOICE TO TEXT (Groq Whisper)
+# ═══════════════════════════════════════════════════════════
+
+def transcribe_audio(audio_bytes, language="ur"):
+    """Convert audio to text using Groq Whisper (FREE)"""
+    try:
+        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not groq_key:
+            return None, "GROQ_API_KEY nahi hai"
+        
+        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+        data = {"model": "whisper-large-v3", "language": language}
+        
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {groq_key}"},
+            files=files,
+            data=data,
+            timeout=60,
+        )
+        
+        if r.status_code == 200:
+            text = r.json().get("text", "").strip()
+            return text, None
+        else:
+            return None, f"Error {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return None, str(e)[:200]
+
+def _chat_tab(page, gym_stats, role="staff", username="", gym_id=None):
+    _init_state()
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner",
+                  "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
+    st.markdown("### 💬 GymPro AI — " + role_label)
+
+    if role in ["admin", "owner"]:
+        chips = ["Aaj ka summary", "Backup karo", "Test karo", "App check", "Reminders"]
+    else:
+        chips = ["Fee kaise?", "Member kaise?", "Workout plan", "Diet plan"]
+
+    cols = st.columns(4)
     for i, chip in enumerate(chips):
-        if cols[i % 3].button(chip, key=f"chip_{i}", use_container_width=True):
+        if cols[i % 4].button(chip, key="chip_" + str(i), use_container_width=True):
             _push_and_respond(chip, page, gym_stats, role=role, username=username, gym_id=gym_id)
 
     st.divider()
-
-    if hasattr(st, "audio_input"):
-        st.markdown("### 🎤 Voice Input")
-        voice_file = st.audio_input("🎙️ Press and speak (Roman Urdu/English)", key="mic_recorder_main")
-        if voice_file is not None:
-            audio_bytes = voice_file.read()
-            with st.spinner("🎧 Sun raha hoon..."):
-                transcribed = transcribe_mic(audio_bytes)
-                if transcribed:
-                    st.success(f"🗣️ Aapne kaha: **{transcribed}**")
-                    _push_and_respond(transcribed, page, gym_stats, role=role, username=username, gym_id=gym_id)
-                else:
-                    st.error("❌ Samajh nahi aaya. Dobara bolein.")
-        st.divider()
-
-    history = st.session_state.get("ai_chat_history", [])
-    for msg in history:
+    
+    # ── Auto-speak toggle ──
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        auto_voice = st.checkbox(
+            "🔊 AI jawab sunaye (Voice)",
+            value=st.session_state.get("auto_speak", True),
+            key="auto_speak_toggle",
+        )
+        st.session_state["auto_speak"] = auto_voice
+    with col_b:
+        if st.button("🔇 Stop Voice", key="stop_voice_btn", use_container_width=True):
+            st.session_state["speak_trigger"] = None
+            st.session_state["_audio_played"] = None
+            st.rerun()
+    
+    # ── Display chat messages ──
+    for msg in st.session_state.get("ai_chat_history", []):
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-
-    if st.session_state.get("speak_trigger") and st.session_state.get("auto_speak", False):
-        play_tts(st.session_state["speak_trigger"])
+            
+            # Voice button for EACH assistant message
+            if msg["role"] == "assistant":
+                if st.button("🔊 Sunao", key=f"speak_{hash(msg['content'])}", use_container_width=False):
+                    play_tts(msg["content"])
+    
+    # ── Auto-play voice for NEW replies ──
+    if st.session_state.get("speak_trigger"):
+        if st.session_state.get("auto_speak", True):
+            # Only play if not already played
+            last_spoken = st.session_state.get("_last_spoken", "")
+            current = st.session_state["speak_trigger"]
+            if last_spoken != current:
+                play_tts(current)
+                st.session_state["_last_spoken"] = current
         st.session_state["speak_trigger"] = None
 
     st.divider()
-
-    key = f"chat_input_{st.session_state.get('ai_input_counter', 0)}"
+    
+    # ── Voice input for chat ──
+    with st.expander("🎤 Bol ke Poocho (Voice Input)", expanded=False):
+        audio_chat = st.audio_input("Mic dabao aur bolo", key="chat_mic_input")
+        if audio_chat is not None:
+            with st.spinner("🎧 Sun raha hoon..."):
+                text, err = transcribe_audio(audio_chat.read(), language="ur")
+            if text:
+                st.success(f"✅ Samjha: **{text}**")
+                if st.button("📤 Ye Poocho", key="chat_mic_send", type="primary"):
+                    _push_and_respond(text, page, gym_stats, role=role, username=username, gym_id=gym_id)
+            elif err:
+                st.error(f"❌ {err}")
+    
+    key = "chat_input_" + str(st.session_state.get('ai_input_counter', 0))
     col1, col2, col3 = st.columns([6, 1, 1])
     user_input = col1.text_input("", key=key, label_visibility="collapsed",
-                                 placeholder="Roman Urdu mein likhein — e.g. Aaj kitna collect hua?")
-    send  = col2.button("Send ➤",  key="send_chat_btn",  type="primary", use_container_width=True)
-    clear = col3.button("🗑 Clear", key="clear_chat_btn", use_container_width=True)
-
+                                 placeholder="Roman Urdu mein likhein...")
+    send = col2.button("Send ➤", key="send_chat_btn", type="primary", use_container_width=True)
+    clear = col3.button("🗑", key="clear_chat_btn", use_container_width=True)
     if clear:
         st.session_state["ai_chat_history"] = []
-        st.session_state["ai_last_question"] = ""
         st.session_state["ai_input_counter"] += 1
         st.rerun()
-
     if send and user_input.strip():
         _push_and_respond(user_input.strip(), page, gym_stats, role=role, username=username, gym_id=gym_id)
 
+
 # ============================================
-# MAIN RENDER
+# RENDER
 # ============================================
+
+def render_staff_ai_coach(username, role="staff", gym_id=None):
+    _init_state()
+    try:
+        from database import get_staff_today_metrics
+        m = get_staff_today_metrics(username, gym_id=gym_id)
+    except Exception:
+        m = {}
+    st.markdown("### 📊 " + username + "'s Performance")
+    st.metric("Fee Today", "PKR " + str(f"{m.get('fee_total', 0):,.0f}"))
+
+
+def show_loading_overlay(message="Loading..."):
+    """Show PREMIUM loading overlay — safe version (no f-string)"""
+    
+    css_part = """
+    <style>
+    .gym-loading-overlay {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background: radial-gradient(circle at 50% 40%, #1e1b4b 0%, #0f172a 50%, #020617 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        z-index: 999999;
+        overflow: hidden;
+    }
+    .gym-loading-overlay::before {
+        content: '';
+        position: absolute;
+        width: 100%; height: 100%;
+        background-image: 
+            radial-gradient(2px 2px at 20% 30%, rgba(139, 92, 246, 0.6), transparent),
+            radial-gradient(2px 2px at 60% 70%, rgba(59, 130, 246, 0.5), transparent),
+            radial-gradient(1px 1px at 50% 50%, rgba(167, 139, 250, 0.7), transparent),
+            radial-gradient(2px 2px at 80% 10%, rgba(96, 165, 250, 0.5), transparent),
+            radial-gradient(1px 1px at 90% 60%, rgba(139, 92, 246, 0.6), transparent);
+        background-size: 200% 200%;
+        animation: floatParticles 15s linear infinite;
+        opacity: 0.8;
+    }
+    .gym-loading-ring {
+        position: absolute;
+        border-radius: 50%;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        animation: pulseRing 3s ease-out infinite;
+    }
+    .gym-loading-ring-1 { width: 300px; height: 300px; animation-delay: 0s; }
+    .gym-loading-ring-2 { width: 450px; height: 450px; animation-delay: 1s; }
+    .gym-loading-ring-3 { width: 600px; height: 600px; animation-delay: 2s; }
+    .gym-loading-logo {
+        font-size: 6rem;
+        position: relative;
+        z-index: 2;
+        animation: gymLift 2s ease-in-out infinite;
+        filter: drop-shadow(0 0 40px rgba(139, 92, 246, 1));
+    }
+    .gym-loading-title {
+        color: #a78bfa;
+        font-size: 2rem;
+        font-weight: 900;
+        letter-spacing: 4px;
+        margin-top: 2rem;
+        z-index: 2;
+        text-transform: uppercase;
+        background: linear-gradient(90deg, #a78bfa 0%, #60a5fa 50%, #a78bfa 100%);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: shineText 3s linear infinite;
+    }
+    .gym-loading-message {
+        color: #94a3b8;
+        font-size: 1rem;
+        margin-top: 0.8rem;
+        z-index: 2;
+        letter-spacing: 1px;
+        animation: fadeMessage 1.5s ease-in-out infinite;
+    }
+    .gym-loading-bar {
+        width: 280px;
+        height: 4px;
+        background: rgba(139, 92, 246, 0.15);
+        border-radius: 9999px;
+        margin-top: 1.5rem;
+        overflow: hidden;
+        z-index: 2;
+    }
+    .gym-loading-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #8b5cf6, #60a5fa, #8b5cf6);
+        border-radius: 9999px;
+        animation: loadBar 1.8s ease-in-out infinite;
+    }
+    .gym-loading-dots {
+        display: flex;
+        gap: 8px;
+        margin-top: 1rem;
+        z-index: 2;
+    }
+    .gym-loading-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: #8b5cf6;
+        animation: bounceDot 1.4s ease-in-out infinite;
+    }
+    .gym-loading-dot:nth-child(1) { animation-delay: 0s; }
+    .gym-loading-dot:nth-child(2) { animation-delay: 0.2s; }
+    .gym-loading-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes floatParticles {
+        0% { background-position: 0% 0%; }
+        100% { background-position: 200% 200%; }
+    }
+    @keyframes pulseRing {
+        0% { transform: scale(0.6); opacity: 0.8; }
+        100% { transform: scale(1.3); opacity: 0; }
+    }
+    @keyframes gymLift {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-15px) scale(1.08); }
+    }
+    @keyframes shineText {
+        to { background-position: 200% center; }
+    }
+    @keyframes fadeMessage {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+    }
+    @keyframes loadBar {
+        0% { width: 10%; margin-left: 0%; }
+        50% { width: 60%; margin-left: 20%; }
+        100% { width: 10%; margin-left: 90%; }
+    }
+    @keyframes bounceDot {
+        0%, 100% { transform: translateY(0); opacity: 0.5; }
+        50% { transform: translateY(-8px); opacity: 1; }
+    }
+    </style>
+    """
+    
+    html_part = (
+        '<div class="gym-loading-overlay">'
+        '<div class="gym-loading-ring gym-loading-ring-1"></div>'
+        '<div class="gym-loading-ring gym-loading-ring-2"></div>'
+        '<div class="gym-loading-ring gym-loading-ring-3"></div>'
+        '<div class="gym-loading-logo">🏋️</div>'
+        '<div class="gym-loading-title">GymPro</div>'
+        '<div class="gym-loading-message">' + message + '</div>'
+        '<div class="gym-loading-bar">'
+        '<div class="gym-loading-bar-fill"></div>'
+        '</div>'
+        '<div class="gym-loading-dots">'
+        '<div class="gym-loading-dot"></div>'
+        '<div class="gym-loading-dot"></div>'
+        '<div class="gym-loading-dot"></div>'
+        '</div>'
+        '</div>'
+    )
+    
+    st.markdown(css_part + html_part, unsafe_allow_html=True)
+
+
 
 def render(gym_id=None, role=None, username=""):
     _init_state()
     role = role or "staff"
-    role_label = {"admin": "👑 Admin", "owner": "👑 Owner", "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
+    role_label = {"admin": "👑 Admin", "owner": "👑 Owner",
+                  "staff": "👤 Staff", "auditor": "🔍 Auditor"}.get(role, role)
 
-    st.markdown(f"""
-        <div style='text-align:center;padding:1rem;'>
-            <h1>🤖 GymPro AI Assistant</h1>
-            <p style='font-size:1.1rem;color:#94A3B8;'>Live gym data · Roman Urdu · Voice</p>
-            <p style='font-size:0.9rem;color:#FBBF24;'>{role_label} — {username}</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# 🤖 Super AI Assistant V12 — ULTIMATE")
+    st.caption(role_label + " — " + username + " · V12 Super Coder")
     st.divider()
 
     current_page = st.session_state.get("page", "AI Assistant")
@@ -1282,20 +1269,25 @@ def render(gym_id=None, role=None, username=""):
     except Exception:
         pass
 
-    tab1, tab2, tab3 = st.tabs(["💬 AI Chat", "🎬 Video", "🎵 Music"])
+    if role in ("admin", "owner"):
+        tabs = st.tabs(["💬 Chat", "🤖 AI Coder V12", "🎬 Video", "🎵 Music"])
+        with tabs[0]:
+            _chat_tab(current_page, gym_stats, role=role, username=username, gym_id=gym_id)
+        with tabs[1]:
+            _v12_coder_tab(role, username, gym_id=gym_id)
+        with tabs[2]:
+            _video_player()
+        with tabs[3]:
+            _music_player()
+    else:
+        tabs = st.tabs(["💬 Chat", "🎬 Video", "🎵 Music"])
+        with tabs[0]:
+            _chat_tab(current_page, gym_stats, role=role, username=username, gym_id=gym_id)
+        with tabs[1]:
+            _video_player()
+        with tabs[2]:
+            _music_player()
 
-    with tab1:
-        _chat_tab(current_page, gym_stats, role=role, username=username, gym_id=gym_id)
-
-    with tab2:
-        _video_player()
-
-    with tab3:
-        _music_player()
-
-# ============================================
-# RUN
-# ============================================
 
 if __name__ == "__main__":
     render(None, "admin")
