@@ -1285,7 +1285,8 @@ def render(gym_id, role, current_user):
                 st.session_state.pop(f"marked_today_{sel_gid}_{att_date}", None)
                 st.rerun()
 
-        all_active = _cached_gym_members(sel_gid, "Active")
+        # 🔥 FIX: "All" members fetch karo taake koi miss na ho
+        all_active = _cached_gym_members(sel_gid, "All")
         existing = {a.member_id: a.status for a in _cached_today_attendance(sel_gid)}
 
         session_key = f"marked_today_{sel_gid}_{att_date}"
@@ -1343,7 +1344,24 @@ def render(gym_id, role, current_user):
                     show_member_photo(m.photo_path, width=70)
 
                 with col_info:
-                    st.markdown(f"**{m.full_name}**")
+                    expiry_badge = ""
+                    if m.expiry_date:
+                        try:
+                            exp = date.fromisoformat(str(m.expiry_date))
+                            days_left = (exp - date.today()).days
+                            if days_left < 0:
+                                expiry_badge = f'<span style="background:#EF4444;color:white;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:5px;">🔴 EXPIRED {abs(days_left)}d ago</span>'
+                            elif days_left <= 7:
+                                expiry_badge = f'<span style="background:#F59E0B;color:white;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:5px;">🟡 {days_left}d left</span>'
+                        except:
+                            pass
+
+                    # Status Badge (agar inactive hai)
+                    status_badge = ""
+                    if m.status != "Active":
+                        status_badge = f'<span style="background:#64748B;color:white;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:5px;">⚪ {m.status}</span>'
+
+                    st.markdown(f"**{m.full_name}** {expiry_badge} {status_badge}", unsafe_allow_html=True)
                     st.caption(f"🆔 {m.serial_number} · {m.membership_type or '—'}")
 
                 with col_btn:

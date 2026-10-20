@@ -1577,16 +1577,34 @@ def _edit_form(m, gyms):
         if save:
             photo_path = m.photo_path
             if photo:
-                photo_bytes = photo.getbuffer()
-                uploaded_key = object_store.upload_photo(bytes(photo_bytes), photo.name, serial=m.serial_number)
-                if m.photo_path and m.photo_path != uploaded_key:
-                    try:
-                        object_store.delete_photo(m.photo_path)
-                    except Exception:
-                        pass
-                photo_path = uploaded_key
-                object_store.get_photo_bytes.clear()
-                st.session_state.photo_cache = {}
+                try:
+                    import time as _time
+                    file_ext = os.path.splitext(photo.name)[1] if hasattr(photo, 'name') else ".jpg"
+                    unique_name = f"{m.serial_number}_{int(_time.time())}{file_ext}"
+                    photo_bytes = photo.getvalue()
+                    
+                    uploaded_key = object_store.upload_photo(bytes(photo_bytes), unique_name, serial=m.serial_number)
+                    
+                    if not uploaded_key:
+                        raise Exception("Cloudinary upload failed or returned empty.")
+                        
+                    if uploaded_key == m.photo_path and "http" in str(uploaded_key):
+                        photo_path = f"{uploaded_key}?v={int(_time.time())}"
+                    else:
+                        photo_path = uploaded_key
+                        
+                    if m.photo_path and m.photo_path != photo_path and "http" not in str(m.photo_path):
+                        try:
+                            object_store.delete_photo(m.photo_path)
+                        except Exception:
+                            pass
+                            
+                    _photo_bytes_cached.clear()
+                    st.cache_data.clear()
+                    st.session_state.photo_cache = {}
+                except Exception as e:
+                    st.error(f"❌ Photo Upload Error: {str(e)}")
+                    photo_path = m.photo_path
             ok, msg = db.update_member(
                 m.id, full_name=full_name, phone=phone, email=email,
                 gender=gender, dob=str(dob) if dob else "",
