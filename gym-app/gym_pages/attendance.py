@@ -231,7 +231,7 @@ def _big_banner(color_bg: str, color_border: str, headline: str,
                       letter-spacing:0.02em;margin-top:0.4rem;">
             {headline}
           </div>
-          <div style="font-size:1.05rem;color:#F8FAFC;opacity:0.9;
+          <div style="font-size:1.05rem;color:var(--gp-text);opacity:0.9;
                       margin-top:0.5rem;">{subline}</div>
         </div>
         """,
@@ -641,7 +641,7 @@ def render_smart_ai_assistant(sel_gid, gym_name):
             <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:1.3rem;">{insight['icon']}</span>
                 <div style="flex:1;">
-                    <div style="color:#F8FAFC;font-weight:600;font-size:0.9rem;">{insight['title']}</div>
+                    <div style="color:var(--gp-text);font-weight:600;font-size:0.9rem;">{insight['title']}</div>
                     <div style="color:{insight['color']};font-size:0.75rem;font-weight:500;">💡 {insight['action']}</div>
                 </div>
             </div>
@@ -794,7 +794,7 @@ def render_staff_attendance_system(sel_gid, current_user):
         <div style="display:flex;align-items:center;gap:12px;">
             <span style="font-size:1.5rem;">{status_icon}</span>
             <div>
-                <div style="color:#F8FAFC;font-size:0.95rem;font-weight:600;">
+                <div style="color:var(--gp-text);font-size:0.95rem;font-weight:600;">
                     AI Status: {status_message}
                 </div>
                 <div style="color:#94A3B8;font-size:0.75rem;">
@@ -1445,9 +1445,9 @@ def render(gym_id, role, current_user):
                     medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f"**{i+1}.**"
                     s_badge = f" 🔥{ld.get('streak', 0)}d" if ld.get('streak', 0) >= 3 else ""
                     st.markdown(
-                        f"""<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #1E293B;">
+                        f"""<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--gp-border);">
                           <span style="font-size:1rem;min-width:22px;">{medal}</span>
-                          <span style="color:#F8FAFC;font-weight:600;flex:1;">{m.full_name}</span>
+                          <span style="color:var(--gp-text);font-weight:600;flex:1;">{m.full_name}</span>
                           <span style="color:#10B981;">{ld['count']}d{s_badge}</span>
                         </div>""",
                         unsafe_allow_html=True

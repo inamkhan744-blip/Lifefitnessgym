@@ -79,7 +79,7 @@ def render(member_id: int):
         st.markdown(
             f"""
             <div style="text-align:center;margin-top:0.5rem;">
-              <div style="font-size:1.6rem;font-weight:800;color:#F1F5F9;">
+              <div style="font-size:1.6rem;font-weight:800;color:var(--gp-text);">
                 {safe_full_name}
               </div>
               <div style="font-family:monospace;color:#94A3B8;font-size:0.95rem;
@@ -117,9 +117,9 @@ def render(member_id: int):
         for label, value in rows:
             st.markdown(
                 f"""<div style="display:flex;justify-content:space-between;
-                              padding:0.45rem 0;border-bottom:1px solid #1E293B;">
+                              padding:0.45rem 0;border-bottom:1px solid var(--gp-border);">
                   <span style="color:#94A3B8;font-size:0.85rem;">{label}</span>
-                  <span style="color:#F1F5F9;font-weight:600;">{value}</span>
+                  <span style="color:var(--gp-text);font-weight:600;">{value}</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -144,7 +144,7 @@ def _not_found():
             <div style="text-align:center;margin-top:5rem;padding:2rem;
                         background:#1E293B;border-radius:14px;border:1px solid #334155;">
               <div style="font-size:3rem;">🔍</div>
-              <div style="font-size:1.3rem;font-weight:700;color:#F1F5F9;margin-top:0.5rem;">
+              <div style="font-size:1.3rem;font-weight:700;color:var(--gp-text);margin-top:0.5rem;">
                 Member Not Found
               </div>
               <div style="color:#94A3B8;margin-top:0.5rem;">

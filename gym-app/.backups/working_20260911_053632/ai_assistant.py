@@ -617,7 +617,7 @@ def _music_player():
             <span style="font-size:1.4rem;">🎵</span>
             <div>
                 <div style="color:#60A5FA;font-weight:700;font-size:0.85rem;">NOW PLAYING</div>
-                <div style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{title[:70]}</div>
+                <div style="color:var(--gp-text);font-size:0.95rem;font-weight:600;">{title[:70]}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -782,7 +782,7 @@ def _video_player():
         <div style="background:linear-gradient(90deg,#1C1937,#0F172A);border:1px solid #8B5CF6;
                     border-radius:12px;padding:0.7rem 1rem;margin-bottom:0.8rem;">
             <span style="color:#A78BFA;font-weight:700;font-size:0.8rem;">▶ NOW PLAYING</span><br/>
-            <span style="color:#F1F5F9;font-size:0.95rem;font-weight:600;">{active_title[:80]}</span>
+            <span style="color:var(--gp-text);font-size:0.95rem;font-weight:600;">{active_title[:80]}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1023,7 +1023,7 @@ def render_staff_ai_coach(username: str, role: str = "staff", gym_id=None):
   </div>
   <div style="flex:1;">
     <div style="font-size:1rem;font-weight:700;color:{ring_color};">{grade}</div>
-    <div style="font-size:0.85rem;color:#F1F5F9;font-weight:600;margin-top:0.2rem;">
+    <div style="font-size:0.85rem;color:var(--gp-text);font-weight:600;margin-top:0.2rem;">
       {username}'s Performance — Aaj
     </div>
     <div style="font-size:0.75rem;color:#94A3B8;margin-top:0.15rem;">
@@ -1093,7 +1093,7 @@ def render_staff_ai_coach(username: str, role: str = "staff", gym_id=None):
   <div style="color:{msg_bc};font-weight:700;font-size:0.8rem;margin-bottom:0.4rem;">
     {msg_ico} AI COACH — {grade}
   </div>
-  <div style="color:#F1F5F9;font-size:0.9rem;line-height:1.6;white-space:pre-wrap;">{msg}</div>
+  <div style="color:var(--gp-text);font-size:0.9rem;line-height:1.6;white-space:pre-wrap;">{msg}</div>
 </div>""", unsafe_allow_html=True)
 
 
@@ -1133,7 +1133,7 @@ def render_persistent_music_bar():
   .info {{ flex:1;min-width:0; }}
   .label {{ color:#60A5FA;font-size:9px;font-weight:700;text-transform:uppercase;
             letter-spacing:.05em; }}
-  .song {{ color:#F1F5F9;font-size:11px;font-weight:600;
+  .song {{ color:var(--gp-text);font-size:11px;font-weight:600;
            white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }}
   iframe {{ width:100%;height:52px;border:none;border-radius:8px;margin-top:6px; }}
 </style></head>

@@ -163,7 +163,7 @@ def render(gym_id, role, current_user):
         .card-3d .value {
             font-size: 2rem;
             font-weight: 800;
-            color: #F8FAFC;
+            color:var(--gp-text);
             text-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
         

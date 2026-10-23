@@ -166,7 +166,7 @@ def render_persistent_music_bar():
         '<div style="background:linear-gradient(90deg,#1E3A5F,#1E1B4B);border:1px solid #3B82F6;'
         'border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;">'
         '<span style="color:#60A5FA;font-weight:700;font-size:0.7rem;">NOW PLAYING</span><br>'
-        f'<span style="color:#F1F5F9;font-size:0.8rem;">{title[:50]}</span></div>'
+        f'<span style="color:var(--gp-text);font-size:0.8rem;">{title[:50]}</span></div>'
     )
     st.markdown(html, unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns([1, 1, 1, 2])

@@ -76,7 +76,7 @@ PROFESSIONAL_TABLE_CSS = """
         z-index: 10;
     }
     .pro-table tbody tr {
-        border-bottom: 1px solid #1E293B;
+        border-bottom:1px solid var(--gp-border);
         transition: all 0.2s ease;
         cursor: default;
     }
@@ -114,7 +114,7 @@ PROFESSIONAL_TABLE_CSS = """
     .pro-amount { font-weight: 700; font-size: 0.85rem; }
     .pro-amount-paid { color: #34D399; }
     .pro-amount-unpaid { color: #F87171; }
-    .pro-name { font-weight: 600; color: #F8FAFC; font-size: 0.9rem; }
+    .pro-name { font-weight: 600; color:var(--gp-text); font-size: 0.9rem; }
     .pro-serial { font-size: 0.7rem; color: #64748B; font-weight: 500; }
     .pro-table-footer {
         background: #0F172A;
@@ -126,7 +126,7 @@ PROFESSIONAL_TABLE_CSS = """
         font-size: 0.8rem;
         color: #94A3B8;
     }
-    .pro-table-footer .count { color: #F8FAFC; font-weight: 600; }
+    .pro-table-footer .count { color:var(--gp-text); font-weight: 600; }
     .pro-table-scroll {
         overflow-x: auto;
         max-height: 600px;

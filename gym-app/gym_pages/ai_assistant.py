@@ -166,7 +166,7 @@ def render_persistent_music_bar():
         '<div style="background:linear-gradient(90deg,#1E3A5F,#1E1B4B);border:1px solid #3B82F6;'
         'border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;">'
         '<span style="color:#60A5FA;font-weight:700;font-size:0.7rem;">NOW PLAYING</span><br>'
-        f'<span style="color:#F1F5F9;font-size:0.8rem;">{title[:50]}</span></div>'
+        f'<span style="color:var(--gp-text);font-size:0.8rem;">{title[:50]}</span></div>'
     )
     st.markdown(html, unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
@@ -1099,156 +1099,72 @@ def render_staff_ai_coach(username, role="staff", gym_id=None):
     st.metric("Fee Today", "PKR " + str(f"{m.get('fee_total', 0):,.0f}"))
 
 
-def show_loading_overlay(message="Loading..."):
-    """Show PREMIUM loading overlay — safe version (no f-string)"""
+def show_loading_overlay(message="Loading GymPro..."):
+    """Ultimate Cinematic Loading Screen with Dynamic Gym Name"""
+    import random
+    import time
+    import database as db
     
-    css_part = """
-    <style>
-    .gym-loading-overlay {
-        position: fixed;
-        top: 0; left: 0;
-        width: 100vw; height: 100vh;
-        background: radial-gradient(circle at 50% 40%, #1e1b4b 0%, #0f172a 50%, #020617 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        z-index: 999999;
-        overflow: hidden;
-    }
-    .gym-loading-overlay::before {
-        content: '';
-        position: absolute;
-        width: 100%; height: 100%;
-        background-image: 
-            radial-gradient(2px 2px at 20% 30%, rgba(139, 92, 246, 0.6), transparent),
-            radial-gradient(2px 2px at 60% 70%, rgba(59, 130, 246, 0.5), transparent),
-            radial-gradient(1px 1px at 50% 50%, rgba(167, 139, 250, 0.7), transparent),
-            radial-gradient(2px 2px at 80% 10%, rgba(96, 165, 250, 0.5), transparent),
-            radial-gradient(1px 1px at 90% 60%, rgba(139, 92, 246, 0.6), transparent);
-        background-size: 200% 200%;
-        animation: floatParticles 15s linear infinite;
-        opacity: 0.8;
-    }
-    .gym-loading-ring {
-        position: absolute;
-        border-radius: 50%;
-        border: 1px solid rgba(139, 92, 246, 0.3);
-        animation: pulseRing 3s ease-out infinite;
-    }
-    .gym-loading-ring-1 { width: 300px; height: 300px; animation-delay: 0s; }
-    .gym-loading-ring-2 { width: 450px; height: 450px; animation-delay: 1s; }
-    .gym-loading-ring-3 { width: 600px; height: 600px; animation-delay: 2s; }
-    .gym-loading-logo {
-        font-size: 6rem;
-        position: relative;
-        z-index: 2;
-        animation: gymLift 2s ease-in-out infinite;
-        filter: drop-shadow(0 0 40px rgba(139, 92, 246, 1));
-    }
-    .gym-loading-title {
-        color: #a78bfa;
-        font-size: 2rem;
-        font-weight: 900;
-        letter-spacing: 4px;
-        margin-top: 2rem;
-        z-index: 2;
-        text-transform: uppercase;
-        background: linear-gradient(90deg, #a78bfa 0%, #60a5fa 50%, #a78bfa 100%);
-        background-size: 200% auto;
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        animation: shineText 3s linear infinite;
-    }
-    .gym-loading-message {
-        color: #94a3b8;
-        font-size: 1rem;
-        margin-top: 0.8rem;
-        z-index: 2;
-        letter-spacing: 1px;
-        animation: fadeMessage 1.5s ease-in-out infinite;
-    }
-    .gym-loading-bar {
-        width: 280px;
-        height: 4px;
-        background: rgba(139, 92, 246, 0.15);
-        border-radius: 9999px;
-        margin-top: 1.5rem;
-        overflow: hidden;
-        z-index: 2;
-    }
-    .gym-loading-bar-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #8b5cf6, #60a5fa, #8b5cf6);
-        border-radius: 9999px;
-        animation: loadBar 1.8s ease-in-out infinite;
-    }
-    .gym-loading-dots {
-        display: flex;
-        gap: 8px;
-        margin-top: 1rem;
-        z-index: 2;
-    }
-    .gym-loading-dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: #8b5cf6;
-        animation: bounceDot 1.4s ease-in-out infinite;
-    }
-    .gym-loading-dot:nth-child(1) { animation-delay: 0s; }
-    .gym-loading-dot:nth-child(2) { animation-delay: 0.2s; }
-    .gym-loading-dot:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes floatParticles {
-        0% { background-position: 0% 0%; }
-        100% { background-position: 200% 200%; }
-    }
-    @keyframes pulseRing {
-        0% { transform: scale(0.6); opacity: 0.8; }
-        100% { transform: scale(1.3); opacity: 0; }
-    }
-    @keyframes gymLift {
-        0%, 100% { transform: translateY(0) scale(1); }
-        50% { transform: translateY(-15px) scale(1.08); }
-    }
-    @keyframes shineText {
-        to { background-position: 200% center; }
-    }
-    @keyframes fadeMessage {
-        0%, 100% { opacity: 0.6; }
-        50% { opacity: 1; }
-    }
-    @keyframes loadBar {
-        0% { width: 10%; margin-left: 0%; }
-        50% { width: 60%; margin-left: 20%; }
-        100% { width: 10%; margin-left: 90%; }
-    }
-    @keyframes bounceDot {
-        0%, 100% { transform: translateY(0); opacity: 0.5; }
-        50% { transform: translateY(-8px); opacity: 1; }
-    }
-    </style>
-    """
-    
-    html_part = (
-        '<div class="gym-loading-overlay">'
-        '<div class="gym-loading-ring gym-loading-ring-1"></div>'
-        '<div class="gym-loading-ring gym-loading-ring-2"></div>'
-        '<div class="gym-loading-ring gym-loading-ring-3"></div>'
-        '<div class="gym-loading-logo">🏋️</div>'
-        '<div class="gym-loading-title">GymPro</div>'
-        '<div class="gym-loading-message">' + message + '</div>'
-        '<div class="gym-loading-bar">'
-        '<div class="gym-loading-bar-fill"></div>'
-        '</div>'
-        '<div class="gym-loading-dots">'
-        '<div class="gym-loading-dot"></div>'
-        '<div class="gym-loading-dot"></div>'
-        '<div class="gym-loading-dot"></div>'
-        '</div>'
-        '</div>'
-    )
-    
-    st.markdown(css_part + html_part, unsafe_allow_html=True)
+    # 🚀 STATIC GYM NAME FOR LOADING SCREEN
+    gym_display_name = "LIFE FITNESS GYM"
+
+    quotes = [
+        "Sweat is just fat crying. 💦",
+        "The body achieves what the mind believes. 🧠",
+        "Push harder than yesterday if you want a different tomorrow. 🔥",
+        "Success starts with self-discipline. 🏆",
+        "Don't limit your challenges. Challenge your limits. 💪",
+        "Your only limit is you. 🚀"
+    ]
+    quote = random.choice(quotes)
+
+    placeholder = st.empty()
+
+    particles = ""
+    for _ in range(30):
+        left = random.randint(0, 100)
+        width = random.randint(2, 6)
+        height = random.randint(2, 6)
+        duration = random.randint(4, 10)
+        delay = random.randint(1, 5)
+        particles += f"<div style='position: absolute; bottom: -50px; left: {left}%; width: {width}px; height: {height}px; border-radius: 50%; background: white; box-shadow: 0 0 15px #3b82f6; animation: floatUp {duration}s linear infinite; animation-delay: -{delay}s;'></div>"
+
+    loader_html = f"""<style>
+@keyframes floatUp {{0% {{transform: translateY(0) scale(1); opacity: 0;}} 50% {{opacity: 0.8;}} 100% {{transform: translateY(-1000px) scale(1.5); opacity: 0;}}}}
+@keyframes pulseRing {{0% {{transform: translate(-50%, -50%) scale(0.8); opacity: 1; border-width: 4px;}} 100% {{transform: translate(-50%, -50%) scale(2.5); opacity: 0; border-width: 1px;}}}}
+@keyframes pulseLogo {{0%, 100% {{transform: translateY(0) scale(1); filter: drop-shadow(0 0 20px #8b5cf6);}} 50% {{transform: translateY(-10px) scale(1.1); filter: drop-shadow(0 0 60px #3b82f6);}}}}
+@keyframes shineText {{to {{background-position: 200% center;}}}}
+@keyframes loadBar {{0% {{left: -30%;}} 100% {{left: 100%;}}}}
+</style>
+<div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: radial-gradient(circle at center, #1e1b4b 0%, #0b0f19 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999999; font-family: 'Inter', sans-serif; overflow: hidden;">
+    {particles}
+    <div style="position: absolute; top: 50%; left: 50%; width: 150px; height: 150px; border-radius: 50%; border: 4px solid #8b5cf6; box-shadow: 0 0 30px #8b5cf6, inset 0 0 20px #8b5cf6; animation: pulseRing 3s cubic-bezier(0.1, 0.8, 0.2, 1) infinite; animation-delay: 0s;"></div>
+    <div style="position: absolute; top: 50%; left: 50%; width: 150px; height: 150px; border-radius: 50%; border: 4px solid #8b5cf6; box-shadow: 0 0 30px #8b5cf6, inset 0 0 20px #8b5cf6; animation: pulseRing 3s cubic-bezier(0.1, 0.8, 0.2, 1) infinite; animation-delay: 1s;"></div>
+    <div style="position: absolute; top: 50%; left: 50%; width: 150px; height: 150px; border-radius: 50%; border: 4px solid #8b5cf6; box-shadow: 0 0 30px #8b5cf6, inset 0 0 20px #8b5cf6; animation: pulseRing 3s cubic-bezier(0.1, 0.8, 0.2, 1) infinite; animation-delay: 2s;"></div>
+    <div style="width: 130px; height: 130px; border-radius: 35px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: inset 0 0 30px rgba(255, 255, 255, 0.1), 0 20px 40px rgba(0,0,0,0.6); backdrop-filter: blur(15px); display: flex; align-items: center; justify-content: center; z-index: 10; margin-bottom: 30px;">
+        <div style="font-size: 4.5rem; animation: pulseLogo 3s ease-in-out infinite; z-index: 10;">🏋️‍♂️</div>
+    </div>
+    <div style="font-size: 2.2rem; font-weight: 900; letter-spacing: 5px; background: linear-gradient(90deg, #60a5fa, #a78bfa, #60a5fa); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shineText 3s linear infinite; z-index: 10; margin-bottom: 15px; text-align: center; padding: 0 20px; text-shadow: 0 0 40px rgba(96, 165, 250, 0.6);">
+        {gym_display_name.upper()}
+    </div>
+    <div style="color: #38bdf8; font-size: 1rem; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; z-index: 10; margin-bottom: 25px; text-shadow: 0 0 15px #38bdf8;">
+        {message}
+    </div>
+    <div style="width: 300px; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 10px; overflow: hidden; position: relative; z-index: 10; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+        <div style="position: absolute; height: 100%; width: 40%; background: linear-gradient(90deg, transparent, #38bdf8, #a78bfa, transparent); animation: loadBar 1.5s ease-in-out infinite; border-radius: 10px; box-shadow: 0 0 15px #38bdf8;"></div>
+    </div>
+    <div style="position: absolute; bottom: 50px; color: #e2e8f0; font-size: 1rem; font-style: italic; z-index: 10; text-align: center; width: 85%; letter-spacing: 1px; font-weight: 500; text-shadow: 0 0 10px rgba(255,255,255,0.3);">
+        "{quote}"
+    </div>
+</div>"""
+
+    clean_html = textwrap.dedent(loader_html).strip() if 'textwrap' in globals() else loader_html
+
+    with placeholder:
+        st.markdown(clean_html, unsafe_allow_html=True)
+        
+    time.sleep(0.1)
+    return placeholder
 
 
 

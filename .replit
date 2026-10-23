@@ -84,7 +84,7 @@ artifactId = "gymPro5000PythonStreamlit"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = ""
+args = "gym-app: Start application"
 
 # ── AGENT ──
 [agent]

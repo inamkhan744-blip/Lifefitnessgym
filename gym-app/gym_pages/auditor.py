@@ -76,7 +76,7 @@ st.markdown("""
     .card-3d .value {
         font-size: 2rem;
         font-weight: 800;
-        color: #F8FAFC;
+        color:var(--gp-text);
         text-shadow: 0 2px 10px rgba(0,0,0,0.3);
     }
     
@@ -390,7 +390,7 @@ def render(gym_id, role, username):
                     show_audit_photo(member.photo_path, width=120, height=180, serial_number=member.serial_number)
                     
                     st.markdown(f"""
-                    <div style="font-weight:700;color:#F8FAFC;margin-top:0.5rem;">{member.full_name}</div>
+                    <div style="font-weight:700;color:var(--gp-text);margin-top:0.5rem;">{member.full_name}</div>
                     <div style="font-size:0.8rem;color:#94A3B8;">🆔 {member.serial_number}</div>
                     """, unsafe_allow_html=True)
                     
@@ -611,7 +611,7 @@ def render(gym_id, role, username):
                         if member_info:
                             st.markdown(f"""
                             <div style="margin-bottom:0.5rem;">
-                                <div style="font-size:1.2rem;font-weight:700;color:#F8FAFC;">{member_info.full_name}</div>
+                                <div style="font-size:1.2rem;font-weight:700;color:var(--gp-text);">{member_info.full_name}</div>
                                 <div style="font-size:0.85rem;color:#7C3AED;">🆔 {member_info.serial_number}</div>
                                 <div style="font-size:0.8rem;color:#94A3B8;">📞 {member_info.phone or '—'}</div>
                                 <div style="font-size:0.8rem;color:#94A3B8;">📅 {member_info.expiry_date or '—'}</div>
@@ -790,7 +790,7 @@ def render(gym_id, role, username):
                         show_audit_photo(member.photo_path, width=120, height=180, serial_number=member.serial_number if hasattr(member, 'serial_number') else '')
                         
                         st.markdown(f"""
-                        <div style="font-weight:700;color:#F8FAFC;margin-top:0.5rem;">{member.full_name}</div>
+                        <div style="font-weight:700;color:var(--gp-text);margin-top:0.5rem;">{member.full_name}</div>
                         <div style="font-size:0.8rem;color:#7C3AED;">🆔 {member.serial_number}</div>
                         <div style="font-size:0.75rem;color:#94A3B8;">📞 {member.phone or '—'}</div>
                         <div style="font-size:0.7rem;color:#34D399;margin-top:0.2rem;">
@@ -830,7 +830,7 @@ def render(gym_id, role, username):
                     bc2 = "#EF4444" if a["severity"] == "critical" else "#F59E0B"
                     alert_rows += f"""
                     <div style="background:{bg2};border-left:4px solid {bc2};border-radius:8px;padding:0.65rem 1rem;margin-bottom:0.4rem;">
-                        <div style="font-weight:700;color:#F8FAFC;">{a['icon']} {a['title']}</div>
+                        <div style="font-weight:700;color:var(--gp-text);">{a['icon']} {a['title']}</div>
                         <div style="color:#CBD5E1;font-size:0.82rem;">{a['detail']}</div>
                     </div>"""
                 st.markdown(f"""
@@ -865,12 +865,12 @@ def render(gym_id, role, username):
                         sign = "+" if s.discrepancy >= 0 else ""
                         diff_html = f'<span style="color:{dc};font-weight:700;">{sign}PKR {s.discrepancy:,.0f}</span>'
                     shift_rows += f"""
-                    <tr style="border-bottom:1px solid #1E293B;">
-                        <td style="padding:0.45rem 0.7rem;color:#F8FAFC;font-weight:600;">{s.staff_user}</td>
+                    <tr style="border-bottom:1px solid var(--gp-border);">
+                        <td style="padding:0.45rem 0.7rem;color:var(--gp-text);font-weight:600;">{s.staff_user}</td>
                         <td style="padding:0.45rem 0.7rem;color:#94A3B8;">{s.opened_at.strftime('%H:%M') if s.opened_at else '—'}</td>
                         <td style="padding:0.45rem 0.7rem;color:#34D399;">PKR {s.opening_cash:,.0f}</td>
                         <td style="padding:0.45rem 0.7rem;color:#FBBF24;">{'PKR ' + f'{s.expected_cash:,.0f}' if s.expected_cash is not None else '—'}</td>
-                        <td style="padding:0.45rem 0.7rem;color:#F8FAFC;">{'PKR ' + f'{s.closing_cash:,.0f}' if s.closing_cash is not None else '—'}</td>
+                        <td style="padding:0.45rem 0.7rem;color:var(--gp-text);">{'PKR ' + f'{s.closing_cash:,.0f}' if s.closing_cash is not None else '—'}</td>
                         <td style="padding:0.45rem 0.7rem;">{diff_html}</td>
                         <td style="padding:0.45rem 0.7rem;"><span style="background:{sbg2};color:{sc2};padding:0.15rem 0.45rem;border-radius:5px;font-size:0.75rem;font-weight:700;">{slbl}</span></td>
                     </tr>"""
@@ -936,7 +936,7 @@ def render(gym_id, role, username):
                 for who, info in sorted(staff_totals.items(), key=lambda x: -x[1]["amount"]):
                     rows_html += f"""
                     <tr>
-                        <td style="padding:0.5rem 0.75rem;color:#F8FAFC;font-weight:600;">{who}</td>
+                        <td style="padding:0.5rem 0.75rem;color:var(--gp-text);font-weight:600;">{who}</td>
                         <td style="padding:0.5rem 0.75rem;color:#34D399;font-weight:700;text-align:right;">PKR {info['amount']:,.0f}</td>
                         <td style="padding:0.5rem 0.75rem;color:#94A3B8;text-align:center;">{info['count']}</td>
                     </tr>"""
@@ -997,9 +997,9 @@ def render(gym_id, role, username):
                     amt = f"PKR {entry.amount:,.0f}" if entry.amount is not None else "—"
                     badge_bg = {"FEE_COLLECTED": "#065F46", "FEE_EDITED": "#78350F", "FEE_DELETED": "#7F1D1D"}.get(entry.action, "#1E293B")
                     rows_html += f"""
-                    <tr style="border-bottom:1px solid #1E293B;">
+                    <tr style="border-bottom:1px solid var(--gp-border);">
                         <td style="padding:0.5rem 0.75rem;color:#94A3B8;font-size:0.8rem;white-space:nowrap;">{ts}</td>
-                        <td style="padding:0.5rem 0.75rem;font-weight:700;color:#F8FAFC;">{entry.user}</td>
+                        <td style="padding:0.5rem 0.75rem;font-weight:700;color:var(--gp-text);">{entry.user}</td>
                         <td style="padding:0.4rem 0.75rem;">
                             <span style="background:{badge_bg};color:{color};padding:0.2rem 0.5rem;border-radius:6px;font-size:0.75rem;font-weight:700;">{entry.action}</span>
                         </td>

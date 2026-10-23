@@ -551,7 +551,7 @@ def render_fast_professional_table(members, gym_id=None):
     st.markdown(f"""
     <div style="background:#0F172A;border-radius:12px;border:1px solid #1E293B;padding:16px;margin:12px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-            <div style="color:#F8FAFC;font-weight:700;font-size:1rem;">
+            <div style="color:var(--gp-text);font-weight:700;font-size:1rem;">
                 👥 Members <span style="background:#7C3AED;color:white;padding:2px 12px;border-radius:999px;font-size:0.75rem;margin-left:8px;">{len(members)}</span>
             </div>
             <div style="display:flex;gap:12px;font-size:0.75rem;">
@@ -1109,7 +1109,7 @@ def _member_detail(m, gyms, role, gym_id=None):
         st.markdown(
             f"""
             <div style="display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;">
-                <h3 style="margin:0;color:#F1F5F9;">{status_emoji} {m.full_name}{birthday_banner}</h3>
+                <h3 style="margin:0;color:var(--gp-text);">{status_emoji} {m.full_name}{birthday_banner}</h3>
                 <span style="background:{bg_color};color:{text_color};
                             padding:4px 14px;border-radius:9999px;
                             font-size:0.75rem;font-weight:700;">
@@ -1455,7 +1455,7 @@ def _register_form(gyms, gym_id, role):
                             CONGRATULATIONS!
                         </div>
                         <div style="
-                            color: #F8FAFC;
+                            color:var(--gp-text);
                             font-size: 1.1rem;
                             font-weight: 700;
                             margin-bottom: 0.5rem;

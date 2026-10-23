@@ -59,7 +59,7 @@ section[data-testid="stSidebar"] { background: #0F172A; border-right: 1px solid 
     gap: 0.75rem;
     margin-bottom: 1.25rem;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid #1E293B;
+    border-bottom:1px solid var(--gp-border);
 }
 .page-header .icon { font-size: 1.8rem; }
 .page-header h1 {

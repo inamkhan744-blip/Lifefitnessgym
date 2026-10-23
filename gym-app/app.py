@@ -148,7 +148,6 @@ def _cached_sidebar_alerts(gym_id):
         low_s = []
     return bdays, absent, low_s
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _cached_theme_settings():
     return db.get_setting("theme_auto", "0"), db.get_setting("theme_key", "design_1")
 
@@ -464,24 +463,26 @@ with st.sidebar:
         _auto_toggle = st.checkbox("Auto (daily)", value=_auto_on, key="theme_auto_chk")
         if _auto_toggle != _auto_on:
             db.set_setting("theme_auto", "1" if _auto_toggle else "0")
-            _cached_theme_settings.clear()
             st.rerun()
 
         if not _auto_toggle:
             _all_labels = list(themes.THEME_NAMES.values())
             _all_keys   = list(themes.THEME_NAMES.keys())
-            _sel_idx    = _all_keys.index(_cur_key) if _cur_key in _all_keys else 0
+            _expected_label = themes.THEME_NAMES.get(_cur_key, _all_labels[0])
+            
+            # 🔥 FIX: Force sync session state with database
+            if "theme_picker" not in st.session_state or st.session_state["theme_picker"] != _expected_label:
+                st.session_state["theme_picker"] = _expected_label
+
             _picked     = st.selectbox(
                 "Select Theme",
                 _all_labels,
-                index=_sel_idx,
                 key="theme_picker",
                 label_visibility="collapsed",
             )
             _picked_key = _all_keys[_all_labels.index(_picked)]
             if _picked_key != _cur_key:
                 db.set_setting("theme_key", _picked_key)
-                _cached_theme_settings.clear()
                 st.rerun()
         else:
             st.caption(f"Today: **{_cur_label}**")
@@ -596,24 +597,6 @@ with st.sidebar:
 
     current_page = st.session_state.get("page", "Dashboard")
 
-    # ═══════════════════════════════════════════════════════════
-    # ⏳ PAGE CHANGE LOADING OVERLAY
-    # ═══════════════════════════════════════════════════════════
-    # ⏳ PAGE CHANGE LOADING (auto-clears when page renders)
-    # ═══════════════════════════════════════════════════════════
-    if "last_page" not in st.session_state:
-        st.session_state.last_page = current_page
-
-    _loading_placeholder = None
-    if st.session_state.last_page != current_page:
-        st.session_state.last_page = current_page
-        try:
-            from gym_pages.ai_assistant import show_loading_overlay
-            _loading_placeholder = st.empty()
-            with _loading_placeholder:
-                show_loading_overlay(f"Loading {current_page}...")
-        except Exception:
-            _loading_placeholder = None
 
 
     for section_label, pages in nav_sections.items():
@@ -688,6 +671,21 @@ with st.sidebar:
 # ── ★★★ RENDER GLOBAL SEARCH AT TOP OF PAGE ★★★ ────────────────────────────
 # This will render the search bar at the top of the main content area
 render_global_search()
+
+# ═══════════════════════════════════════════════════════════
+# ⏳ GLOBAL PAGE CHANGE LOADING OVERLAY (Outside Sidebar)
+# ═══════════════════════════════════════════════════════════
+_loading_placeholder = None
+if "last_page" not in st.session_state:
+    st.session_state.last_page = current_page
+
+if st.session_state.last_page != current_page:
+    st.session_state.last_page = current_page
+    try:
+        from gym_pages.ai_assistant import show_loading_overlay
+        _loading_placeholder = show_loading_overlay(f"Loading {current_page}...")
+    except Exception:
+        _loading_placeholder = None
 
 # ── Page router — lazy imports ──────────────────────────────────────────────────
 page = st.session_state.get("page", "Dashboard")
@@ -796,10 +794,9 @@ else:
 # ═══════════════════════════════════════════════════════════
 # ⏳ CLEAR LOADING OVERLAY (runs at end of every render)
 # ═══════════════════════════════════════════════════════════
-if "last_page" in st.session_state:
-    if "_loading_placeholder" in dir():
-        try:
-            _loading_placeholder.empty()
-        except Exception:
-            pass
+if _loading_placeholder is not None:
+    try:
+        _loading_placeholder.empty()
+    except Exception:
+        pass
 

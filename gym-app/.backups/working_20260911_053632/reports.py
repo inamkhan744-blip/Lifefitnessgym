@@ -181,7 +181,7 @@ st.markdown("""
     .card-3d .value {
         font-size: 2rem;
         font-weight: 800;
-        color: #F8FAFC;
+        color:var(--gp-text);
         text-shadow: 0 2px 10px rgba(0,0,0,0.3);
     }
     
@@ -252,7 +252,7 @@ st.markdown("""
     .staff-card .staff-name {
         font-size: 1.1rem;
         font-weight: 700;
-        color: #F8FAFC;
+        color:var(--gp-text);
     }
     
     .staff-card .staff-role {

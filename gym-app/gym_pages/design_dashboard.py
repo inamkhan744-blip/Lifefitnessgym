@@ -83,7 +83,7 @@ PROFESSIONAL_TABLE_CSS = """
         z-index: 10;
     }
     .pro-table tbody tr {
-        border-bottom: 1px solid #1E293B;
+        border-bottom:1px solid var(--gp-border);
         transition: all 0.2s ease;
         cursor: default;
     }
@@ -121,7 +121,7 @@ PROFESSIONAL_TABLE_CSS = """
     .pro-amount { font-weight: 700; font-size: 0.85rem; }
     .pro-amount-paid { color: #34D399; }
     .pro-amount-unpaid { color: #F87171; }
-    .pro-name { font-weight: 600; color: #F8FAFC; font-size: 0.9rem; }
+    .pro-name { font-weight: 600; color:var(--gp-text); font-size: 0.9rem; }
     .pro-serial { font-size: 0.7rem; color: #64748B; font-weight: 500; }
     .pro-table-footer {
         background: #0F172A;
@@ -133,7 +133,7 @@ PROFESSIONAL_TABLE_CSS = """
         font-size: 0.8rem;
         color: #94A3B8;
     }
-    .pro-table-footer .count { color: #F8FAFC; font-weight: 600; }
+    .pro-table-footer .count { color:var(--gp-text); font-weight: 600; }
     .pro-table-scroll {
         overflow-x: auto;
         max-height: 600px;
@@ -333,7 +333,7 @@ def render_revenue_trend_chart(gym_id):
                     fill='tozeroy', fillcolor='rgba(124,58,237,0.15)'
                 ))
                 fig.update_layout(
-                    template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     height=250, margin=dict(l=0, r=0, t=20, b=20),
                     xaxis=dict(gridcolor='rgba(255,255,255,0.05)'), 
                     yaxis=dict(gridcolor='rgba(255,255,255,0.05)', title='Revenue (PKR)'),
@@ -370,7 +370,7 @@ def render_member_growth_chart(gym_id):
                         fill='tozeroy', fillcolor='rgba(79,70,229,0.15)'
                     ))
                     fig.update_layout(
-                        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                        template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                         height=250, margin=dict(l=0, r=0, t=20, b=20),
                         xaxis=dict(gridcolor='rgba(255,255,255,0.05)'), 
                         yaxis=dict(gridcolor='rgba(255,255,255,0.05)', title='Members'),
@@ -397,7 +397,7 @@ def render_expense_breakdown_chart(gym_id):
                     textfont=dict(color='white', size=11)
                 )])
                 fig.update_layout(
-                    template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     height=280, margin=dict(l=0, r=0, t=10, b=10),
                     font=dict(color='#94A3B8')
                 )
@@ -420,7 +420,7 @@ def render_attendance_chart(gym_id):
                     line=dict(color='#10B981', width=3), marker=dict(size=6, color='#10B981')
                 ))
                 fig.update_layout(
-                    template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     height=250, margin=dict(l=0, r=0, t=20, b=20),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     xaxis=dict(gridcolor='rgba(255,255,255,0.05)'), 
@@ -451,7 +451,7 @@ def render_fee_chart(gym_id):
                     textfont=dict(color='white', size=9)
                 ))
                 fig.update_layout(
-                    template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     height=250, margin=dict(l=0, r=0, t=30, b=20),
                     xaxis=dict(gridcolor='rgba(255,255,255,0.05)'), 
                     yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
@@ -699,7 +699,7 @@ def render_daily_performance_chart(gym_id=None):
             line=dict(color='#7C3AED', width=2, dash='dash'), marker=dict(size=6, color='#7C3AED')
         ))
         fig.update_layout(
-            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             height=300, margin=dict(l=0, r=0, t=30, b=20),
             xaxis=dict(gridcolor='rgba(255,255,255,0.05)', tickangle=45), 
             yaxis=dict(gridcolor='rgba(255,255,255,0.05)', title='Amount (PKR)'),
@@ -742,7 +742,7 @@ def render_gym_performance_comparison(gyms, date_from, date_to):
             textposition='outside', textfont=dict(color='white', size=11)
         ))
         fig.update_layout(
-            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            template='plotly_white', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             height=250, margin=dict(l=0, r=0, t=30, b=20),
             xaxis=dict(gridcolor='rgba(255,255,255,0.05)'), 
             yaxis=dict(gridcolor='rgba(255,255,255,0.05)', title='Amount (PKR)'),

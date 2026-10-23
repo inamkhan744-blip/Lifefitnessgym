@@ -1,3 +1,4 @@
+import streamlit as st
 # database.py - COMPLETE FIXED VERSION
 # Phase 1 fixes + Phase 2 AI Voice Trainer (20 exercises)
 # No duplicates, all functions working
@@ -935,6 +936,7 @@ def update_gym_next_serial(gym_id: int, new_serial: int) -> Tuple[bool, str]:
 
 # ── User CRUD ──────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_user_by_username(username):
     db = get_db()
     try:

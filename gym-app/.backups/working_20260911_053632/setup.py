@@ -271,7 +271,7 @@ def render_staff_timing_manager(gym_id):
                 status_class = "timing-status-set" if timing else "timing-status-pending"
                 st.markdown(f"""
                 <div>
-                    <span style="font-size:1.1rem;font-weight:700;color:#F8FAFC;">{status_icon} {staff.full_name}</span>
+                    <span style="font-size:1.1rem;font-weight:700;color:var(--gp-text);">{status_icon} {staff.full_name}</span>
                     <div style="color:#94A3B8;font-size:0.8rem;">@{staff.username} · {staff.role}</div>
                     {f'<div style="color:#34D399;font-size:0.75rem;">Current: {timing.check_in_time} - {timing.check_out_time} (Grace: {timing.grace_minutes}min)</div>' if timing else '<div style="color:#F59E0B;font-size:0.75rem;">⚠️ Timing not set</div>'}
                 </div>
@@ -589,7 +589,7 @@ def render_membership_plans(gym_id):
             with cols[idx % 4]:
                 st.markdown(f"""
                 <div class="plan-card">
-                    <div style="font-size:1.1rem;font-weight:700;color:#F8FAFC;">{plan['name']}</div>
+                    <div style="font-size:1.1rem;font-weight:700;color:var(--gp-text);">{plan['name']}</div>
                     <div class="price">PKR {plan['price']:,.0f}</div>
                     <div class="duration">{plan['duration_days']} days</div>
                     <div class="features">{plan['features'] or 'No features listed'}</div>

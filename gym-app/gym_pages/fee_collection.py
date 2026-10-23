@@ -1095,7 +1095,7 @@ def render_ocr_member_matcher(gym_id, current_user):
                     <div style="background:#0F172A;border:1px solid #1E293B;border-radius:8px;
                                 padding:0.5rem;text-align:center;">
                         <div style="color:#94A3B8;font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;">{label}</div>
-                        <div style="color:#F8FAFC;font-weight:700;font-size:0.9rem;">{value}</div>
+                        <div style="color:var(--gp-text);font-weight:700;font-size:0.9rem;">{value}</div>
                     </div>
                     """, unsafe_allow_html=True)
             
@@ -1209,7 +1209,7 @@ def render_ocr_member_matcher(gym_id, current_user):
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
                 <div>
                     <div style="color:#34D399;font-weight:700;font-size:0.8rem;">🏆 BEST MATCH</div>
-                    <div style="color:#F8FAFC;font-size:1.4rem;font-weight:800;">{best_match.full_name}</div>
+                    <div style="color:var(--gp-text);font-size:1.4rem;font-weight:800;">{best_match.full_name}</div>
                     <div style="color:#94A3B8;font-size:0.9rem;">{best_match.serial_number}</div>
                 </div>
                 <div style="text-align:right;">
@@ -1602,7 +1602,7 @@ def render_staff_performance(records, current_user):
             </div>
             <div style="text-align:center;">
                 <div style="color:#94A3B8;font-size:0.6rem;">Transactions</div>
-                <div style="color:#F8FAFC;font-size:1rem;font-weight:600;">{total_transactions}</div>
+                <div style="color:var(--gp-text);font-size:1rem;font-weight:600;">{total_transactions}</div>
             </div>
             <div style="text-align:center;">
                 <div style="color:#94A3B8;font-size:0.6rem;">Average</div>
@@ -1706,7 +1706,7 @@ def render_staff_ranking(records):
             <div style="background:#0F172A;border:1px solid #1E293B;
                         border-radius:12px;padding:0.8rem;text-align:center;">
                 <div style="font-size:2rem;">{medal}</div>
-                <div style="color:#F8FAFC;font-weight:700;font-size:0.9rem;">{r['Staff']}</div>
+                <div style="color:var(--gp-text);font-weight:700;font-size:0.9rem;">{r['Staff']}</div>
                 <div style="color:#FFC947;font-size:1.1rem;font-weight:700;">PKR {r['Collection']:,.0f}</div>
                 <div style="color:#94A3B8;font-size:0.7rem;">{r['Transactions']} transactions</div>
             </div>
@@ -2597,7 +2597,7 @@ def render_history_admin(gym_id, role, current_user=""):
         st.markdown(f"""
         <div style="background:#0F172A;border:2px solid #10B981;border-radius:10px;padding:0.5rem;text-align:center;">
             <div style="font-size:0.8rem;color:#94A3B8;">✅ PAID</div>
-            <div style="font-size:1.8rem;font-weight:800;color:#F8FAFC;">{len(paid_members)}</div>
+            <div style="font-size:1.8rem;font-weight:800;color:var(--gp-text);">{len(paid_members)}</div>
             <div style="font-size:0.9rem;font-weight:600;color:#34D399;">PKR {paid_total:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -2606,7 +2606,7 @@ def render_history_admin(gym_id, role, current_user=""):
         st.markdown(f"""
         <div style="background:#0F172A;border:2px solid #EF4444;border-radius:10px;padding:0.5rem;text-align:center;">
             <div style="font-size:0.8rem;color:#94A3B8;">⏳ UNPAID</div>
-            <div style="font-size:1.8rem;font-weight:800;color:#F8FAFC;">{len(unpaid_members)}</div>
+            <div style="font-size:1.8rem;font-weight:800;color:var(--gp-text);">{len(unpaid_members)}</div>
             <div style="font-size:0.9rem;font-weight:600;color:#F87171;">PKR {unpaid_total:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -2615,7 +2615,7 @@ def render_history_admin(gym_id, role, current_user=""):
         st.markdown(f"""
         <div style="background:#0F172A;border:2px solid #F59E0B;border-radius:10px;padding:0.5rem;text-align:center;">
             <div style="font-size:0.8rem;color:#94A3B8;">🟡 UPCOMING</div>
-            <div style="font-size:1.8rem;font-weight:800;color:#F8FAFC;">{len(upcoming_members)}</div>
+            <div style="font-size:1.8rem;font-weight:800;color:var(--gp-text);">{len(upcoming_members)}</div>
             <div style="font-size:0.9rem;font-weight:600;color:#FBBF24;">PKR {upcoming_total:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -2733,7 +2733,7 @@ def render_history_admin(gym_id, role, current_user=""):
                     if member:
                         st.markdown(f"""
                         <div style="display:flex;flex-direction:column;justify-content:center;height:100%;">
-                            <div style="color:#F8FAFC;font-size:1.2rem;font-weight:700;">{member.full_name}</div>
+                            <div style="color:var(--gp-text);font-size:1.2rem;font-weight:700;">{member.full_name}</div>
                             <div style="color:#94A3B8;font-size:0.9rem;">🔢 {member.serial_number}</div>
                             <div style="color:#94A3B8;font-size:0.9rem;">📱 {member.phone or 'N/A'}</div>
                             <div style="color:#94A3B8;font-size:0.9rem;">💰 Fee: PKR {member.fee_amount:,.2f}</div>
@@ -3016,13 +3016,13 @@ def render_shift_management(gym_id, role, current_user):
                 closing_str = f"PKR {s.closing_cash:,.0f}" if s.closing_cash is not None else "—"
 
                 rows_html += f"""
-                <tr style="border-bottom:1px solid #1E293B;">
-                    <td style="padding:0.5rem 0.75rem;color:#F8FAFC;font-weight:600;">{s.staff_user}</td>
+                <tr style="border-bottom:1px solid var(--gp-border);">
+                    <td style="padding:0.5rem 0.75rem;color:var(--gp-text);font-weight:600;">{s.staff_user}</td>
                     <td style="padding:0.5rem 0.75rem;color:#94A3B8;">{opened_str}</td>
                     <td style="padding:0.5rem 0.75rem;color:#94A3B8;">{closed_str}</td>
                     <td style="padding:0.5rem 0.75rem;color:#34D399;font-weight:700;">PKR {s.opening_cash:,.0f}</td>
                     <td style="padding:0.5rem 0.75rem;color:#FBBF24;font-weight:700;">{expected_str}</td>
-                    <td style="padding:0.5rem 0.75rem;color:#F8FAFC;">{closing_str}</td>
+                    <td style="padding:0.5rem 0.75rem;color:var(--gp-text);">{closing_str}</td>
                     <td style="padding:0.5rem 0.75rem;">{diff_str}</td>
                     <td style="padding:0.5rem 0.75rem;"><span style="background:{sbg};color:{sc};padding:0.2rem 0.5rem;border-radius:6px;font-size:0.75rem;font-weight:700;">{slabel}</span></td>
                 </tr>"""

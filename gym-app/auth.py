@@ -22,6 +22,48 @@ ROLE_ICONS = {
 
 
 def login_page():
+
+    # 🔥 LOGIN PAGE RESPONSIVE FIX
+    st.markdown("""
+    <style>
+    /* Center the login form and limit width */
+    .main .block-container {
+        max-width: 450px !important;
+        margin: 0 auto !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+        padding-top: 4rem !important;
+    }
+    
+    /* Fix input fields */
+    div[data-testid="stTextInput"] {
+        width: 100% !important;
+    }
+    div[data-testid="stTextInput"] input {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding: 12px 15px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Fix Button width */
+    .stButton > button {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding: 14px !important;
+        font-size: 16px !important;
+        font-weight: 800 !important;
+        border-radius: 12px !important;
+        margin-top: 10px !important;
+    }
+    
+    /* Hide default Streamlit header/footer for cleaner login */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    </style>
+    """, unsafe_allow_html=True)
+
     """Login page with clean design"""
     
     st.markdown("""

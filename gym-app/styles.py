@@ -1,3 +1,8 @@
+from datetime import datetime
+import streamlit as st
+import database as _db
+import themes as _th
+
 GLOBAL_CSS = """
 <style>
 /* ── Layout ─────────────────────────────────────────────────── */
@@ -59,7 +64,7 @@ section[data-testid="stSidebar"] { background: #0F172A; border-right: 1px solid 
     gap: 0.75rem;
     margin-bottom: 1.25rem;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid #1E293B;
+    border-bottom:1px solid var(--gp-border);
 }
 .page-header .icon { font-size: 1.8rem; }
 .page-header h1 {
@@ -215,15 +220,22 @@ hr { border-color: #1E293B !important; }
         max-width: calc(100% - 20px);
     }
 }
+
+/* Desktop Full Width Fix */
+@media (min-width: 1024px) {
+    .main .block-container {
+        max-width: 100% !important;
+        width: 100% !important;
+        padding-left: 3rem !important;
+        padding-right: 3rem !important;
+    }
+}
+
 </style>
 """
 
 
 def inject_css():
-    import streamlit as st
-    import database as _db
-    import themes as _th
-
     # Active theme
     auto  = _db.get_setting("theme_auto", "0") == "1"
     key   = _th.get_daily_theme() if auto else _db.get_setting("theme_key", "design_1")
@@ -257,7 +269,6 @@ def metric_card(label, value, sub="", color=""):
 
 
 def page_header(icon, title, sub=""):
-    import streamlit as st
     st.markdown(f"""
     <div class="page-header">
         <span class="icon">{icon}</span>
@@ -275,18 +286,9 @@ def badge(text, color="gray"):
 # ── ★★★ TOAST NOTIFICATIONS FUNCTIONS ★★★ ──────────────────────
 
 def show_toast(message, type="success", duration=4000):
-    """
-    Show a toast notification.
-    
-    Parameters:
-    - message: str - The message to display
-    - type: str - 'success', 'error', 'warning', 'info'
-    - duration: int - Time in milliseconds to show the toast (default: 4000)
-    """
     if "toasts" not in st.session_state:
         st.session_state.toasts = []
     
-    # Create toast object
     toast = {
         "message": message,
         "type": type,
@@ -294,40 +296,23 @@ def show_toast(message, type="success", duration=4000):
         "timestamp": datetime.now().timestamp()
     }
     
-    # Add to toasts list
     st.session_state.toasts.append(toast)
     
-    # Keep only last 50 toasts
     if len(st.session_state.toasts) > 50:
         st.session_state.toasts = st.session_state.toasts[-50:]
     
-    # Render toasts
     render_toasts()
 
 
 def render_toasts():
-    """Render all pending toast notifications"""
     if "toasts" not in st.session_state or not st.session_state.toasts:
         return
     
-    import streamlit as st
-    import time
-    
-    # Get current toasts
     toasts = st.session_state.toasts
-    
-    # Build toast HTML
     toast_html = '<div class="toast-container">'
+    icons = {"success": "✅", "error": "❌", "warning": "⚠️", "info": "ℹ️"}
     
-    # Icons for each type
-    icons = {
-        "success": "✅",
-        "error": "❌",
-        "warning": "⚠️",
-        "info": "ℹ️"
-    }
-    
-    for toast in toasts[-5:]:  # Show last 5 toasts
+    for toast in toasts[-5:]:
         toast_type = toast.get("type", "info")
         icon = icons.get(toast_type, "ℹ️")
         message = toast.get("message", "")
@@ -341,42 +326,18 @@ def render_toasts():
         """
     
     toast_html += '</div>'
-    
-    # Inject toast HTML
     st.markdown(toast_html, unsafe_allow_html=True)
-    
-    # Auto-clear toasts after duration
-    # Note: This is handled by the CSS animation
 
 
-def toast_success(message, duration=4000):
-    """Show success toast"""
-    show_toast(message, "success", duration)
-
-
-def toast_error(message, duration=4000):
-    """Show error toast"""
-    show_toast(message, "error", duration)
-
-
-def toast_warning(message, duration=4000):
-    """Show warning toast"""
-    show_toast(message, "warning", duration)
-
-
-def toast_info(message, duration=4000):
-    """Show info toast"""
-    show_toast(message, "info", duration)
-
+def toast_success(message, duration=4000): show_toast(message, "success", duration)
+def toast_error(message, duration=4000): show_toast(message, "error", duration)
+def toast_warning(message, duration=4000): show_toast(message, "warning", duration)
+def toast_info(message, duration=4000): show_toast(message, "info", duration)
 
 def clear_toasts():
-    """Clear all toasts"""
     if "toasts" in st.session_state:
         st.session_state.toasts = []
 
-
-# ── AUTO-RENDER TOASTS (call this at the end of each page) ──
 def render_toasts_auto():
-    """Auto-render toasts if any exist"""
     if "toasts" in st.session_state and st.session_state.toasts:
         render_toasts()
