@@ -19,7 +19,7 @@ import sqlite3
 # 🚀 CACHED DB HELPERS — speed boost
 # ═══════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _cached_members(gym_id):
     """Cached members list — 60 sec TTL"""
     if gym_id is None:
@@ -29,14 +29,14 @@ def _cached_members(gym_id):
         return all_m
     return db.get_members(gym_id=gym_id)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _cached_fee_records(gym_id, date_from=None, date_to=None):
     """Cached fee records — 60 sec TTL"""
     df = str(date_from) if date_from else None
     dt = str(date_to) if date_to else None
     return db.get_fee_records(gym_id=gym_id, date_from=df, date_to=dt)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _cached_all_fee_records(gym_id):
     """All fee records — cached"""
     if gym_id is None:
@@ -46,7 +46,7 @@ def _cached_all_fee_records(gym_id):
         return all_r
     return db.get_fee_records(gym_id=gym_id)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _cached_fee_records_by_member(member_id):
     """Fee records for a member"""
     return db.get_fee_records(member_id=member_id)
@@ -131,7 +131,7 @@ from printer_utils import (
 # 🚀 BULK STATUS LOADER
 # ═══════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _bulk_member_status(gym_id, member_ids_tuple):
     """Load payment status for ALL members in ONE query"""
     if not member_ids_tuple:
@@ -2503,7 +2503,7 @@ def render_history_admin(gym_id, role, current_user=""):
             for m in paid_members:
                 paid_data.append({"Serial": m.serial_number, "Name": m.full_name, "Fee": f"PKR {m.fee_amount:,.2f}", "Expiry": m.expiry_date})
             paid_df = pd.DataFrame(paid_data)
-            st.dataframe(paid_df.head(50), width="stretch", hide_index=True, height=300)
+            st.dataframe(paid_df.head(20), width="stretch", hide_index=True, height=300)
             
             st.markdown(f"""
             <div style="background:#0F172A;border:2px solid #10B981;border-radius:10px;padding:0.8rem;text-align:center;margin-top:0.5rem;">
@@ -2527,7 +2527,7 @@ def render_history_admin(gym_id, role, current_user=""):
             for m in unpaid_members:
                 unpaid_data.append({"Serial": m.serial_number, "Name": m.full_name, "Fee": f"PKR {m.fee_amount:,.2f}", "Expiry": m.expiry_date or "—"})
             unpaid_df = pd.DataFrame(unpaid_data)
-            st.dataframe(unpaid_df.head(50), width="stretch", hide_index=True, height=300)
+            st.dataframe(unpaid_df.head(20), width="stretch", hide_index=True, height=300)
             
             st.markdown(f"""
             <div style="background:#0F172A;border:2px solid #EF4444;border-radius:10px;padding:0.8rem;text-align:center;margin-top:0.5rem;">
@@ -2551,7 +2551,7 @@ def render_history_admin(gym_id, role, current_user=""):
             for m in upcoming_members:
                 upcoming_data.append({"Serial": m.serial_number, "Name": m.full_name, "Fee": f"PKR {m.fee_amount:,.2f}", "Expiry": m.expiry_date})
             upcoming_df = pd.DataFrame(upcoming_data)
-            st.dataframe(upcoming_df.head(50), width="stretch", hide_index=True, height=300)
+            st.dataframe(upcoming_df.head(20), width="stretch", hide_index=True, height=300)
             
             st.markdown(f"""
             <div style="background:#0F172A;border:2px solid #F59E0B;border-radius:10px;padding:0.8rem;text-align:center;margin-top:0.5rem;">
@@ -2631,7 +2631,7 @@ def render_history_admin(gym_id, role, current_user=""):
             mem = db.get_member(r.member_id)
             recent_data.append({"Date": r.payment_date, "Member": mem.full_name if mem else "—", "Serial": mem.serial_number if mem else "—", "Amount": f"PKR {r.amount:,.2f}", "Method": r.payment_method, "Collected By": r.collected_by or "—"})
         
-        st.dataframe(pd.DataFrame(recent_data).head(50), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(recent_data).head(20), width="stretch", hide_index=True)
         
         total_collected = sum(r.amount for r in recent_records)
         st.markdown(f"""
