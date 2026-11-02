@@ -1,0 +1,111 @@
+# ============================================
+# GYMPRO - REPLIT CONFIGURATION
+# ============================================
+
+run = "python run.py"
+entrypoint = "run.py"
+
+# ── MODULES ──
+modules = ["python-3.11", "nodejs-24"]
+
+# ── NIX PACKAGES ──
+[nix]
+channel = "stable-24_05"
+packages = [
+    "python311",
+    "python311Packages.pip",
+    "python311Packages.streamlit",
+    "python311Packages.plotly",
+    "python311Packages.pandas",
+    "python311Packages.sqlalchemy",
+    "python311Packages.psycopg2",
+    "python311Packages.pillow",
+    "python311Packages.numpy",
+    "cargo",
+    "cups",
+    "freetype",
+    "glibcLocales",
+    "lcms2",
+    "libiconv",
+    "libimagequant",
+    "libjpeg",
+    "libtiff",
+    "libwebp",
+    "libxcrypt",
+    "lsof",
+    "openjpeg",
+    "psmisc",
+    "rustc",
+    "sqlite",
+    "tcl",
+    "tk",
+    "zlib"
+]
+
+# ── ENVIRONMENT ──
+[env]
+PORT = "5000"
+PYTHONPATH = "."
+PYTHONUNBUFFERED = "1"
+STREAMLIT_SERVER_PORT = "5000"
+STREAMLIT_SERVER_ADDRESS = "0.0.0.0"
+STREAMLIT_BROWSER_GATHER_USAGE_STATS = "false"
+STREAMLIT_SERVER_MAX_UPLOAD_SIZE = "200"
+STREAMLIT_THEME_BASE = "dark"
+
+# ── PORTS ──
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 8501
+externalPort = 8501
+
+# ── DEPLOYMENT ──
+[deployment]
+run = "python run.py"
+deploymentTarget = "gce"
+
+[deployment.postBuild]
+args = []
+env = {}
+
+[workflows]
+
+[[workflows.workflow]]
+name = "gym-app: Start application"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "gymPro5000PythonStreamlit"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "gym-app: Start application"
+
+# ── AGENT ──
+[agent]
+stack = "PYTHON"
+expertMode = true
+
+# ── POST MERGE ──
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+# ── INTERPRETER ──
+[interpreter]
+language = "python3"
+
+# ── PACKAGER ──
+[packager]
+language = "python3"
+
+[userenv]
+[userenv.shared]
+
+[objectStorage]
+defaultBucketID = "replit-objstore-93b25a82-e645-4107-94ee-0f52ee98e9a7"

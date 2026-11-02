@@ -1,0 +1,4 @@
+gympro_safety_backup_20260828_000901/live_postgres_readonly_export.json filter=lfs diff=lfs merge=lfs -text
+*.json filter=lfs diff=lfs merge=lfs -text
+uploads/*.jpg filter=lfs diff=lfs merge=lfs -text
+uploads/*.png filter=lfs diff=lfs merge=lfs -text

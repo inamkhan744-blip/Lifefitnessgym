@@ -1,0 +1,44 @@
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+gym_pro.db
+gym_management.db
+
+# Uploaded photos & captures (don't push to GitHub)
+uploads/
+uploaded_photos/
+
+# Backup folder
+backup_db/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Streamlit secrets (contains passwords/API keys — never push!)
+.streamlit/secrets.toml
+
+# Cache files
+gym_app_cache_last_card.json
+gym_app_gallery_cache.json
+*.json
+
+# Replit-specific
+.replit
+replit.nix
+.upm/
+.config/
+
+# Env files
+.env
+.env.*
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log

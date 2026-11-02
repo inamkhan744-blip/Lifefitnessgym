@@ -1,0 +1,7 @@
+gympro_safety_backup_*
+gym_app_gallery_cache.json
+*.zip
+gym-app/gym_logos/*
+*.db
+__pycache__/
+*.pyc
