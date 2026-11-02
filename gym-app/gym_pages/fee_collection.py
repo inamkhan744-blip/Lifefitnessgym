@@ -53,6 +53,20 @@ def _cached_fee_records_by_member(member_id):
 
 
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _get_cached_latest_fees(gym_id):
+    all_gym_fees = _cached_all_fee_records(gym_id)
+    latest_fees_dict = {}
+    for f_rec in all_gym_fees:
+        if f_rec.member_id not in latest_fees_dict:
+            latest_fees_dict[f_rec.member_id] = f_rec
+        else:
+            if f_rec.payment_date and latest_fees_dict[f_rec.member_id].payment_date:
+                if str(f_rec.payment_date) > str(latest_fees_dict[f_rec.member_id].payment_date):
+                    latest_fees_dict[f_rec.member_id] = f_rec
+    return latest_fees_dict
+
 # ============================================
 # PDF EXPORT (ReportLab)
 # ============================================
@@ -1972,16 +1986,8 @@ def render_collect_fee(gym_id, current_user):
             filtered_members = [m for m in members if q in m.full_name.lower() or q in str(m.serial_number).lower()]
         else:
             filtered_members = members
-        # 🚀 BULK FETCH: Ek dafa saari fees le kar aao (Fast)
-        all_gym_fees = _cached_all_fee_records(sel_gym_id)
-        latest_fees_dict = {}
-        for f_rec in all_gym_fees:
-            if f_rec.member_id not in latest_fees_dict:
-                latest_fees_dict[f_rec.member_id] = f_rec
-            else:
-                if f_rec.payment_date and latest_fees_dict[f_rec.member_id].payment_date:
-                    if str(f_rec.payment_date) > str(latest_fees_dict[f_rec.member_id].payment_date):
-                        latest_fees_dict[f_rec.member_id] = f_rec
+        # 🚀 CACHED FETCH: Ek dafa process hokar memory mein save ho jayega
+        latest_fees_dict = _get_cached_latest_fees(sel_gym_id)
 
 
         st.markdown("**Filter by Status:**")
